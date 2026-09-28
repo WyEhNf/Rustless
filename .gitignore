@@ -1,5 +1,7 @@
 # Rust
 /target
+/build/
+/cmake-build-*/
 
 # REIMU build configuration
 /.xmake/
