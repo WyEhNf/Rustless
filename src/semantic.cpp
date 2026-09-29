@@ -1581,3 +1581,138 @@ private:
     return {std::move(result)};
   }
 
+  ExprInfo check_field(const ast::ExprPtr &expression) {
+    auto receiver = check_expr(expression->operands.front());
+    auto base = receiver.type;
+    bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
+    bool locked = receiver.access_locked;
+    std::vector<Adjustment> adjustments;
+    while (base->kind == Ty::Kind::Ref || base->kind == Ty::Kind::Box) {
+      if (base->kind == Ty::Kind::Ref) {
+        if (!base->is_mutable) {
+          locked = true;
+          mutable_access = false;
+        } else if (!locked) {
+          // Binding immutability does not remove an &mut referent's rights.
+          mutable_access = true;
+        }
+      }
+      base = base->element;
+      adjustments.push_back({Adjustment::Kind::Dereference, base});
+    }
+    if (base->kind != Ty::Kind::Struct || !structures_.contains(base->name)) {
+      report(expression->span, "field access requires a struct");
+      return {};
+    }
+    auto field = structures_.at(base->name).fields.find(expression->text);
+    if (field == structures_.at(base->name).fields.end()) {
+      report(expression->span, "unknown field '" + expression->text + "'");
+      return {};
+    }
+    return {field->second,
+            true,
+            mutable_access,
+            locked,
+            structures_.at(base->name).field_symbols.at(expression->text),
+            base->name + "::" + expression->text,
+            std::move(adjustments)};
+  }
+
+  ExprInfo check_index(const ast::ExprPtr &expression) {
+    auto base = check_expr(expression->operands[0]);
+    auto index = check_expr(expression->operands[1], ty(Ty::Kind::Usize));
+    if (!same(index.type, ty(Ty::Kind::Usize)))
+      mismatch(expression->operands[1]->span, index.type, ty(Ty::Kind::Usize));
+    auto container = base.type;
+    bool mutable_access = base.is_place ? base.is_mutable : true;
+    bool locked = base.access_locked;
+    std::vector<Adjustment> adjustments;
+    while (container->kind == Ty::Kind::Ref ||
+           container->kind == Ty::Kind::Box) {
+      if (container->kind == Ty::Kind::Ref) {
+        if (!container->is_mutable) {
+          locked = true;
+          mutable_access = false;
+        } else if (!locked) {
+          mutable_access = true;
+        }
+      }
+      container = container->element;
+      adjustments.push_back({Adjustment::Kind::Dereference, container});
+    }
+    if (container->kind != Ty::Kind::Array &&
+        container->kind != Ty::Kind::Vec) {
+      report(expression->span,
+             "type " + type_name(container) + " cannot be indexed");
+      return {};
+    }
+    if (container->kind == Ty::Kind::Vec && !mutable_access)
+      locked = true;
+    return {container->element, true,    mutable_access,        locked,
+            std::nullopt,       "index", std::move(adjustments)};
+  }
+
+  ExprInfo check_break(const ast::ExprPtr &expression, const TyPtr &) {
+    if (loops_.empty()) {
+      report(expression->span, "break is only available inside a loop");
+      return {ty(Ty::Kind::Never)};
+    }
+    auto value =
+        expression->operands.empty()
+            ? ExprInfo{ty(Ty::Kind::Unit)}
+            : check_expr(expression->operands.front(), loops_.back().expected);
+    loops_.back().break_types.push_back(value.type);
+    return {ty(Ty::Kind::Never)};
+  }
+
+  ExprInfo check_continue(const ast::ExprPtr &expression) {
+    if (loops_.empty())
+      report(expression->span, "continue is only available inside a loop");
+    return {ty(Ty::Kind::Never)};
+  }
+
+  ExprInfo check_return(const ast::ExprPtr &expression) {
+    auto expected =
+        current_function_ ? current_function_->result : ty(Ty::Kind::Error);
+    auto value = expression->operands.empty()
+                     ? ExprInfo{ty(Ty::Kind::Unit)}
+                     : check_expr(expression->operands.front(), expected);
+    if (!coercible(value.type, expected))
+      mismatch(expression->span, value.type, expected);
+    return {ty(Ty::Kind::Never)};
+  }
+
+  static std::string join_path(const std::vector<std::string> &path) {
+    std::string result;
+    for (const auto &segment : path) {
+      if (!result.empty())
+        result += "::";
+      result += segment;
+    }
+    return result;
+  }
+
+  struct LoopInfo {
+    TyPtr expected;
+    std::vector<TyPtr> break_types;
+  };
+
+  const ast::Crate &crate_;
+  DiagnosticEngine &diagnostics_;
+  std::unordered_map<std::string, StructInfo> structures_;
+  std::unordered_map<std::string, FunctionInfo> functions_;
+  std::unordered_map<std::string, ConstantInfo> constants_;
+  std::vector<const ast::Impl *> impls_;
+  std::unordered_map<std::string, FunctionInfo> associated_functions_;
+  std::unordered_map<std::string, ConstantInfo> associated_constants_;
+  std::vector<std::unordered_map<std::string, Binding>> scopes_;
+  std::vector<LoopInfo> loops_;
+  const FunctionInfo *current_function_{};
+  SemanticResult result_;
+  std::unordered_set<SymbolId> recorded_symbols_;
+  std::map<ast::NodeId, ExpressionSemantics> expression_facts_;
+  std::map<ast::NodeId, TyPtr> resolved_types_;
+};
+
+} // namespace
+
