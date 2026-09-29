@@ -1451,3 +1451,133 @@ private:
     return finish({});
   }
 
+  ExprInfo check_signature(const ast::ExprPtr &expression,
+                           const std::vector<TyPtr> &parameters, TyPtr result) {
+    const auto count = expression->operands.size() - 1;
+    if (count != parameters.size())
+      report(expression->span, "wrong number of function arguments");
+    for (std::size_t i = 0; i < count; ++i) {
+      auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
+      auto argument = check_expr(expression->operands[i + 1], expected);
+      if (expected && !coercible(argument.type, expected))
+        mismatch(expression->operands[i + 1]->span, argument.type, expected);
+      if (expected && expected->kind == Ty::Kind::Ref && expected->is_mutable &&
+          argument.access_locked)
+        report(expression->operands[i + 1]->span,
+               "mutable reference argument requires mutable container access");
+    }
+    return {std::move(result)};
+  }
+
+  ExprInfo check_method(const ast::ExprPtr &expression) {
+    if (!expression->type_arguments.empty())
+      report(expression->span, "method segments have no type parameters");
+    auto receiver = check_expr(expression->operands.front());
+    TyPtr base = receiver.type;
+    std::vector<Adjustment> receiver_adjustments;
+    while (base->kind == Ty::Kind::Ref || base->kind == Ty::Kind::Box) {
+      base = base->element;
+      receiver_adjustments.push_back({Adjustment::Kind::Dereference, base});
+    }
+    auto finish = [&](ExprInfo result, std::string target,
+                      std::optional<SymbolId> symbol = {},
+                      std::optional<Adjustment::Kind> borrow = {}) {
+      result.target = std::move(target);
+      result.symbol = symbol;
+      result.adjustments = receiver_adjustments;
+      if (borrow) {
+        const bool mutable_borrow = *borrow == Adjustment::Kind::BorrowMutable;
+        result.adjustments.push_back(
+            {*borrow, compound(Ty::Kind::Ref, base, mutable_borrow)});
+      }
+      return result;
+    };
+    const auto &name = expression->text;
+    if (name == "len" || name == "is_empty") {
+      if (receiver.type->kind != Ty::Kind::Vec &&
+          receiver.type->kind != Ty::Kind::Array &&
+          !(receiver.type->kind == Ty::Kind::Ref &&
+            (receiver.type->element->kind == Ty::Kind::Vec ||
+             receiver.type->element->kind == Ty::Kind::Array)))
+        report(expression->span, name + " is only available on arrays and Vec");
+      return finish(check_method_signature(expression, {},
+                                           name == "len" ? ty(Ty::Kind::Usize)
+                                                         : ty(Ty::Kind::Bool)),
+                    "builtin::" + name, {}, Adjustment::Kind::BorrowShared);
+    }
+    if (name == "push" || name == "remove") {
+      TyPtr vector = receiver.type;
+      if (vector->kind == Ty::Kind::Ref)
+        vector = vector->element;
+      if (vector->kind != Ty::Kind::Vec) {
+        report(expression->span, name + " is only available on Vec");
+        return finish({}, "builtin::Vec::" + name);
+      }
+      if (!writable(receiver))
+        report(expression->span, name + " requires mutable access to Vec");
+      if (name == "push")
+        return finish(check_method_signature(expression, {vector->element},
+                                             ty(Ty::Kind::Unit)),
+                      "builtin::Vec::push", {},
+                      Adjustment::Kind::BorrowMutable);
+      return finish(check_method_signature(expression, {ty(Ty::Kind::Usize)},
+                                           vector->element),
+                    "builtin::Vec::remove", {},
+                    Adjustment::Kind::BorrowMutable);
+    }
+    if (name == "clone") {
+      auto cloned = receiver.type;
+      if (cloned->kind == Ty::Kind::Ref &&
+          (cloned->element->kind == Ty::Kind::Box ||
+           cloned->element->kind == Ty::Kind::Vec ||
+           cloned->element->kind == Ty::Kind::Array))
+        cloned = cloned->element;
+      if (!supports(cloned, "Clone", "", {}))
+        report(expression->span,
+               "clone is not available for " + type_name(cloned));
+      return finish(check_method_signature(expression, {}, cloned),
+                    "builtin::clone", {}, Adjustment::Kind::BorrowShared);
+    }
+    if (base->kind == Ty::Kind::Struct) {
+      auto key = base->name + "::" + name;
+      if (auto it = associated_functions_.find(key);
+          it != associated_functions_.end()) {
+        const auto &function = it->second;
+        if (!function.ast->has_self) {
+          report(expression->span, "associated function without self cannot be "
+                                   "called with dot syntax");
+          return finish({}, key, function.ast->id);
+        }
+        if (function.ast->self_by_ref && function.ast->self_mutable &&
+            !writable(receiver))
+          report(expression->span, "method requires a mutable receiver");
+        return finish(check_method_signature(expression, function.parameters,
+                                             function.result),
+                      key, function.ast->id,
+                      function.ast->self_by_ref
+                          ? std::optional<Adjustment::Kind>(
+                                function.ast->self_mutable
+                                    ? Adjustment::Kind::BorrowMutable
+                                    : Adjustment::Kind::BorrowShared)
+                          : std::nullopt);
+      }
+    }
+    report(expression->span, "unknown method '" + name + "'");
+    return finish({}, name);
+  }
+
+  ExprInfo check_method_signature(const ast::ExprPtr &expression,
+                                  const std::vector<TyPtr> &parameters,
+                                  TyPtr result) {
+    const auto count = expression->operands.size() - 1;
+    if (count != parameters.size())
+      report(expression->span, "wrong number of method arguments");
+    for (std::size_t i = 0; i < count; ++i) {
+      auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
+      auto value = check_expr(expression->operands[i + 1], expected);
+      if (expected && !coercible(value.type, expected))
+        mismatch(expression->operands[i + 1]->span, value.type, expected);
+    }
+    return {std::move(result)};
+  }
+
