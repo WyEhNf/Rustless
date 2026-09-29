@@ -667,3 +667,62 @@ private:
     return false;
   }
 
+  void validate_entry() {
+    auto it = functions_.find("main");
+    if (it == functions_.end()) {
+      report(crate_.span, "an executable requires a top-level main function");
+      return;
+    }
+    const auto &main = it->second;
+    if (!main.parameters.empty())
+      report(main.ast->span, "main cannot have value parameters");
+    if (!main.ast->lifetime_parameters.empty())
+      report(main.ast->span, "main cannot have generic parameters");
+    if (main.result->kind != Ty::Kind::Unit)
+      report(main.ast->span, "main must return unit");
+  }
+
+  void check_functions() {
+    for (const auto &[_, function] : functions_)
+      check_function(function);
+    for (const auto &[_, function] : associated_functions_)
+      check_function(function);
+  }
+
+  void check_function(const FunctionInfo &function) {
+    // Every function starts with isolated scopes and loop context.
+    scopes_.clear();
+    scopes_.emplace_back();
+    current_function_ = &function;
+    if (function.ast->has_self) {
+      if (function.owner.empty())
+        report(function.ast->span, "self is only available in a method");
+      auto self = ty(Ty::Kind::Struct);
+      self->name = function.owner;
+      if (function.ast->self_by_ref)
+        self = compound(Ty::Kind::Ref, self, function.ast->self_mutable);
+      scopes_.back()["self"] = {self, function.ast->self_mutable,
+                                function.ast->id};
+    }
+    for (std::size_t i = 0; i < function.ast->parameters.size(); ++i) {
+      const auto &parameter = function.ast->parameters[i];
+      if (protected_builtin_value(parameter.name))
+        report(parameter.span, "cannot shadow a protected builtin");
+      record_symbol(parameter.id, "parameter", parameter.name,
+                    function.ast->id);
+      scopes_.back()[parameter.name] = {function.parameters[i],
+                                        parameter.is_mutable, parameter.id};
+    }
+    auto body = check_expr(function.ast->body, function.result);
+    if (!coercible(body.type, function.result))
+      mismatch(function.ast->body->span, body.type, function.result);
+    current_function_ = nullptr;
+  }
+
+  Binding *lookup(const std::string &name) {
+    for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
+      if (auto found = it->find(name); found != it->end())
+        return &found->second;
+    return nullptr;
+  }
+
