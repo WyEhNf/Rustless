@@ -1355,3 +1355,99 @@ private:
     return {destination};
   }
 
+  ExprInfo check_call(const ast::ExprPtr &expression) {
+    auto callee = check_expr(expression->operands.front());
+    if (callee.type->kind != Ty::Kind::Function) {
+      report(expression->span, "called expression is not a function");
+      for (std::size_t i = 1; i < expression->operands.size(); ++i)
+        check_expr(expression->operands[i]);
+      return {};
+    }
+    const auto &name = callee.type->name;
+    auto finish = [&](ExprInfo result) {
+      result.symbol = callee.symbol;
+      result.target = callee.target.empty() ? name : callee.target;
+      return result;
+    };
+    const auto &callee_ast = expression->operands.front();
+    if (!callee_ast->type_arguments.empty() && !name.starts_with("Box::") &&
+        !name.starts_with("Vec::"))
+      report(callee_ast->span, "functions have no type parameters");
+    if (name == "get_i32" || name == "getInt")
+      return finish(check_signature(expression, {}, ty(Ty::Kind::I32)));
+    if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
+        name == "printlnInt")
+      return finish(
+          check_signature(expression, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
+    if (auto it = functions_.find(name); it != functions_.end())
+      return finish(check_signature(expression, it->second.parameters,
+                                    it->second.result));
+    if (auto it = associated_functions_.find(name);
+        it != associated_functions_.end()) {
+      auto parameters = it->second.parameters;
+      if (it->second.ast->has_self) {
+        auto self = ty(Ty::Kind::Struct);
+        self->name = it->second.owner;
+        if (it->second.ast->self_by_ref)
+          self = compound(Ty::Kind::Ref, self, it->second.ast->self_mutable);
+        parameters.insert(parameters.begin(), self);
+      }
+      return finish(check_signature(expression, parameters, it->second.result));
+    }
+    if (name == "Box::new" || name == "Vec::new") {
+      const auto &path = expression->operands.front();
+      if (path->type_arguments.size() != 1) {
+        report(expression->span,
+               name.substr(0, 3) + " constructor requires one type argument");
+        return finish({});
+      }
+      auto element = resolve_type(path->type_arguments.front());
+      if (name == "Box::new")
+        return finish(check_signature(expression, {element},
+                                      compound(Ty::Kind::Box, element)));
+      return finish(
+          check_signature(expression, {}, compound(Ty::Kind::Vec, element)));
+    }
+    if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
+        name == "Vec::is_empty" || name == "Vec::push" ||
+        name == "Vec::remove") {
+      const auto &path = expression->operands.front();
+      if (path->type_arguments.size() != 1) {
+        report(expression->span,
+               "container associated function requires one type argument");
+        return finish({});
+      }
+      auto element = resolve_type(path->type_arguments.front());
+      auto container = compound(
+          name.starts_with("Box") ? Ty::Kind::Box : Ty::Kind::Vec, element);
+      if (name.ends_with("clone")) {
+        if (!supports(container, "Clone", "", {}))
+          report(expression->span,
+                 "clone is not available for " + type_name(container));
+        return finish(check_signature(
+            expression, {compound(Ty::Kind::Ref, container)}, container));
+      }
+      if (name.ends_with("push"))
+        return finish(check_signature(
+            expression, {compound(Ty::Kind::Ref, container, true), element},
+            ty(Ty::Kind::Unit)));
+      if (name.ends_with("remove"))
+        return finish(check_signature(
+            expression,
+            {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
+            element));
+      return finish(check_signature(
+          expression, {compound(Ty::Kind::Ref, container)},
+          name.ends_with("len") ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool)));
+    }
+    if (name.ends_with("::clone")) {
+      auto owner = name.substr(0, name.size() - 7);
+      auto result = ty(Ty::Kind::Struct);
+      result->name = owner;
+      return finish(check_signature(expression,
+                                    {compound(Ty::Kind::Ref, result)}, result));
+    }
+    report(expression->span, "unknown function '" + name + "'");
+    return finish({});
+  }
+
