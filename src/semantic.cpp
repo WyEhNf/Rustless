@@ -1311,3 +1311,47 @@ private:
     return value;
   }
 
+  ExprInfo check_assignment(const ast::ExprPtr &expression) {
+    auto destination = check_expr(expression->operands[0]);
+    auto source = check_expr(expression->operands[1], destination.type);
+    if (!destination.is_place)
+      report(expression->operands[0]->span,
+             "assignment destination is not a place");
+    else if (!destination.is_mutable)
+      report(expression->operands[0]->span,
+             "assignment destination is immutable");
+    if (expression->text == "=") {
+      if (!coercible(source.type, destination.type))
+        mismatch(expression->operands[1]->span, source.type, destination.type);
+    } else {
+      auto source_scalar = scalar_operand(source.type);
+      if ((expression->text == "<<=" || expression->text == ">>=") &&
+          integer(source_scalar) && integer(destination.type)) {
+        // Shift counts may use any of the four integer types.
+      } else if (!same(source_scalar, destination.type)) {
+        mismatch(expression->operands[1]->span, source_scalar,
+                 destination.type);
+      }
+      if (!integer(destination.type) &&
+          destination.type->kind != Ty::Kind::Bool)
+        report(expression->span,
+               "compound assignment requires a scalar destination");
+    }
+    return {ty(Ty::Kind::Unit)};
+  }
+
+  ExprInfo check_cast(const ast::ExprPtr &expression) {
+    auto source = check_expr(expression->operands.front());
+    auto destination =
+        resolve_type(expression->cast_type,
+                     current_function_ ? current_function_->owner : "");
+    const bool valid =
+        (integer(source.type) && integer(destination)) ||
+        (source.type->kind == Ty::Kind::Bool && integer(destination));
+    if (!valid)
+      report(expression->span, "unsupported cast from " +
+                                   type_name(source.type) + " to " +
+                                   type_name(destination));
+    return {destination};
+  }
+
