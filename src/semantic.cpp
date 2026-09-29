@@ -1208,3 +1208,106 @@ private:
     return {ty(Ty::Kind::Unit)};
   }
 
+  ExprInfo check_unary(const ast::ExprPtr &expression, const TyPtr &expected) {
+    const auto &op = expression->text;
+    if (op == "&" || op == "&mut" || op == "&&" || op == "&&mut") {
+      auto operand = check_expr(expression->operands.front());
+      const bool mutable_ref = op.ends_with("mut");
+      if (mutable_ref &&
+          ((operand.is_place && !operand.is_mutable) || operand.access_locked))
+        report(expression->span, "mutable borrow requires a mutable place");
+      auto result = compound(Ty::Kind::Ref, operand.type, mutable_ref);
+      if (op.starts_with("&&"))
+        result = compound(Ty::Kind::Ref, result, false);
+      return {result};
+    }
+    auto operand = check_expr(expression->operands.front(), expected);
+    if (op == "*") {
+      if (operand.type->kind != Ty::Kind::Ref &&
+          operand.type->kind != Ty::Kind::Box) {
+        report(expression->span,
+               "type " + type_name(operand.type) + " cannot be dereferenced");
+        return {};
+      }
+      const bool shared_layer =
+          operand.type->kind == Ty::Kind::Ref && !operand.type->is_mutable;
+      const bool locked = operand.access_locked || shared_layer;
+      const bool mut =
+          (operand.type->kind == Ty::Kind::Ref ? operand.type->is_mutable
+                                               : operand.is_mutable) &&
+          !locked;
+      return {operand.type->element, true, mut, locked};
+    }
+    TyPtr scalar = operand.type;
+    if (scalar->kind == Ty::Kind::Ref && !scalar->is_mutable)
+      scalar = scalar->element;
+    if (op == "!") {
+      if (!integer(scalar) && scalar->kind != Ty::Kind::Bool)
+        report(expression->span, "operator ! requires bool or integer");
+      return {scalar};
+    }
+    if (op == "-" && !signed_integer(scalar))
+      report(expression->span, "unary minus requires a signed integer");
+    return {scalar};
+  }
+
+  ExprInfo check_binary(const ast::ExprPtr &expression) {
+    auto left = check_expr(expression->operands[0]);
+    auto right = check_expr(expression->operands[1], left.type);
+    auto lhs = scalar_operand(left.type);
+    auto rhs = scalar_operand(right.type);
+    const auto &op = expression->text;
+    if (op == "&&" || op == "||") {
+      if (left.type->kind != Ty::Kind::Bool ||
+          right.type->kind != Ty::Kind::Bool)
+        report(expression->span, "logical operators require bool operands");
+      return {ty(Ty::Kind::Bool)};
+    }
+    if (op == "==" || op == "!=") {
+      if (!same(lhs, rhs))
+        mismatch(expression->span, rhs, lhs);
+      if (!supports(lhs, "PartialEq", "", {}))
+        report(expression->span, "equality requires PartialEq");
+      return {ty(Ty::Kind::Bool)};
+    }
+    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+      auto ordering_left = left.type;
+      auto ordering_right = right.type;
+      if ((ordering_left->kind == Ty::Kind::Ref) !=
+          (ordering_right->kind == Ty::Kind::Ref)) {
+        report(expression->span, "ordering requires matching scalar operands");
+        return {ty(Ty::Kind::Bool)};
+      }
+      while (ordering_left->kind == Ty::Kind::Ref &&
+             ordering_right->kind == Ty::Kind::Ref) {
+        if (ordering_left->is_mutable && !ordering_right->is_mutable)
+          report(expression->span, "ordering cannot coerce a mutable left "
+                                   "reference to a shared right reference");
+        ordering_left = ordering_left->element;
+        ordering_right = ordering_right->element;
+      }
+      if ((!integer(ordering_left) && ordering_left->kind != Ty::Kind::Bool) ||
+          !same(ordering_left, ordering_right))
+        report(expression->span, "ordering requires matching scalar operands");
+      return {ty(Ty::Kind::Bool)};
+    }
+    if (op == "<<" || op == ">>") {
+      if (!integer(lhs) || !integer(rhs))
+        report(expression->span, "shift operands must be integers");
+      return {lhs};
+    }
+    if ((op == "&" || op == "|" || op == "^") && lhs->kind == Ty::Kind::Bool &&
+        rhs->kind == Ty::Kind::Bool)
+      return {ty(Ty::Kind::Bool)};
+    if (!integer(lhs) || !same(lhs, rhs))
+      report(expression->span,
+             "integer operator requires matching integer operands");
+    return {lhs};
+  }
+
+  TyPtr scalar_operand(TyPtr value) {
+    if (value->kind == Ty::Kind::Ref && !value->is_mutable)
+      return value->element;
+    return value;
+  }
+
