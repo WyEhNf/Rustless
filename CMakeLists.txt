@@ -73,6 +73,11 @@ if(BUILD_TESTING)
   add_test(NAME frontend_ast_smoke COMMAND frontend_ast_smoke)
   add_executable(frontend_ast_corpus tests/frontend_ast_corpus.cpp)
   target_link_libraries(frontend_ast_corpus PRIVATE rustless_frontend)
+  if(EXISTS "${CMAKE_SOURCE_DIR}/tests/official/semantic/arrays/manifest.json")
+    add_test(NAME semantic_official
+      COMMAND frontend_ast_corpus "${CMAKE_SOURCE_DIR}/tests/official/semantic"
+        --semantic)
+  endif()
   add_executable(semantic_smoke tests/semantic_smoke.cpp)
   target_link_libraries(semantic_smoke PRIVATE rustless_frontend)
   add_test(NAME semantic_smoke COMMAND semantic_smoke)
