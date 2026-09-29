@@ -1,14 +1,17 @@
 #include "rx/frontend.hpp"
+#include "rx/semantic.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <string_view>
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::cerr << "usage: frontend_ast_corpus <directory>\n";
+  const bool semantic = argc == 3 && std::string_view(argv[2]) == "--semantic";
+  if (argc != 2 && !semantic) {
+    std::cerr << "usage: frontend_ast_corpus <directory> [--semantic]\n";
     return 2;
   }
   std::size_t checked = 0;
@@ -22,7 +25,18 @@ int main(int argc, char **argv) {
     rx::DiagnosticEngine diagnostics(entry.path().string());
     try {
       const auto parsed = rx::parse_source(source, diagnostics);
-      if (!parsed.syntax_ok || !parsed.crate || diagnostics.has_errors()) {
+      bool passed = parsed.syntax_ok && parsed.crate && !diagnostics.has_errors();
+      if (passed && semantic) {
+        rx::analyze(*parsed.crate, diagnostics);
+        const auto name = entry.path().filename().string();
+        if (name.starts_with("acc-"))
+          passed = !diagnostics.has_errors();
+        else if (name.starts_with("rej-"))
+          passed = diagnostics.has_errors();
+        else
+          passed = false;
+      }
+      if (!passed) {
         ++failed;
         std::cerr << entry.path() << '\n';
         diagnostics.print(std::cerr);
