@@ -979,3 +979,78 @@ private:
             expression->path[1] == "clone");
   }
 
+  ExprInfo check_array(const ast::ExprPtr &expression, const TyPtr &expected) {
+    TyPtr expected_element;
+    std::uint64_t expected_length = 0;
+    if (expected && expected->kind == Ty::Kind::Array) {
+      expected_element = expected->element;
+      expected_length = expected->length;
+    }
+    if (expression->operands.empty()) {
+      if (!expected_element) {
+        report(expression->span,
+               "an empty array requires an expected array type");
+        return {};
+      }
+      auto result = compound(Ty::Kind::Array, expected_element);
+      result->length = 0;
+      return {result};
+    }
+    auto first = check_expr(expression->operands.front(), expected_element);
+    auto result = compound(Ty::Kind::Array, first.type);
+    if (expression->flag) {
+      auto count_name = join_path(expression->operands[1]->path);
+      if (count_name.starts_with("Self::") && current_function_)
+        count_name = current_function_->owner + count_name.substr(4);
+      if (expression->operands[1]->kind != ast::Expr::Kind::Integer &&
+          expression->operands[1]->kind != ast::Expr::Kind::Path)
+        report(expression->operands[1]->span,
+               "array repeat count must be a constant");
+      if (expression->operands[1]->kind == ast::Expr::Kind::Path &&
+          !constants_.contains(count_name) &&
+          !associated_constants_.contains(count_name))
+        report(expression->operands[1]->span,
+               "array repeat count must name a constant");
+      auto count = check_expr(expression->operands[1], ty(Ty::Kind::Usize));
+      if (!coercible(count.type, ty(Ty::Kind::Usize)))
+        mismatch(expression->operands[1]->span, count.type,
+                 ty(Ty::Kind::Usize));
+      std::uint64_t length = 0;
+      if (expression->operands[1]->kind == ast::Expr::Kind::Integer) {
+        std::string text = expression->operands[1]->text;
+        if (text.ends_with("usize"))
+          text.resize(text.size() - 5);
+        parse_unsigned(text, length);
+      } else if (expression->operands[1]->kind == ast::Expr::Kind::Path) {
+        const auto &name = count_name;
+        if (auto it = constants_.find(name); it != constants_.end())
+          length = static_cast<std::uint64_t>(it->second.value);
+        else if (auto it = associated_constants_.find(name);
+                 it != associated_constants_.end())
+          length = static_cast<std::uint64_t>(it->second.value);
+      }
+      result->length = length;
+      if (length > 1 && !supports(first.type, "Copy", "", {}))
+        report(expression->span, "array repetition requires Copy");
+    } else {
+      result->length = expression->operands.size();
+      for (std::size_t i = 1; i < expression->operands.size(); ++i) {
+        auto element = check_expr(expression->operands[i], expected_element);
+        auto merged = common_type(first.type, element.type);
+        if (merged->kind == Ty::Kind::Error)
+          mismatch(expression->operands[i]->span, element.type, first.type);
+        else {
+          if (!same(element.type, merged))
+            append_adjustments(expression->operands[i]->id,
+                               coercion_adjustments(element.type, merged));
+          first.type = merged;
+        }
+      }
+      result->element = first.type;
+    }
+    if (expected_element &&
+        (result->length != expected_length || !coercible(result, expected)))
+      mismatch(expression->span, result, expected);
+    return {result};
+  }
+
