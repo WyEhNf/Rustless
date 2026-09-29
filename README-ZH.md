@@ -45,6 +45,25 @@ IR 测试还需要 **Clang 22**。
 - `vendor/REIMU` 下的 REIMU，为 Git 子模块。`config.mk` 中的 `RUN` 命令会调用它；测试运行器本身并不依赖特定的模拟器。
 - `grammar/` 目录下的 Rx 语言 G4 文法。你可以使用它来为编译器生成词法分析器和语法分析器。
 
+## C++ 前端与语义分析
+
+当前的 C++ 实现包含 ANTLR 建树与语义分析库。可单独构建并运行测试：
+
+```sh
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+初始化官方测试子模块后，还可按文件名中的 `acc-` / `rej-` 预期检查语义用例：
+
+```sh
+git submodule update --init tests/official
+build/frontend_ast_corpus tests/official/semantic --semantic
+```
+
+语义分析接口是 `rx::analyze`，声明位于 `include/rx/semantic.hpp`。
+
 ## 配置 Makefile
 
 Makefile 是调用你编译器的统一入口。你需要编辑 [`config.mk`](config.mk) 并接入你的编译器命令。具体来说，需要配置以下字段：
