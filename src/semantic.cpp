@@ -847,3 +847,135 @@ private:
         result.target,     result.adjustments};
   }
 
+  ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
+    // Central dispatch lets contextual types flow into child expressions.
+    if (!expression)
+      return {};
+    auto result = [&]() -> ExprInfo {
+      switch (expression->kind) {
+      case ast::Expr::Kind::Integer:
+        return {literal_type(expression->text, expected, expression->span)};
+      case ast::Expr::Kind::Boolean:
+        return {ty(Ty::Kind::Bool)};
+      case ast::Expr::Kind::Unit:
+        return {ty(Ty::Kind::Unit)};
+      case ast::Expr::Kind::Path:
+        return check_path(expression);
+      case ast::Expr::Kind::Array:
+        return check_array(expression, expected);
+      case ast::Expr::Kind::Struct:
+        return check_struct(expression);
+      case ast::Expr::Kind::Block:
+        return check_block(expression, expected);
+      case ast::Expr::Kind::If:
+        return check_if(expression, expected);
+      case ast::Expr::Kind::Loop:
+        return check_loop(expression, expected);
+      case ast::Expr::Kind::While:
+        return check_while(expression);
+      case ast::Expr::Kind::Unary:
+        return check_unary(expression, expected);
+      case ast::Expr::Kind::Binary:
+        return check_binary(expression);
+      case ast::Expr::Kind::Assign:
+        return check_assignment(expression);
+      case ast::Expr::Kind::Cast:
+        return check_cast(expression);
+      case ast::Expr::Kind::Call:
+        return check_call(expression);
+      case ast::Expr::Kind::MethodCall:
+        return check_method(expression);
+      case ast::Expr::Kind::Field:
+        return check_field(expression);
+      case ast::Expr::Kind::Index:
+        return check_index(expression);
+      case ast::Expr::Kind::Break:
+        return check_break(expression, expected);
+      case ast::Expr::Kind::Continue:
+        return check_continue(expression);
+      case ast::Expr::Kind::Return:
+        return check_return(expression);
+      }
+      return {};
+    }();
+    if (expected && coercible(result.type, expected)) {
+      auto adjustments = coercion_adjustments(result.type, expected);
+      result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
+                                adjustments.end());
+    }
+    record_expression(expression, result);
+    return result;
+  }
+
+  ExprInfo check_path(const ast::ExprPtr &expression) {
+    auto name = join_path(expression->path);
+    if (expression->path.size() > 1 && expression->path.front() == "Self" &&
+        current_function_ && !current_function_->owner.empty()) {
+      name = current_function_->owner;
+      for (std::size_t i = 1; i < expression->path.size(); ++i)
+        name += "::" + expression->path[i];
+    }
+    if (expression->path.size() == 1) {
+      if (auto *binding = lookup(name))
+        return {binding->type,   true, binding->is_mutable, false,
+                binding->symbol, name};
+      if (auto it = constants_.find(name); it != constants_.end())
+        return {it->second.type, false, false, false, it->second.ast->id, name};
+      if (auto it = functions_.find(name); it != functions_.end()) {
+        auto value = ty(Ty::Kind::Function);
+        value->name = name;
+        return {value, false, false, false, it->second.ast->id, name};
+      }
+      if (builtin_function(name)) {
+        auto value = ty(Ty::Kind::Function);
+        value->name = name;
+        return {value, false, false, false, std::nullopt, "builtin::" + name};
+      }
+      if (auto it = structures_.find(name); it != structures_.end()) {
+        auto value = ty(Ty::Kind::Function);
+        value->name = name;
+        return {value, false, false, false, it->second.ast->id, name};
+      }
+    } else {
+      if (auto it = associated_constants_.find(name);
+          it != associated_constants_.end())
+        return {it->second.type, false, false, false, it->second.ast->id, name};
+      if (auto it = associated_functions_.find(name);
+          it != associated_functions_.end()) {
+        auto value = ty(Ty::Kind::Function);
+        value->name = name;
+        return {value, false, false, false, it->second.ast->id, name};
+      }
+      if (constructor_path(expression)) {
+        auto value = ty(Ty::Kind::Function);
+        value->name = name;
+        std::optional<SymbolId> symbol;
+        if (auto it = structures_.find(expression->path.front());
+            it != structures_.end())
+          symbol = it->second.ast->id;
+        return {value, false, false, false, symbol, "builtin::" + name};
+      }
+    }
+    report(expression->span, "unresolved value name '" + name + "'");
+    return {};
+  }
+
+  static bool builtin_function(std::string_view name) {
+    return protected_builtin_value(name) || name == "get_i32" ||
+           name == "print_i32" || name == "println_i32";
+  }
+
+  bool constructor_path(const ast::ExprPtr &expression) {
+    if (expression->path.size() != 2)
+      return false;
+    const bool builtin_container =
+        expression->path[0] == "Box" || expression->path[0] == "Vec";
+    const bool builtin_member =
+        expression->path[1] == "new" || expression->path[1] == "clone" ||
+        expression->path[1] == "len" || expression->path[1] == "is_empty" ||
+        expression->path[1] == "push" || expression->path[1] == "remove";
+    return (builtin_container && builtin_member) ||
+           (structures_.contains(expression->path[0]) &&
+            expression->path[1] == "clone");
+  }
+
