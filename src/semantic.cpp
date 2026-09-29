@@ -1054,3 +1054,87 @@ private:
     return {result};
   }
 
+  ExprInfo check_struct(const ast::ExprPtr &expression) {
+    auto name = join_path(expression->path);
+    if (name == "Self" && current_function_ &&
+        !current_function_->owner.empty())
+      name = current_function_->owner;
+    auto it = structures_.find(name);
+    if (it == structures_.end()) {
+      report(expression->span,
+             "struct literal names an unknown struct '" + name + "'");
+      return {};
+    }
+    std::unordered_set<std::string> initialized;
+    for (const auto &field : expression->fields) {
+      if (!initialized.insert(field.name).second)
+        report(field.span, "duplicate field initializer '" + field.name + "'");
+      auto expected = it->second.fields.find(field.name);
+      if (expected == it->second.fields.end()) {
+        report(field.span, "unknown field '" + field.name + "'");
+        check_expr(field.value);
+      } else {
+        auto value = check_expr(field.value, expected->second);
+        if (!coercible(value.type, expected->second))
+          mismatch(field.value->span, value.type, expected->second);
+      }
+    }
+    for (const auto &[field, _] : it->second.fields)
+      if (!initialized.contains(field))
+        report(expression->span, "missing field initializer '" + field + "'");
+    auto result = ty(Ty::Kind::Struct);
+    result->name = name;
+    return {result, false, false, false, it->second.ast->id, name};
+  }
+
+  ExprInfo check_block(const ast::ExprPtr &expression, const TyPtr &expected) {
+    scopes_.emplace_back();
+    TyPtr result = ty(Ty::Kind::Unit);
+    for (std::size_t i = 0; i < expression->statements.size(); ++i) {
+      const auto &statement = expression->statements[i];
+      const bool last = i + 1 == expression->statements.size();
+      if (statement->kind == ast::Stmt::Kind::Empty)
+        continue;
+      if (statement->kind == ast::Stmt::Kind::Let) {
+        auto annotation =
+            statement->annotation
+                ? resolve_type(statement->annotation,
+                               current_function_ ? current_function_->owner
+                                                 : "")
+                : TyPtr{};
+        auto initializer = check_expr(statement->expression, annotation);
+        auto binding_type = annotation ? annotation : initializer.type;
+        if (annotation && !coercible(initializer.type, annotation))
+          mismatch(statement->expression->span, initializer.type, annotation);
+        if (annotation && annotation->kind == Ty::Kind::Ref &&
+            annotation->is_mutable && initializer.access_locked)
+          report(statement->expression->span,
+                 "mutable reference initializer requires mutable container "
+                 "access");
+        record_symbol(statement->id, "local", statement->name,
+                      current_function_
+                          ? std::optional<SymbolId>(current_function_->ast->id)
+                          : std::nullopt);
+        if (protected_builtin_value(statement->name))
+          report(statement->span, "cannot shadow a protected builtin");
+        scopes_.back()[statement->name] = {binding_type, statement->is_mutable,
+                                           statement->id};
+        continue;
+      }
+      auto value =
+          check_expr(statement->expression,
+                     last && !statement->has_semicolon ? expected : TyPtr{});
+      if (last &&
+          (!statement->has_semicolon || value.type->kind == Ty::Kind::Never))
+        result = value.type;
+      else if (!statement->has_semicolon &&
+               value.type->kind != Ty::Kind::Unit &&
+               value.type->kind != Ty::Kind::Never)
+        report(
+            statement->span,
+            "a non-final expression without a semicolon must have unit type");
+    }
+    scopes_.pop_back();
+    return {result};
+  }
+
