@@ -161,3 +161,102 @@ struct Binding {
   SymbolId symbol{};
 };
 
+class Analyzer {
+public:
+  Analyzer(const ast::Crate &crate, DiagnosticEngine &diagnostics)
+      : crate_(crate), diagnostics_(diagnostics) {}
+
+  SemanticResult run() {
+    // Each pass consumes complete tables produced by the earlier passes.
+    collect_items();
+    resolve_declarations();
+    validate_constants();
+    validate_layouts_and_derives();
+    validate_entry();
+    check_functions();
+    result_.summary = {functions_.size(), structures_.size(),
+                       constants_.size()};
+    std::sort(result_.symbols.begin(), result_.symbols.end(),
+              [](const SymbolRecord &left, const SymbolRecord &right) {
+                return left.id < right.id;
+              });
+    for (auto &[_, fact] : expression_facts_)
+      result_.expressions.push_back(std::move(fact));
+    for (auto &[node, type] : resolved_types_)
+      result_.resolved_types.push_back({node, std::move(type)});
+    for (const auto &[_, constant] : constants_)
+      if (constant.state == ConstantInfo::State::Done)
+        result_.constants.push_back(
+            {constant.ast->id, static_cast<std::uint32_t>(constant.value)});
+    for (const auto &[_, constant] : associated_constants_)
+      if (constant.state == ConstantInfo::State::Done)
+        result_.constants.push_back(
+            {constant.ast->id, static_cast<std::uint32_t>(constant.value)});
+    std::sort(result_.constants.begin(), result_.constants.end(),
+              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+    return std::move(result_);
+  }
+
+private:
+  void report(Span span, std::string message) {
+    diagnostics_.error(span, std::move(message));
+  }
+
+  void record_symbol(SymbolId id, std::string kind, std::string name,
+                     std::optional<SymbolId> owner = {}) {
+    if (recorded_symbols_.insert(id).second)
+      result_.symbols.push_back({id, std::move(kind), std::move(name), owner});
+  }
+
+  void collect_items() {
+    std::unordered_set<std::string> type_names;
+    std::unordered_set<std::string> value_names;
+    for (const auto &item : crate_.items) {
+      std::visit(
+          [&](const auto &value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, ast::Struct>) {
+              record_symbol(value.id, "struct", value.name);
+              if (builtin_type(value.name))
+                report(value.span, "the builtin type name '" + value.name +
+                                       "' is protected");
+              if (!type_names.insert(value.name).second)
+                report(value.span, "duplicate type name '" + value.name + "'");
+              structures_[value.name].ast = &value;
+            } else if constexpr (std::is_same_v<T, ast::Function>) {
+              record_symbol(value.id, "function", value.name);
+              if (protected_builtin_value(value.name))
+                report(value.span, "the builtin value name '" + value.name +
+                                       "' is protected");
+              if (!value_names.insert(value.name).second)
+                report(value.span, "duplicate value name '" + value.name + "'");
+              functions_[value.name].ast = &value;
+            } else if constexpr (std::is_same_v<T, ast::Constant>) {
+              record_symbol(value.id, "constant", value.name);
+              if (protected_builtin_value(value.name))
+                report(value.span, "the builtin value name '" + value.name +
+                                       "' is protected");
+              if (!value_names.insert(value.name).second)
+                report(value.span, "duplicate value name '" + value.name + "'");
+              constants_[value.name].ast = &value;
+            } else if constexpr (std::is_same_v<T, ast::Impl>) {
+              impls_.push_back(&value);
+            } else if constexpr (std::is_same_v<T, ast::Use>) {
+              (void)value;
+            }
+          },
+          item);
+    }
+  }
+
+  static bool builtin_type(std::string_view name) {
+    return name == "bool" || name == "i32" || name == "u32" ||
+           name == "isize" || name == "usize" || name == "Box" ||
+           name == "Vec" || name == "Copy" || name == "Clone" ||
+           name == "PartialEq" || name == "Eq";
+  }
+
+  static bool protected_builtin_value(std::string_view name) {
+    return name == "getInt" || name == "printInt" || name == "printlnInt";
+  }
+
