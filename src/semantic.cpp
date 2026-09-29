@@ -495,3 +495,95 @@ private:
     function.result = resolve_type(function.ast->result, function.owner);
   }
 
+  void validate_constants() {
+    for (auto &[_, constant] : constants_)
+      evaluate_constant(constant);
+    for (auto &[_, constant] : associated_constants_)
+      evaluate_constant(constant);
+  }
+
+  void evaluate_constant(ConstantInfo &constant) {
+    // The visit state turns recursive evaluation into cycle detection.
+    resolve_constant_type(constant);
+    if (constant.state == ConstantInfo::State::Done ||
+        constant.state == ConstantInfo::State::Failed)
+      return;
+    if (constant.state == ConstantInfo::State::Evaluating) {
+      report(constant.ast->span, "constant dependency cycle");
+      constant.state = ConstantInfo::State::Failed;
+      return;
+    }
+    constant.state = ConstantInfo::State::Evaluating;
+    auto [value_type, value] =
+        constant_value(constant.ast->value, constant.type, constant.owner);
+    if (!same(constant.type, value_type)) {
+      report(constant.ast->span, "constant initializer has type " +
+                                     type_name(value_type) + ", expected " +
+                                     type_name(constant.type));
+      constant.state = ConstantInfo::State::Failed;
+      return;
+    }
+    constant.value = value;
+    constant.state = ConstantInfo::State::Done;
+  }
+
+  std::pair<TyPtr, std::int64_t>
+  constant_value(const ast::ExprPtr &expression, TyPtr expected = {},
+                 std::string_view self_name = {}) {
+    if (!expression)
+      return {ty(Ty::Kind::Error), 0};
+    if (expression->kind == ast::Expr::Kind::Boolean) {
+      auto type = ty(Ty::Kind::Bool);
+      record_expression(expression, ExprInfo{type});
+      return {type, expression->text == "true"};
+    }
+    if (expression->kind == ast::Expr::Kind::Integer) {
+      auto type = literal_type(expression->text, expected, expression->span);
+      std::string digits = expression->text;
+      for (auto suffix : {"usize", "isize", "u32", "i32"})
+        if (digits.ends_with(suffix))
+          digits.resize(digits.size() - std::string_view(suffix).size());
+      std::uint64_t value{};
+      parse_unsigned(digits, value);
+      record_expression(expression, ExprInfo{type});
+      return {type, static_cast<std::int64_t>(value)};
+    }
+    if (expression->kind == ast::Expr::Kind::Unary && expression->text == "-" &&
+        !expression->operands.empty()) {
+      auto [type, value] =
+          constant_value(expression->operands.front(), expected, self_name);
+      if (!signed_integer(type))
+        report(expression->span, "only signed constants may be negated");
+      record_expression(expression, ExprInfo{type});
+      return {type, -value};
+    }
+    if (expression->kind == ast::Expr::Kind::Path) {
+      auto name = join_path(expression->path);
+      if (!self_name.empty() && name.starts_with("Self::"))
+        name = std::string(self_name) + name.substr(4);
+      if (auto it = constants_.find(name); it != constants_.end()) {
+        evaluate_constant(it->second);
+        record_expression(expression,
+                          ExprInfo{it->second.type, false, false, false,
+                                   it->second.ast->id, name});
+        return {it->second.type, it->second.value};
+      }
+      if (auto it = associated_constants_.find(name);
+          it != associated_constants_.end()) {
+        evaluate_constant(it->second);
+        record_expression(expression,
+                          ExprInfo{it->second.type, false, false, false,
+                                   it->second.ast->id, name});
+        return {it->second.type, it->second.value};
+      }
+      report(expression->span, "constant path does not resolve to a constant");
+      auto error = ty(Ty::Kind::Error);
+      record_expression(expression, ExprInfo{error});
+      return {error, 0};
+    }
+    report(expression->span, "invalid constant expression");
+    auto error = ty(Ty::Kind::Error);
+    record_expression(expression, ExprInfo{error});
+    return {error, 0};
+  }
+
