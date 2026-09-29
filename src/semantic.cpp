@@ -1716,3 +1716,66 @@ private:
 
 } // namespace
 
+SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics) {
+  return Analyzer(crate, diagnostics).run();
+}
+
+std::string dump_semantic(const SemanticResult &result) {
+  std::ostringstream out;
+  out << "Semantic\n"
+      << "  Summary functions=" << result.summary.functions
+      << " structures=" << result.summary.structures
+      << " constants=" << result.summary.constants << '\n';
+  out << "  Symbols\n";
+  for (const auto &symbol : result.symbols) {
+    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name;
+    if (symbol.owner)
+      out << " owner=#" << *symbol.owner;
+    out << '\n';
+  }
+  out << "  Expressions\n";
+  for (const auto &expression : result.expressions) {
+    out << "    #" << expression.node << " type=" << type_name(expression.type)
+        << (expression.is_place ? " place" : " value");
+    if (expression.is_place)
+      out << (expression.is_mutable ? " mutable" : " immutable");
+    if (expression.access_locked)
+      out << " access-locked";
+    if (expression.symbol)
+      out << " symbol=#" << *expression.symbol;
+    if (!expression.target.empty())
+      out << " target=" << expression.target;
+    if (!expression.adjustments.empty()) {
+      out << " adjustments=[";
+      for (std::size_t i = 0; i < expression.adjustments.size(); ++i) {
+        if (i)
+          out << ", ";
+        const auto &adjustment = expression.adjustments[i];
+        switch (adjustment.kind) {
+        case Adjustment::Kind::Dereference:
+          out << "deref";
+          break;
+        case Adjustment::Kind::BorrowShared:
+          out << "borrow-shared";
+          break;
+        case Adjustment::Kind::BorrowMutable:
+          out << "borrow-mutable";
+          break;
+        case Adjustment::Kind::MutToShared:
+          out << "mut-to-shared";
+          break;
+        case Adjustment::Kind::NeverToAny:
+          out << "never-to-any";
+          break;
+        }
+        if (adjustment.target)
+          out << "->" << type_name(adjustment.target);
+      }
+      out << ']';
+    }
+    out << '\n';
+  }
+  return out.str();
+}
+
+} // namespace rx
