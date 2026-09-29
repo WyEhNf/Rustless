@@ -587,3 +587,83 @@ private:
     return {error, 0};
   }
 
+  void validate_layouts_and_derives() {
+    for (auto &[name, _] : structures_)
+      validate_layout(name);
+    for (auto &[name, structure] : structures_) {
+      for (const auto &derive : structure.derives) {
+        for (const auto &[_, field] : structure.fields) {
+          if (!supports(field, derive, name, {})) {
+            report(structure.ast->span, "field type " + type_name(field) +
+                                            " does not support derived " +
+                                            derive);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  bool validate_layout(const std::string &name) {
+    // Layout DFS rejects inline recursion while references remain finite.
+    auto &structure = structures_.at(name);
+    if (structure.layout == StructInfo::LayoutState::Valid)
+      return true;
+    if (structure.layout == StructInfo::LayoutState::Invalid)
+      return false;
+    if (structure.layout == StructInfo::LayoutState::Visiting) {
+      report(structure.ast->span, "recursive type has infinite inline layout");
+      structure.layout = StructInfo::LayoutState::Invalid;
+      return false;
+    }
+    structure.layout = StructInfo::LayoutState::Visiting;
+    bool valid = true;
+    std::function<void(const TyPtr &)> visit = [&](const TyPtr &field) {
+      if (field->kind == Ty::Kind::Struct)
+        valid &= validate_layout(field->name);
+      else if (field->kind == Ty::Kind::Array)
+        visit(field->element);
+    };
+    for (const auto &[_, field] : structure.fields)
+      visit(field);
+    structure.layout = valid ? StructInfo::LayoutState::Valid
+                             : StructInfo::LayoutState::Invalid;
+    return valid;
+  }
+
+  bool supports(const TyPtr &value, const std::string &trait,
+                const std::string &root, std::unordered_set<std::string> seen) {
+    if (!value)
+      return false;
+    if (value->kind == Ty::Kind::Bool || integer(value) ||
+        value->kind == Ty::Kind::Unit)
+      return true;
+    if (value->kind == Ty::Kind::Ref) {
+      if (trait == "Copy")
+        return !value->is_mutable;
+      if (trait == "Clone")
+        return !value->is_mutable;
+      if (trait == "PartialEq" || trait == "Eq")
+        return supports(value->element, trait, root, seen);
+    }
+    if (value->kind == Ty::Kind::Box || value->kind == Ty::Kind::Vec ||
+        value->kind == Ty::Kind::Array) {
+      if (trait == "Copy" && value->kind != Ty::Kind::Array)
+        return false;
+      return supports(value->element, trait, root, std::move(seen));
+    }
+    if (value->kind == Ty::Kind::Struct) {
+      if (seen.contains(value->name))
+        return trait != "Copy";
+      seen.insert(value->name);
+      auto it = structures_.find(value->name);
+      if (it == structures_.end() || !it->second.derives.contains(trait))
+        return false;
+      for (const auto &[_, field] : it->second.fields)
+        if (!supports(field, trait, root, seen))
+          return false;
+      return true;
+    }
+    return false;
+  }
+
