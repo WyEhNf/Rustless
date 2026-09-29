@@ -407,3 +407,91 @@ private:
     return error == std::errc{} && end == text.data() + text.size();
   }
 
+  void resolve_declarations() {
+    // Register every associated item before resolving declaration types.
+    for (const auto *implementation : impls_) {
+      auto target = resolve_type(implementation->target);
+      if (target->kind != Ty::Kind::Struct ||
+          !structures_.contains(target->name)) {
+        report(implementation->span,
+               "an inherent impl target must be a user-defined struct");
+        continue;
+      }
+      const std::string owner = target->name;
+      const auto owner_symbol = structures_.at(owner).ast->id;
+      std::unordered_set<std::string> associated_names;
+      for (const auto &function_ast : implementation->functions) {
+        record_symbol(function_ast.id, "associated-function",
+                      owner + "::" + function_ast.name, owner_symbol);
+        if (!associated_names.insert(function_ast.name).second)
+          report(function_ast.span,
+                 "duplicate associated item '" + function_ast.name + "'");
+        auto key = owner + "::" + function_ast.name;
+        if (associated_functions_.contains(key) ||
+            associated_constants_.contains(key))
+          report(function_ast.span,
+                 "duplicate associated item '" + function_ast.name + "'");
+        associated_functions_[key].ast = &function_ast;
+        associated_functions_[key].owner = owner;
+      }
+      for (const auto &constant_ast : implementation->constants) {
+        record_symbol(constant_ast.id, "associated-constant",
+                      owner + "::" + constant_ast.name, owner_symbol);
+        if (!associated_names.insert(constant_ast.name).second)
+          report(constant_ast.span,
+                 "duplicate associated item '" + constant_ast.name + "'");
+        auto key = owner + "::" + constant_ast.name;
+        if (associated_functions_.contains(key) ||
+            associated_constants_.contains(key))
+          report(constant_ast.span,
+                 "duplicate associated item '" + constant_ast.name + "'");
+        associated_constants_[key].ast = &constant_ast;
+        associated_constants_[key].owner = owner;
+      }
+    }
+    // Constant types resolve lazily so their order cannot affect array lengths.
+    for (auto &[_, constant] : constants_)
+      resolve_constant_type(constant);
+    for (auto &[_, constant] : associated_constants_)
+      resolve_constant_type(constant);
+    for (auto &[name, function] : associated_functions_)
+      resolve_function(function, name, function.owner);
+    for (auto &[name, structure] : structures_) {
+      std::unordered_set<std::string> fields;
+      std::unordered_set<std::string> derives;
+      for (const auto &derive : structure.ast->derives) {
+        if (!derives.insert(derive).second)
+          report(structure.ast->span, "duplicate derive '" + derive + "'");
+        structure.derives.insert(derive);
+      }
+      if (structure.derives.contains("Copy") &&
+          !structure.derives.contains("Clone"))
+        report(structure.ast->span, "Copy requires an explicit Clone derive");
+      if (structure.derives.contains("Eq") &&
+          !structure.derives.contains("PartialEq"))
+        report(structure.ast->span, "Eq requires an explicit PartialEq derive");
+      for (const auto &field : structure.ast->fields) {
+        record_symbol(field.id, "field", field.name, structure.ast->id);
+        if (!fields.insert(field.name).second)
+          report(field.span, "duplicate field '" + field.name + "'");
+        structure.fields[field.name] = resolve_type(field.type, name);
+        structure.field_symbols[field.name] = field.id;
+      }
+    }
+    for (auto &[name, function] : functions_)
+      resolve_function(function, name, {});
+  }
+
+  void resolve_function(FunctionInfo &function, const std::string &,
+                        std::string owner) {
+    function.owner = std::move(owner);
+    std::unordered_set<std::string> parameters;
+    for (const auto &parameter : function.ast->parameters) {
+      if (!parameters.insert(parameter.name).second)
+        report(parameter.span, "duplicate parameter '" + parameter.name + "'");
+      function.parameters.push_back(
+          resolve_type(parameter.type, function.owner));
+    }
+    function.result = resolve_type(function.ast->result, function.owner);
+  }
+
