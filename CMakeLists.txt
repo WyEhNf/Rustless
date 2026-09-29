@@ -58,7 +58,8 @@ add_library(rustless_frontend STATIC
   "${GENERATED_DIR}/RxLexer.cpp"
   "${GENERATED_DIR}/RxParser.cpp"
   src/ast.cpp
-  src/frontend.cpp)
+  src/frontend.cpp
+  src/semantic.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
 target_include_directories(rustless_frontend SYSTEM PRIVATE
   "${antlr4_runtime_SOURCE_DIR}/runtime/src")
