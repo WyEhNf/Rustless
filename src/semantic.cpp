@@ -1138,3 +1138,73 @@ private:
     return {result};
   }
 
+  ExprInfo check_if(const ast::ExprPtr &expression, const TyPtr &expected) {
+    auto condition = check_expr(expression->operands[0], ty(Ty::Kind::Bool));
+    if (!same(condition.type, ty(Ty::Kind::Bool)))
+      mismatch(expression->operands[0]->span, condition.type,
+               ty(Ty::Kind::Bool));
+    auto then_value = check_expr(expression->operands[1], expected);
+    if (expression->operands.size() == 2) {
+      if (then_value.type->kind != Ty::Kind::Unit &&
+          then_value.type->kind != Ty::Kind::Never)
+        report(expression->span, "if without else requires a unit consequent");
+      return {ty(Ty::Kind::Unit)};
+    }
+    auto else_value = check_expr(expression->operands[2], expected);
+    if (then_value.type->kind == Ty::Kind::Never)
+      return else_value;
+    if (else_value.type->kind == Ty::Kind::Never)
+      return then_value;
+    if (coercible(else_value.type, then_value.type)) {
+      append_adjustments(
+          expression->operands[2]->id,
+          coercion_adjustments(else_value.type, then_value.type));
+      return then_value;
+    }
+    if (coercible(then_value.type, else_value.type)) {
+      append_adjustments(
+          expression->operands[1]->id,
+          coercion_adjustments(then_value.type, else_value.type));
+      return else_value;
+    }
+    mismatch(expression->span, else_value.type, then_value.type);
+    return {};
+  }
+
+  ExprInfo check_loop(const ast::ExprPtr &expression, const TyPtr &expected) {
+    loops_.push_back({expected, {}});
+    auto body = check_expr(expression->operands.front());
+    if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
+      report(expression->operands.front()->span,
+             "loop body must have unit type");
+    auto loop = std::move(loops_.back());
+    loops_.pop_back();
+    if (loop.break_types.empty())
+      return {ty(Ty::Kind::Never)};
+    auto result = loop.expected ? loop.expected : loop.break_types.front();
+    for (const auto &value : loop.break_types)
+      if (!coercible(value, result))
+        mismatch(expression->span, value, result);
+    return {result};
+  }
+
+  ExprInfo check_while(const ast::ExprPtr &expression) {
+    // A condition may only break or continue loops nested inside itself.
+    auto surrounding_loops = std::move(loops_);
+    loops_.clear();
+    auto condition = check_expr(expression->operands[0], ty(Ty::Kind::Bool));
+    loops_ = std::move(surrounding_loops);
+    if (!same(condition.type, ty(Ty::Kind::Bool)))
+      mismatch(expression->operands[0]->span, condition.type,
+               ty(Ty::Kind::Bool));
+    loops_.push_back({ty(Ty::Kind::Unit), {}});
+    auto body = check_expr(expression->operands[1], ty(Ty::Kind::Unit));
+    if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
+      report(expression->operands[1]->span, "while body must have unit type");
+    for (const auto &value : loops_.back().break_types)
+      if (value->kind != Ty::Kind::Unit)
+        report(expression->span, "break with a value is not allowed in while");
+    loops_.pop_back();
+    return {ty(Ty::Kind::Unit)};
+  }
+
