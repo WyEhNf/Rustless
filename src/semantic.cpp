@@ -372,3 +372,38 @@ private:
     return value;
   }
 
+  void resolve_constant_type(ConstantInfo &constant) {
+    if (constant.type_state == ConstantInfo::TypeState::Done ||
+        constant.type_state == ConstantInfo::TypeState::Failed)
+      return;
+    if (constant.type_state == ConstantInfo::TypeState::Resolving) {
+      report(constant.ast->span, "constant type dependency cycle");
+      constant.type = ty(Ty::Kind::Error);
+      constant.type_state = ConstantInfo::TypeState::Failed;
+      return;
+    }
+    constant.type_state = ConstantInfo::TypeState::Resolving;
+    constant.type = resolve_type(constant.ast->type, constant.owner);
+    if (constant.type_state != ConstantInfo::TypeState::Failed)
+      constant.type_state = ConstantInfo::TypeState::Done;
+  }
+
+  static bool parse_unsigned(std::string text, std::uint64_t &value) {
+    text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
+    int base = 10;
+    std::size_t offset = 0;
+    if (text.starts_with("0x")) {
+      base = 16;
+      offset = 2;
+    } else if (text.starts_with("0o")) {
+      base = 8;
+      offset = 2;
+    } else if (text.starts_with("0b")) {
+      base = 2;
+      offset = 2;
+    }
+    auto [end, error] = std::from_chars(text.data() + offset,
+                                        text.data() + text.size(), value, base);
+    return error == std::errc{} && end == text.data() + text.size();
+  }
+
