@@ -103,3 +103,61 @@ std::string type_name(const TyPtr &value) {
   return "<?>";
 }
 
+struct ConstantInfo {
+  const ast::Constant *ast{};
+  TyPtr type;
+  std::string owner;
+  enum class TypeState {
+    Fresh,
+    Resolving,
+    Done,
+    Failed
+  } type_state{TypeState::Fresh};
+  enum class State { Fresh, Evaluating, Done, Failed } state{State::Fresh};
+  std::int64_t value{};
+};
+
+struct StructInfo {
+  const ast::Struct *ast{};
+  std::unordered_map<std::string, TyPtr> fields;
+  std::unordered_map<std::string, SymbolId> field_symbols;
+  std::unordered_set<std::string> derives;
+  enum class LayoutState {
+    Fresh,
+    Visiting,
+    Valid,
+    Invalid
+  } layout{LayoutState::Fresh};
+};
+
+struct FunctionInfo {
+  const ast::Function *ast{};
+  std::vector<TyPtr> parameters;
+  TyPtr result;
+  std::string owner;
+};
+
+struct ExprInfo {
+  ExprInfo(TyPtr type = ty(Ty::Kind::Error), bool is_place = false,
+           bool is_mutable = false, bool access_locked = false,
+           std::optional<SymbolId> symbol = {}, std::string target = {},
+           std::vector<Adjustment> adjustments = {})
+      : type(std::move(type)), is_place(is_place), is_mutable(is_mutable),
+        access_locked(access_locked), symbol(symbol), target(std::move(target)),
+        adjustments(std::move(adjustments)) {}
+
+  TyPtr type;
+  bool is_place{};
+  bool is_mutable{};
+  bool access_locked{};
+  std::optional<SymbolId> symbol;
+  std::string target;
+  std::vector<Adjustment> adjustments;
+};
+
+struct Binding {
+  TyPtr type;
+  bool is_mutable{};
+  SymbolId symbol{};
+};
+
