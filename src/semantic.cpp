@@ -726,3 +726,124 @@ private:
     return nullptr;
   }
 
+  bool coercible(const TyPtr &from, const TyPtr &to) {
+    if (!from || !to || from->kind == Ty::Kind::Error ||
+        to->kind == Ty::Kind::Error || from->kind == Ty::Kind::Never)
+      return true;
+    if (same(from, to))
+      return true;
+    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref) {
+      if (from->is_mutable && !to->is_mutable &&
+          same(from->element, to->element))
+        return true;
+      auto current = from;
+      while (current->kind == Ty::Kind::Ref || current->kind == Ty::Kind::Box) {
+        current = current->element;
+        if (to->kind == Ty::Kind::Ref &&
+            (!to->is_mutable || from->is_mutable) && same(current, to->element))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  TyPtr common_type(const TyPtr &first, const TyPtr &second) {
+    if (coercible(second, first))
+      return first;
+    if (coercible(first, second))
+      return second;
+    return ty(Ty::Kind::Error);
+  }
+
+  bool writable(const ExprInfo &value) const {
+    if (value.access_locked)
+      return false;
+    auto current = value.type;
+    while (current && current->kind == Ty::Kind::Box)
+      current = current->element;
+    if (current && current->kind == Ty::Kind::Ref)
+      return current->is_mutable;
+    return !value.is_place || value.is_mutable;
+  }
+
+  void mismatch(Span span, const TyPtr &actual, const TyPtr &expected) {
+    report(span, "type mismatch: found " + type_name(actual) + ", expected " +
+                     type_name(expected));
+  }
+
+  TyPtr literal_type(const std::string &text, const TyPtr &expected,
+                     Span span) {
+    TyPtr result;
+    if (text.ends_with("usize"))
+      result = ty(Ty::Kind::Usize);
+    else if (text.ends_with("isize"))
+      result = ty(Ty::Kind::Isize);
+    else if (text.ends_with("u32"))
+      result = ty(Ty::Kind::U32);
+    else if (text.ends_with("i32"))
+      result = ty(Ty::Kind::I32);
+    else if (integer(expected))
+      result = expected;
+    else
+      result = ty(Ty::Kind::I32);
+    std::string digits = text;
+    for (auto suffix : {"usize", "isize", "u32", "i32"})
+      if (digits.ends_with(suffix))
+        digits.resize(digits.size() - std::string_view(suffix).size());
+    std::uint64_t value{};
+    if (!parse_unsigned(digits, value) ||
+        value > std::numeric_limits<std::uint32_t>::max())
+      report(span, "integer literal is outside the 32-bit target range");
+    return result;
+  }
+
+  std::vector<Adjustment> coercion_adjustments(const TyPtr &from,
+                                               const TyPtr &to) const {
+    std::vector<Adjustment> result;
+    if (!from || !to || same(from, to) || from->kind == Ty::Kind::Error ||
+        to->kind == Ty::Kind::Error)
+      return result;
+    if (from->kind == Ty::Kind::Never) {
+      result.push_back({Adjustment::Kind::NeverToAny, to});
+      return result;
+    }
+    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref &&
+        from->is_mutable && !to->is_mutable &&
+        same(from->element, to->element)) {
+      result.push_back({Adjustment::Kind::MutToShared, to});
+      return result;
+    }
+    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref) {
+      auto current = from;
+      while (current->kind == Ty::Kind::Ref || current->kind == Ty::Kind::Box) {
+        current = current->element;
+        result.push_back({Adjustment::Kind::Dereference, current});
+        if (same(current, to->element)) {
+          result.push_back({to->is_mutable ? Adjustment::Kind::BorrowMutable
+                                           : Adjustment::Kind::BorrowShared,
+                            to});
+          return result;
+        }
+      }
+    }
+    result.clear();
+    return result;
+  }
+
+  void append_adjustments(ast::NodeId node,
+                          std::vector<Adjustment> adjustments) {
+    auto &fact = expression_facts_[node];
+    fact.node = node;
+    fact.adjustments.insert(fact.adjustments.end(),
+                            std::make_move_iterator(adjustments.begin()),
+                            std::make_move_iterator(adjustments.end()));
+  }
+
+  void record_expression(const ast::ExprPtr &expression,
+                         const ExprInfo &result) {
+    expression_facts_[expression->id] = {
+        expression->id,    result.type,          result.is_place,
+        result.is_mutable, result.access_locked, result.symbol,
+        result.target,     result.adjustments};
+  }
+
