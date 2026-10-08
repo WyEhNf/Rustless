@@ -72,6 +72,12 @@ target_link_libraries(rxc PRIVATE rustless_frontend)
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME rxc_help COMMAND rxc --help)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME frontend_cli
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frontend_cli_test.py"
+        "$<TARGET_FILE:rxc>")
+  endif()
   add_executable(frontend_ast_smoke tests/frontend_ast_smoke.cpp)
   target_link_libraries(frontend_ast_smoke PRIVATE rustless_frontend)
   add_test(NAME frontend_ast_smoke COMMAND frontend_ast_smoke)
