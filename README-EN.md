@@ -45,6 +45,39 @@ In this course you can use **any language** to implement your compiler. Contact 
 - REIMU under `vendor/REIMU`, pinned as a git submodule. The `RUN` command in `config.mk` invokes it; the test runner does not depend on a particular simulator.
 - G4 grammar for Rx under `grammar/`. You may use it to generate the lexer and parser for your compiler.
 
+## C++ frontend CLI
+
+The C++ frontend builds an `rxc` executable with lexer, parser, AST construction,
+and semantic checking:
+
+```sh
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+build/rxc --stage lex program.rx
+build/rxc --stage parse --parse-entry expression fragment.rx
+build/rxc --stage parse --dump-ast program.rx
+build/rxc --stage semantic --dump-typed -o checked.txt program.rx
+```
+
+On Windows, use `build/rxc.exe`. The default stage is `semantic`. Parser entries
+are `crate` (default), `item`, `expression`, `letStatement`, and `typeRef`.
+Exit codes are 0 for acceptance, 1 for source rejection, and 2 for invocation,
+file access, or internal errors. Diagnostics go to stderr. Rejected source does
+not create a dump output file.
+
+Run all three frontend stages against the external testcase repository:
+
+```sh
+python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-testcases --report build/frontend-test-report.json
+```
+
+The runner checks manifest `compilation_success`, honors parser `metadata.entry`,
+and treats crashes, unexpected exit codes, and timeouts as failures. Its JSON
+report records every command, exit code, stdout, and stderr. Use `--jobs` and
+`--timeout` to adjust concurrency and per-case limits. The existing Makefile
+reference-compiler workflow remains independent.
+
 ## Setting up the Makefile
 
 The Makefile is our unified entrypoint in accessing your compiler. You are expected to edit [`config.mk`](config.mk) and hook in your compiler commands. In practice, specify in these fields:

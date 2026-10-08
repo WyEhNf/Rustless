@@ -47,7 +47,7 @@ IR 测试还需要 **Clang 22**。
 
 ## C++ 前端与语义分析
 
-当前的 C++ 实现包含 ANTLR 建树与语义分析库。可单独构建并运行测试：
+当前的 C++ 实现包含 ANTLR 建树、语义分析库与 `rxc` 命令行入口。可单独构建并运行测试：
 
 ```sh
 cmake -S . -B build
@@ -63,6 +63,25 @@ build/frontend_ast_corpus tests/official/semantic --semantic
 ```
 
 语义分析接口是 `rx::analyze`，声明位于 `include/rx/semantic.hpp`。
+
+`rxc` 支持 `--stage lex|parse|semantic`，默认运行语义检查。接受源码时退出码为 0，正常拒绝时为 1，命令行、文件访问或内部异常时为 2。诊断写入 stderr；AST 与语义文本可输出到 stdout 或通过 `-o` 保存。示例：
+
+```sh
+build/rxc --stage lex program.rx
+build/rxc --stage parse --parse-entry expression fragment.rx
+build/rxc --stage parse --dump-ast program.rx
+build/rxc --stage semantic --dump-typed -o checked.txt program.rx
+```
+
+Windows 使用 `build/rxc.exe`。Parser 入口支持 `crate`、`item`、`expression`、`letStatement` 与 `typeRef`；默认入口为 `crate`。
+
+用 C++ 实现运行外部 `rx-compiler-testcases` 的三阶段测试：
+
+```sh
+python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-testcases --report build/frontend-test-report.json
+```
+
+该脚本按 manifest 的 `compilation_success` 核验退出码，读取 parser 的 `metadata.entry`，并将崩溃、异常退出和超时计为失败。JSON 报告保留逐用例命令、退出码和完整输出。可用 `--jobs` 与 `--timeout` 调整并发数和每用例时限。原有 Makefile 测试流程保持独立。
 
 ## 配置 Makefile
 
