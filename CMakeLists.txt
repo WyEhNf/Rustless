@@ -66,8 +66,12 @@ target_include_directories(rustless_frontend SYSTEM PRIVATE
 target_link_libraries(rustless_frontend PUBLIC antlr4_static)
 target_compile_definitions(rustless_frontend PRIVATE ANTLR4CPP_STATIC)
 
+add_executable(rxc src/main.cpp)
+target_link_libraries(rxc PRIVATE rustless_frontend)
+
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME rxc_help COMMAND rxc --help)
   add_executable(frontend_ast_smoke tests/frontend_ast_smoke.cpp)
   target_link_libraries(frontend_ast_smoke PRIVATE rustless_frontend)
   add_test(NAME frontend_ast_smoke COMMAND frontend_ast_smoke)
