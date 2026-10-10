@@ -120,6 +120,25 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
         << type_name(instruction.type);
     break;
   }
+  case Op::Call:
+    out << "call " << type_name(instruction.type) << " @"
+        << instruction.callee << '(';
+    for (std::size_t i = 0; i < instruction.operands.size(); ++i) {
+      if (i)
+        out << ", ";
+      out << typed(instruction.operands[i]);
+    }
+    out << ')';
+    break;
+  case Op::Phi:
+    out << "phi " << type_name(instruction.type) << ' ';
+    for (std::size_t i = 0; i < instruction.operands.size(); ++i) {
+      if (i)
+        out << ", ";
+      out << "[ " << value(instruction.operands[i]) << ", "
+          << label(instruction.targets.at(i)) << " ]";
+    }
+    break;
   case Op::Br:
     out << "br label " << label(instruction.targets.at(0));
     break;
