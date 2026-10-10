@@ -68,6 +68,24 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
   if (instruction.result)
     out << "%v" << instruction.result << " = ";
   switch (instruction.op) {
+  case Op::Alloca:
+    out << "alloca i8, i32 " << instruction.bytes << ", align "
+        << instruction.alignment;
+    break;
+  case Op::Load:
+    out << "load " << type_name(instruction.type) << ", "
+        << typed(instruction.operands.at(0)) << ", align "
+        << instruction.alignment;
+    break;
+  case Op::Store:
+    out << "store " << typed(instruction.operands.at(0)) << ", "
+        << typed(instruction.operands.at(1)) << ", align "
+        << instruction.alignment;
+    break;
+  case Op::Gep:
+    out << "getelementptr i8, " << typed(instruction.operands.at(0))
+        << ", " << typed(instruction.operands.at(1));
+    break;
   case Op::Add:
   case Op::Sub:
   case Op::Mul:
