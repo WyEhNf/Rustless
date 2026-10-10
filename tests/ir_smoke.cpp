@@ -49,7 +49,7 @@ int main() {
   assert(llvm.find("br i1 %v1, label %b1, label %b2") != std::string::npos);
   assert(llvm.find("ret i32 1") != std::string::npos);
 
-  module.functions[0].blocks[0].instructions[0].op = Op::Add;
+  module.functions[0].blocks[0].instructions[0].op = static_cast<Op>(255);
   bool rejected = false;
   try {
     (void)print(module);

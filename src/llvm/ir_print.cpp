@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace rx::ir {
 namespace {
@@ -22,11 +23,61 @@ std::string typed(const Operand &operand) {
 
 std::string label(BlockId id) { return "%b" + std::to_string(id); }
 
+std::string_view binary_opcode(Op op) {
+  switch (op) {
+  case Op::Add:
+    return "add";
+  case Op::Sub:
+    return "sub";
+  case Op::Mul:
+    return "mul";
+  case Op::SDiv:
+    return "sdiv";
+  case Op::UDiv:
+    return "udiv";
+  case Op::SRem:
+    return "srem";
+  case Op::URem:
+    return "urem";
+  case Op::And:
+    return "and";
+  case Op::Or:
+    return "or";
+  case Op::Xor:
+    return "xor";
+  case Op::Shl:
+    return "shl";
+  case Op::LShr:
+    return "lshr";
+  case Op::AShr:
+    return "ashr";
+  default:
+    throw std::logic_error("not a binary opcode");
+  }
+}
+
 void print_instruction(std::ostringstream &out, const Instruction &instruction) {
   out << "  ";
   if (instruction.result)
     out << "%v" << instruction.result << " = ";
   switch (instruction.op) {
+  case Op::Add:
+  case Op::Sub:
+  case Op::Mul:
+  case Op::SDiv:
+  case Op::UDiv:
+  case Op::SRem:
+  case Op::URem:
+  case Op::And:
+  case Op::Or:
+  case Op::Xor:
+  case Op::Shl:
+  case Op::LShr:
+  case Op::AShr:
+    out << binary_opcode(instruction.op) << ' '
+        << typed(instruction.operands.at(0)) << ", "
+        << value(instruction.operands.at(1));
+    break;
   case Op::Br:
     out << "br label " << label(instruction.targets.at(0));
     break;
