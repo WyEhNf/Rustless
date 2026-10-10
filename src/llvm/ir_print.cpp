@@ -1,5 +1,6 @@
 #include "rx/ir.hpp"
 
+#include <array>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -22,6 +23,12 @@ std::string typed(const Operand &operand) {
 }
 
 std::string label(BlockId id) { return "%b" + std::to_string(id); }
+
+std::string_view predicate_name(Predicate predicate) {
+  static constexpr std::array<std::string_view, 10> names = {
+      "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge"};
+  return names.at(static_cast<std::size_t>(predicate));
+}
 
 std::string_view binary_opcode(Op op) {
   switch (op) {
@@ -78,6 +85,23 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
         << typed(instruction.operands.at(0)) << ", "
         << value(instruction.operands.at(1));
     break;
+  case Op::ICmp:
+    out << "icmp " << predicate_name(instruction.predicate) << ' '
+        << typed(instruction.operands.at(0)) << ", "
+        << value(instruction.operands.at(1));
+    break;
+  case Op::ZExt:
+  case Op::Trunc:
+  case Op::PtrToInt:
+  case Op::IntToPtr: {
+    const auto opcode = instruction.op == Op::ZExt      ? "zext"
+                        : instruction.op == Op::Trunc    ? "trunc"
+                        : instruction.op == Op::PtrToInt ? "ptrtoint"
+                                                       : "inttoptr";
+    out << opcode << ' ' << typed(instruction.operands.at(0)) << " to "
+        << type_name(instruction.type);
+    break;
+  }
   case Op::Br:
     out << "br label " << label(instruction.targets.at(0));
     break;
