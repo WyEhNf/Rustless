@@ -925,14 +925,14 @@ private:
             [&](const ast::Expr &node, const ast::BorrowExpr &borrow) {
               return check_borrow(node, borrow);
             },
-            [&](const ast::Expr &, const ast::BinaryExpr &) {
-              return check_binary(expression);
+            [&](const ast::Expr &node, const ast::BinaryExpr &binary) {
+              return check_binary(node, binary);
             },
-            [&](const ast::Expr &, const ast::AssignExpr &) {
-              return check_assignment(expression);
+            [&](const ast::Expr &node, const ast::AssignExpr &assignment) {
+              return check_assignment(node, assignment);
             },
-            [&](const ast::Expr &, const ast::CompoundAssignExpr &) {
-              return check_compound_assignment(expression);
+            [&](const ast::Expr &node, const ast::CompoundAssignExpr &assignment) {
+              return check_compound_assignment(node, assignment);
             },
             [&](const ast::Expr &, const ast::CastExpr &) {
               return check_cast(expression);
@@ -1318,8 +1318,7 @@ private:
     return {scalar};
   }
 
-  ExprInfo check_binary(const ast::ExprPtr &expression) {
-    const auto &binary = std::get<ast::BinaryExpr>(expression->data);
+  ExprInfo check_binary(const ast::Expr &node, const ast::BinaryExpr &binary) {
     auto left = check_expr(binary.left);
     auto right = check_expr(binary.right, left.type);
     auto lhs = scalar_operand(left.type);
@@ -1328,14 +1327,14 @@ private:
     if (op == ast::BinaryOp::LogicalAnd || op == ast::BinaryOp::LogicalOr) {
       if (left.type->kind != Ty::Kind::Bool ||
           right.type->kind != Ty::Kind::Bool)
-        report(expression->span, "logical operators require bool operands");
+        report(node.span, "logical operators require bool operands");
       return {ty(Ty::Kind::Bool)};
     }
     if (op == ast::BinaryOp::Eq || op == ast::BinaryOp::Ne) {
       if (!same(lhs, rhs))
-        mismatch(expression->span, rhs, lhs);
+        mismatch(node.span, rhs, lhs);
       if (!supports(lhs, "PartialEq", "", {}))
-        report(expression->span, "equality requires PartialEq");
+        report(node.span, "equality requires PartialEq");
       return {ty(Ty::Kind::Bool)};
     }
     if (op == ast::BinaryOp::Lt || op == ast::BinaryOp::Le ||
@@ -1344,25 +1343,25 @@ private:
       auto ordering_right = right.type;
       if ((ordering_left->kind == Ty::Kind::Ref) !=
           (ordering_right->kind == Ty::Kind::Ref)) {
-        report(expression->span, "ordering requires matching scalar operands");
+        report(node.span, "ordering requires matching scalar operands");
         return {ty(Ty::Kind::Bool)};
       }
       while (ordering_left->kind == Ty::Kind::Ref &&
              ordering_right->kind == Ty::Kind::Ref) {
         if (ordering_left->is_mutable && !ordering_right->is_mutable)
-          report(expression->span, "ordering cannot coerce a mutable left "
+          report(node.span, "ordering cannot coerce a mutable left "
                                    "reference to a shared right reference");
         ordering_left = ordering_left->element;
         ordering_right = ordering_right->element;
       }
       if ((!integer(ordering_left) && ordering_left->kind != Ty::Kind::Bool) ||
           !same(ordering_left, ordering_right))
-        report(expression->span, "ordering requires matching scalar operands");
+        report(node.span, "ordering requires matching scalar operands");
       return {ty(Ty::Kind::Bool)};
     }
     if (op == ast::BinaryOp::Shl || op == ast::BinaryOp::Shr) {
       if (!integer(lhs) || !integer(rhs))
-        report(expression->span, "shift operands must be integers");
+        report(node.span, "shift operands must be integers");
       return {lhs};
     }
     if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr ||
@@ -1370,7 +1369,7 @@ private:
         lhs->kind == Ty::Kind::Bool && rhs->kind == Ty::Kind::Bool)
       return {ty(Ty::Kind::Bool)};
     if (!integer(lhs) || !same(lhs, rhs))
-      report(expression->span,
+      report(node.span,
              "integer operator requires matching integer operands");
     return {lhs};
   }
@@ -1381,8 +1380,7 @@ private:
     return value;
   }
 
-  ExprInfo check_assignment(const ast::ExprPtr &expression) {
-    const auto &assignment = std::get<ast::AssignExpr>(expression->data);
+  ExprInfo check_assignment(const ast::Expr &node, const ast::AssignExpr &assignment) {
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
@@ -1397,9 +1395,7 @@ private:
     else if (!destination.is_mutable)
       report(target->span, "assignment destination is immutable");
   }
-  ExprInfo check_compound_assignment(const ast::ExprPtr &expression) {
-    const auto &assignment =
-        std::get<ast::CompoundAssignExpr>(expression->data);
+  ExprInfo check_compound_assignment(const ast::Expr &node, const ast::CompoundAssignExpr &assignment) {
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
@@ -1410,7 +1406,7 @@ private:
         !same(scalar, destination.type))
       mismatch(assignment.value->span, scalar, destination.type);
     if (!integer(destination.type) && destination.type->kind != Ty::Kind::Bool)
-      report(expression->span,
+      report(node.span,
              "compound assignment requires a scalar destination");
     return {ty(Ty::Kind::Unit)};
   }
