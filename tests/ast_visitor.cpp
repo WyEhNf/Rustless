@@ -1,4 +1,4 @@
-#include "rx/ast/dispatch.hpp"
+#include "rx/ast/children.hpp"
 #include "rx/frontend.hpp"
 
 #undef NDEBUG
@@ -51,4 +51,15 @@ int main() {
     }, IdentityVisitor{}});
   assert(id == expr.id);
   assert(ast::dispatch(parsed.crate->items[0], IdentityVisitor{}) == function.id);
+  std::vector<ast::NodeId> child_ids;
+  ast::for_each_child(expr, [&](const ast::Node &child) {
+    child_ids.push_back(child.id);
+  });
+  const auto &binary = *ast::get_if<ast::BinaryExpr>(expr);
+  assert((child_ids == std::vector{binary.left->id, binary.right->id}));
+  child_ids.clear();
+  ast::for_each_child(parsed.crate->items[0], [&](const ast::Node &child) {
+    child_ids.push_back(child.id);
+  });
+  assert((child_ids == std::vector{function.body->id}));
 }

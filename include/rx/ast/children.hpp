@@ -125,6 +125,30 @@ public:
     recurse_(*p.value);
     recurse_(*p.target_type);
   }
+  void operator()(const CallExpr &p) {
+    recurse_(*p.callee);
+    for (const auto &argument : p.arguments)
+      recurse_(*argument);
+  }
+  void operator()(const MethodCallExpr &p) {
+    recurse_(*p.receiver);
+    arguments(p.generic_args);
+    for (const auto &argument : p.arguments)
+      recurse_(*argument);
+  }
+  void operator()(const FieldExpr &p) { recurse_(*p.base); }
+  void operator()(const IndexExpr &p) {
+    recurse_(*p.base);
+    recurse_(*p.index);
+  }
+  void operator()(const BreakExpr &p) {
+    if (p.value)
+      recurse_(**p.value);
+  }
+  void operator()(const ReturnExpr &p) {
+    if (p.value)
+      recurse_(**p.value);
+  }
 
 private:
   void arguments(const std::optional<GenericArguments> &value) {
