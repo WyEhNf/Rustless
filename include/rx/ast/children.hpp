@@ -176,7 +176,7 @@ private:
 } // namespace detail
 
 // Enumerate immediate identity-bearing children; recursion belongs to the caller.
-template <class T, class Recurse>
+template <SyntaxRoot T, class Recurse>
 void for_each_child(const T &node, Recurse &&recurse) {
   detail::ChildEnumerator<std::remove_reference_t<Recurse>> children(recurse);
   visit(node, [&](const auto &, const auto &p) { children(p); });

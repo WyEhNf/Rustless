@@ -33,18 +33,34 @@ struct VisitorCoverage<V, Owner, std::variant<Ps...>> {
   }
   static constexpr bool value = compatible();
 };
+template <class V, class T> struct Coverage;
+// Register identity-bearing owners once for dispatch and whole-tree coverage.
+template <class... Owners> struct OwnerTypes {
+  template <class T> static constexpr bool contains = (std::same_as<T, Owners> || ...);
+  template <class V> static constexpr bool covered = (Coverage<V, Owners>::value && ...);
+};
+using SyntaxOwners = OwnerTypes<Crate, Expr, TypeSyntax, Stmt, Block, Use,
+    UseTree, Function, Struct, Constant, Impl, IfBranch, SelfParam, Parameter,
+    StructField, FieldInit, LifetimeParameter, LifetimePredicate, TypePredicate>;
+template <class T> struct RootType : std::bool_constant<SyntaxOwners::contains<T>> {};
+template <class... Ts> struct RootType<std::variant<Ts...>>
+    : std::bool_constant<(SyntaxOwners::contains<Ts> && ...)> {};
+
 template <class V, class T> struct Coverage : std::false_type {};
-template <class V, std::derived_from<Node> T>
+template <class V, class T> requires SyntaxOwners::contains<T>
 struct Coverage<V, T> : VisitorCoverage<V, T,
     std::remove_cvref_t<decltype(payload(std::declval<const T &>()))>> {};
 } // namespace detail
+
+template <class T>
+concept SyntaxRoot = detail::RootType<std::remove_cvref_t<T>>::value;
 
 // A catch-all overload is an explicit choice to accept future alternatives.
 template <class V, class T>
 concept ExhaustiveVisitor = detail::Coverage<V, T>::value;
 
 template <class T, class V>
-  requires std::derived_from<T, Node> && ExhaustiveVisitor<V, T>
+  requires detail::SyntaxOwners::contains<T> && ExhaustiveVisitor<V, T>
 decltype(auto) visit(const T &node, V &&visitor) {
   const auto &value = detail::payload(node);
   if constexpr (requires { std::variant_size<std::remove_cvref_t<decltype(value)>>::value; }) {

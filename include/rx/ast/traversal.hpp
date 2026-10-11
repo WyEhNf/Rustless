@@ -33,14 +33,7 @@ template <class V> struct LeaveAdapter {
     }
   void operator()(const O &owner, const P &p) { visitor.leave(owner, p); }
 };
-template <class V> constexpr bool covers_tree =
-    ExhaustiveVisitor<V, Crate> && ExhaustiveVisitor<V, Expr> &&
-    ExhaustiveVisitor<V, TypeSyntax> && ExhaustiveVisitor<V, Stmt> &&
-    ExhaustiveVisitor<V, Block> && ExhaustiveVisitor<V, Item> &&
-    ExhaustiveVisitor<V, UseTree> && ExhaustiveVisitor<V, IfBranch> &&
-    ExhaustiveVisitor<V, SelfParam> && ExhaustiveVisitor<V, Parameter> &&
-    ExhaustiveVisitor<V, StructField> && ExhaustiveVisitor<V, FieldInit> &&
-    ExhaustiveVisitor<V, LifetimeParameter> && ExhaustiveVisitor<V, WherePredicate>;
+template <class V> constexpr bool covers_tree = SyntaxOwners::covered<V>;
 } // namespace detail
 
 template <class V>
@@ -50,7 +43,7 @@ concept TraversalVisitor = detail::covers_tree<detail::EnterAdapter<V>> &&
 template <TraversalVisitor V> class Walker {
 public:
   explicit Walker(V &visitor) : visitor_(visitor) {}
-  template <class T> WalkResult walk(const T &node) {
+  template <SyntaxRoot T> WalkResult walk(const T &node) {
     if (stopped_)
       return WalkResult::Stopped;
     auto control = visit(node, detail::EnterAdapter<V>{visitor_});
@@ -68,7 +61,7 @@ private:
   bool stopped_{};
 };
 
-template <class T, class V> requires TraversalVisitor<std::remove_reference_t<V>>
+template <SyntaxRoot T, class V> requires TraversalVisitor<std::remove_reference_t<V>>
 WalkResult walk(const T &root, V &&visitor) {
   Walker<std::remove_reference_t<V>> walker(visitor);
   return walker.walk(root);
@@ -97,7 +90,7 @@ template <class V> struct PreorderAdapter : DefaultVisitor {
 template <class V>
 concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
 
-template <class T, class V>
+template <SyntaxRoot T, class V>
   requires (!TraversalVisitor<std::remove_reference_t<V>>) &&
            TraversalCallback<std::remove_reference_t<V>>
 WalkResult walk(const T &root, V &&callback) {
