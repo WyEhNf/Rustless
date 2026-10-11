@@ -17,6 +17,9 @@ dispatch to their concrete declaration or predicate owners.
 The tree remains closed and read-only. Adding a node requires adding its
 child enumeration and handlers in exhaustive visitors. There is no virtual
 base visitor or numeric kind switch.
+Identity-bearing owner types are registered once in dispatch.hpp, shared by
+dispatch constraints and whole-tree traversal coverage. SyntaxRoot rejects
+non-AST values, bare Node metadata, and payloads without their owners.
 
 ## Structural traversal
 
@@ -93,3 +96,26 @@ cmake -S . -B build
 cmake --build build --target ast_visitor -j 4
 ctest --test-dir build -R "^ast_visitor$" --output-on-failure
 ```
+
+## Final verification (2026-10-11)
+
+This visitor update contains 26 commits after b934c6f. It replaces the old
+walker and migrates printing, semantic dispatch and existing traversal tests.
+
+| Check | Result |
+| --- | --- |
+| MinGW C++23 full build | Passed |
+| CTest, including ast_visitor | 7/7 |
+| External lexer manifests | 53/53 |
+| External parser manifests | 442/442 |
+| External semantic manifests | 236/236 |
+| Accepted parser crate AST identity/span/traversal/dump corpus | 47/47 |
+| Semantic AST identity/span/traversal/dump corpus | 236/236 |
+| Diff whitespace checks | Passed |
+
+The final visitor test also checks reference return preservation, expression
+and Item traversal roots, preference for hooks when an object is also callable,
+and rejection of wrong owner types, missing BinaryExpr hooks, mixed declaration
+return types and invalid roots. External manifest results are recorded in the
+ignored build/ast-visitor-report.json. The user's existing frontend.cpp comment
+deletions remain uncommitted.
