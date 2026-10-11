@@ -41,7 +41,43 @@ std::vector<std::string> verify_instruction(const Instruction &node) {
     [&](const Instruction &, const Gep &p) {
       require(p.base.type == Type::Ptr && p.offset.type == Type::I32, "GEP requires ptr and i32 byte offset");
     },
-    [&](const Instruction &, const auto &) {}});
+    [&](const Instruction &, const Binary &p) {
+      require(integer_width(p.result.type) && p.left.type == p.result.type &&
+              p.right.type == p.result.type, "binary operands and result must share an integer type");
+    },
+    [&](const Instruction &, const Compare &p) {
+      require(p.left.type == p.right.type, "comparison operand types differ");
+      require(static_cast<unsigned>(p.predicate) <= static_cast<unsigned>(Predicate::UGe),
+              "invalid comparison predicate");
+      require(p.left.type != Type::Ptr || p.predicate == Predicate::Eq ||
+              p.predicate == Predicate::Ne, "pointer comparisons require eq or ne");
+    },
+    [&](const Instruction &, const Cast &p) {
+      auto from = integer_width(p.operand.type), to = integer_width(p.result.type);
+      switch (p.op) {
+      case CastOp::ZExt: require(from && to && from < to, "invalid zero extension"); break;
+      case CastOp::Trunc: require(from && to && from > to, "invalid truncation"); break;
+      case CastOp::PtrToInt:
+        require(p.operand.type == Type::Ptr && p.result.type == Type::I32, "invalid RV32 pointer-to-int cast"); break;
+      case CastOp::IntToPtr:
+        require(p.operand.type == Type::I32 && p.result.type == Type::Ptr, "invalid RV32 int-to-pointer cast"); break;
+      }
+    },
+    [&](const Instruction &, const Call &p) { require(!p.callee.empty(), "call requires a target"); },
+    [&](const Instruction &, const Phi &p) {
+      require(!p.incoming.empty(), "phi requires incoming values");
+      std::set<BlockId> predecessors;
+      for (const auto &incoming : p.incoming) {
+        require(incoming.value.type == p.result.type, "phi incoming type mismatch");
+        require(predecessors.insert(incoming.predecessor).second, "duplicate phi predecessor");
+      }
+    },
+    [&](const Instruction &, const Branch &) {},
+    [&](const Instruction &, const CondBranch &p) {
+      require(p.condition.type == Type::I1, "branch condition must be i1");
+    },
+    [&](const Instruction &, const Return &) {},
+    [&](const Instruction &, const Unreachable &) {}});
   return errors;
 }
 // Module-level validation follows after instruction contracts.
