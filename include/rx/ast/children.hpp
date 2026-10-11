@@ -76,6 +76,55 @@ public:
     recurse_(*p.initializer);
   }
   void operator()(const ExprStmt &p) { recurse_(*p.expression); }
+  void operator()(const IntegerExpr &) {}
+  void operator()(const BooleanExpr &) {}
+  void operator()(const UnitExpr &) {}
+  void operator()(const ContinueExpr &) {}
+  void operator()(const PathExpr &p) { path(p.path); }
+  void operator()(const ParenExpr &p) { recurse_(*p.inner); }
+  void operator()(const ArrayExpr &p) {
+    for (const auto &element : p.elements)
+      recurse_(*element);
+  }
+  void operator()(const RepeatArrayExpr &p) {
+    recurse_(*p.element);
+    recurse_(*p.count);
+  }
+  void operator()(const StructExpr &p) {
+    path(p.path);
+    for (const auto &field : p.fields)
+      recurse_(field);
+  }
+  void operator()(const BlockExpr &p) { recurse_(*p.block); }
+  void operator()(const IfExpr &p) {
+    recurse_(*p.condition);
+    recurse_(*p.then_block);
+    if (p.else_branch)
+      std::visit([&](const auto &branch) { recurse_(*branch); }, *p.else_branch);
+  }
+  void operator()(const LoopExpr &p) { recurse_(*p.body); }
+  void operator()(const WhileExpr &p) {
+    recurse_(*p.condition);
+    recurse_(*p.body);
+  }
+  void operator()(const UnaryExpr &p) { recurse_(*p.operand); }
+  void operator()(const BorrowExpr &p) { recurse_(*p.operand); }
+  void operator()(const BinaryExpr &p) {
+    recurse_(*p.left);
+    recurse_(*p.right);
+  }
+  void operator()(const AssignExpr &p) {
+    recurse_(*p.target);
+    recurse_(*p.value);
+  }
+  void operator()(const CompoundAssignExpr &p) {
+    recurse_(*p.target);
+    recurse_(*p.value);
+  }
+  void operator()(const CastExpr &p) {
+    recurse_(*p.value);
+    recurse_(*p.target_type);
+  }
 
 private:
   void arguments(const std::optional<GenericArguments> &value) {
