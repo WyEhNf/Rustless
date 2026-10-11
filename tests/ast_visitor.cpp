@@ -1,4 +1,4 @@
-#include "rx/ast/children.hpp"
+#include "rx/ast/traversal.hpp"
 #include "rx/frontend.hpp"
 
 #undef NDEBUG
@@ -35,6 +35,71 @@ static_assert(!ast::ExhaustiveVisitor<DifferentReturns, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<MutablePayload, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<IdentityVisitor, int>);
 
+struct BinaryObserver : ast::DefaultVisitor {
+  using DefaultVisitor::enter;
+  int count{};
+  ast::WalkControl enter(const ast::Expr &owner, const ast::BinaryExpr &p) {
+    assert(owner.id.value && p.left->id != p.right->id);
+    ++count;
+    return ast::WalkControl::Continue;
+  }
+};
+struct TraceVisitor {
+  ast::NodeId target{};
+  ast::WalkControl action{ast::WalkControl::Continue};
+  std::vector<ast::NodeId> entered, left, stack;
+  template <class P> ast::WalkControl enter(const ast::Node &node, const P &) {
+    entered.push_back(node.id);
+    stack.push_back(node.id);
+    return node.id == target ? action : ast::WalkControl::Continue;
+  }
+  template <class P> void leave(const ast::Node &node, const P &) {
+    assert(!stack.empty() && stack.back() == node.id);
+    stack.pop_back();
+    left.push_back(node.id);
+  }
+};
+struct MissingLeave {
+  template <class P> ast::WalkControl enter(const ast::Node &, const P &) {
+    return ast::WalkControl::Continue;
+  }
+};
+struct WrongControl : ast::DefaultVisitor {
+  using DefaultVisitor::enter;
+  bool enter(const ast::Expr &, const ast::BinaryExpr &) { return true; }
+};
+static_assert(ast::TraversalVisitor<BinaryObserver>);
+static_assert(ast::TraversalVisitor<TraceVisitor>);
+static_assert(!ast::TraversalVisitor<MissingLeave>);
+static_assert(!ast::TraversalVisitor<WrongControl>);
+
+void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
+  const auto &binary = *ast::get_if<ast::BinaryExpr>(expr);
+  BinaryObserver observer;
+  assert(ast::walk_typed(crate, observer) == ast::WalkResult::Completed);
+  assert(observer.count == 1);
+  TraceVisitor full;
+  assert(ast::walk_typed(crate, full) == ast::WalkResult::Completed);
+  assert(full.entered.size() == 7 && full.left.size() == 7 && full.stack.empty());
+  assert(full.entered[4] == expr.id && full.entered[5] == binary.left->id &&
+         full.entered[6] == binary.right->id);
+  TraceVisitor skipped;
+  skipped.target = expr.id;
+  skipped.action = ast::WalkControl::SkipChildren;
+  assert(ast::walk_typed(crate, skipped) == ast::WalkResult::Completed);
+  assert(skipped.entered.size() == 5 && skipped.left.size() == 5 && skipped.stack.empty());
+  TraceVisitor stopped;
+  stopped.target = binary.left->id;
+  stopped.action = ast::WalkControl::Stop;
+  assert(ast::walk_typed(crate, stopped) == ast::WalkResult::Stopped);
+  assert(stopped.entered.size() == 6 && stopped.left.size() == 6 && stopped.stack.empty());
+  TraceVisitor root_stop;
+  root_stop.target = crate.id;
+  root_stop.action = ast::WalkControl::Stop;
+  assert(ast::walk_typed(crate, root_stop) == ast::WalkResult::Stopped);
+  assert(root_stop.entered.size() == 1 && root_stop.left.size() == 1);
+}
+
 int main() {
   rx::DiagnosticEngine diagnostics;
   auto parsed = rx::parse_source("fn main() { 1 + 2; }", diagnostics);
@@ -62,4 +127,5 @@ int main() {
     child_ids.push_back(child.id);
   });
   assert((child_ids == std::vector{function.body->id}));
+  check_walk(*parsed.crate, expr);
 }
