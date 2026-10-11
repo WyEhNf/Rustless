@@ -934,8 +934,8 @@ private:
             [&](const ast::Expr &node, const ast::CompoundAssignExpr &assignment) {
               return check_compound_assignment(node, assignment);
             },
-            [&](const ast::Expr &, const ast::CastExpr &) {
-              return check_cast(expression);
+            [&](const ast::Expr &node, const ast::CastExpr &cast) {
+              return check_cast(node, cast);
             },
             [&](const ast::Expr &, const ast::CallExpr &) {
               return check_call(expression);
@@ -946,8 +946,8 @@ private:
             [&](const ast::Expr &node, const ast::FieldExpr &projection) {
               return check_field(node, projection);
             },
-            [&](const ast::Expr &, const ast::IndexExpr &) {
-              return check_index(expression);
+            [&](const ast::Expr &node, const ast::IndexExpr &projection) {
+              return check_index(node, projection);
             },
             [&](const ast::Expr &, const ast::BreakExpr &) {
               return check_break(expression, expected);
@@ -1411,8 +1411,7 @@ private:
     return {ty(Ty::Kind::Unit)};
   }
 
-  ExprInfo check_cast(const ast::ExprPtr &expression) {
-    const auto &cast = std::get<ast::CastExpr>(expression->data);
+  ExprInfo check_cast(const ast::Expr &node, const ast::CastExpr &cast) {
     auto source = check_expr(cast.value);
     auto destination = resolve_type(
         cast.target_type, current_function_ ? current_function_->owner : "");
@@ -1420,7 +1419,7 @@ private:
         (integer(source.type) && integer(destination)) ||
         (source.type->kind == Ty::Kind::Bool && integer(destination));
     if (!valid)
-      report(expression->span, "unsupported cast from " +
+      report(node.span, "unsupported cast from " +
                                    type_name(source.type) + " to " +
                                    type_name(destination));
     return {destination};
@@ -1697,8 +1696,7 @@ private:
             std::move(adjustments)};
   }
 
-  ExprInfo check_index(const ast::ExprPtr &expression) {
-    const auto &projection = std::get<ast::IndexExpr>(expression->data);
+  ExprInfo check_index(const ast::Expr &node, const ast::IndexExpr &projection) {
     auto base = check_expr(projection.base);
     auto index = check_expr(projection.index, ty(Ty::Kind::Usize));
     if (!same(index.type, ty(Ty::Kind::Usize)))
@@ -1722,7 +1720,7 @@ private:
     }
     if (container->kind != Ty::Kind::Array &&
         container->kind != Ty::Kind::Vec) {
-      report(expression->span,
+      report(node.span,
              "type " + type_name(container) + " cannot be indexed");
       return {};
     }
