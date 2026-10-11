@@ -106,3 +106,59 @@ derived from payloads. The builder checks local instruction contracts and insert
 order; module verification checks targets, call signatures, Phi predecessors,
 SSA uniqueness, use-before-definition and dominance. Direct payload construction
 is supported, so callers must still run module verification before using it.
+
+## Completed verification (2026-10-11)
+
+This integration was completed in 58 commits after baseline `d205c69`, including
+the verification record. Feature/fix commits cover the semantic migration,
+checked facts, typed IR model, visitors, verifier, builder and bridge. Existing
+frontend.cpp comment edits remain uncommitted and were not included.
+
+| Check | Result |
+| --- | --- |
+| MinGW C++23 build | Passed |
+| CTest, including semantic and IR alignment regressions | 10/10 |
+| rx-compiler-testcases lexer manifests | 53/53 |
+| rx-compiler-testcases parser manifests | 442/442 |
+| rx-compiler-testcases semantic manifests | 236/236 |
+| Semantic AST corpus: identities, spans, facts and links | 236/236 |
+| Accepted parser crate AST corpus | 47/47 |
+| LLVM/Clang RV32IM compilation of emitted IR fixtures | 2/2 |
+| Committed diff whitespace check | Passed |
+
+The Clang checks compile the migrated instruction smoke fixture and the builder
+diamond/Phi fixture (including a qualified function name) to RV32 objects.
+They do not test execution of source-language programs. Clang reported its normal
+target-triple normalization warning, with no compilation errors.
+
+Reproduce from the Rustless directory after configuring the build:
+
+```powershell
+$env:PATH = 'E:\mingw64\bin;' + $env:PATH
+cmake --build build -j 4
+ctest --test-dir build --output-on-failure
+python scripts/test_frontend.py --compiler build/rxc.exe `
+  --test-root ../rx-compiler-testcases `
+  --report build/semantic-ir-alignment-report.json
+build/frontend_ast_corpus.exe ../rx-compiler-testcases/semantic --semantic
+build/frontend_ast_corpus.exe build/ast-refactor-parser-crates
+build/ir_smoke.exe build/typed-ir-smoke.ll
+build/ir_alignment.exe build/typed-ir-alignment.ll
+& 'C:\Program Files\LLVM\bin\clang.exe' --target=riscv32-unknown-elf `
+  -march=rv32im -mabi=ilp32 -x ir -c build/typed-ir-smoke.ll `
+  -o build/typed-ir-smoke.o
+& 'C:\Program Files\LLVM\bin\clang.exe' --target=riscv32-unknown-elf `
+  -march=rv32im -mabi=ilp32 -x ir -c build/typed-ir-alignment.ll `
+  -o build/typed-ir-alignment.o
+git rev-list --count d205c69..HEAD
+git diff --check d205c69..HEAD
+```
+
+The accepted-parser-crates directory is an existing local extraction of successful
+crate-entry parser tests; the complete parser manifest runner above does not
+depend on it. Reports and LLVM fixtures are generated under ignored `build/`.
+
+Remaining backend work is full AST expression/statement lowering, application of
+semantic adjustments, aggregate operations and runtime integration. The CLI still
+provides its existing lex/parse/semantic stages. The new bridge APIs are available
+to that future lowering pass and have no undefined placeholder methods.
