@@ -31,7 +31,9 @@ template <class V> struct LeaveAdapter {
     requires requires(V &v, const O &owner, const P &p) {
       { v.leave(owner, p) } -> std::same_as<void>;
     }
-  void operator()(const O &owner, const P &p) { visitor.leave(owner, p); }
+  void operator()(const O &owner, const P &p) {
+    visitor.leave(owner, p);
+  }
 };
 template <class V> constexpr bool covers_tree = SyntaxOwners::covered<V>;
 } // namespace detail
@@ -61,7 +63,8 @@ private:
   bool stopped_{};
 };
 
-template <SyntaxRoot T, class V> requires TraversalVisitor<std::remove_reference_t<V>>
+template <SyntaxRoot T, class V>
+  requires TraversalVisitor<std::remove_reference_t<V>>
 WalkResult walk(const T &root, V &&visitor) {
   Walker<std::remove_reference_t<V>> walker(visitor);
   return walker.walk(root);
@@ -74,10 +77,13 @@ template <class V> struct PreorderAdapter : DefaultVisitor {
   // Hide DefaultVisitor::enter: missing callback handlers remain errors.
   template <class O, class P>
     requires std::invocable<V &, const O &, const P &> &&
-      (std::same_as<std::invoke_result_t<V &, const O &, const P &>, void> ||
-       std::same_as<std::invoke_result_t<V &, const O &, const P &>, WalkControl>)
+             (std::same_as<std::invoke_result_t<V &, const O &, const P &>,
+                           void> ||
+              std::same_as<std::invoke_result_t<V &, const O &, const P &>,
+                           WalkControl>)
   WalkControl enter(const O &owner, const P &p) {
-    if constexpr (std::same_as<std::invoke_result_t<V &, const O &, const P &>, void>) {
+    if constexpr (std::same_as<std::invoke_result_t<V &, const O &, const P &>,
+                               void>) {
       std::invoke(callback, owner, p);
       return WalkControl::Continue;
     } else {
@@ -91,8 +97,8 @@ template <class V>
 concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
 
 template <SyntaxRoot T, class V>
-  requires (!TraversalVisitor<std::remove_reference_t<V>>) &&
-           TraversalCallback<std::remove_reference_t<V>>
+  requires(!TraversalVisitor<std::remove_reference_t<V>>) &&
+          TraversalCallback<std::remove_reference_t<V>>
 WalkResult walk(const T &root, V &&callback) {
   detail::PreorderAdapter<std::remove_reference_t<V>> visitor(callback);
   return walk(root, visitor);

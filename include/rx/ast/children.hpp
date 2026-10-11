@@ -100,7 +100,8 @@ public:
     recurse_(*p.condition);
     recurse_(*p.then_block);
     if (p.else_branch)
-      std::visit([&](const auto &branch) { recurse_(*branch); }, *p.else_branch);
+      std::visit([&](const auto &branch) { recurse_(*branch); },
+                 *p.else_branch);
   }
   void operator()(const LoopExpr &p) { recurse_(*p.body); }
   void operator()(const WhileExpr &p) {
@@ -155,7 +156,8 @@ private:
     if (value)
       for (const auto &argument : value->values)
         std::visit(Overloaded{[&](const TypePtr &p) { recurse_(*p); },
-                              [&](const LifetimeName &) {}}, argument);
+                              [&](const LifetimeName &) {}},
+                   argument);
   }
   void path(const Path &value) {
     for (const auto &segment : value.segments)
@@ -169,13 +171,15 @@ private:
   void where_clause(const std::optional<WhereClause> &value) {
     if (value)
       for (const auto &predicate : value->predicates)
-        visit(predicate, [&](const auto &owner, const auto &) { recurse_(owner); });
+        visit(predicate,
+              [&](const auto &owner, const auto &) { recurse_(owner); });
   }
   Recurse &recurse_;
 };
 } // namespace detail
 
-// Enumerate immediate identity-bearing children; recursion belongs to the caller.
+// Enumerate immediate identity-bearing children; recursion belongs to the
+// caller.
 template <SyntaxRoot T, class Recurse>
 void for_each_child(const T &node, Recurse &&recurse) {
   detail::ChildEnumerator<std::remove_reference_t<Recurse>> children(recurse);

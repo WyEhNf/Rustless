@@ -220,44 +220,42 @@ private:
     std::unordered_set<std::string> type_names;
     std::unordered_set<std::string> value_names;
     for (const auto &item : crate_.items) {
-      ast::visit(item,
-          [&](const ast::Node &, const auto &value) {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, ast::Struct>) {
-              record_symbol(value.id, "struct", value.name.text);
-              if (builtin_type(value.name.text))
-                report(value.span, "the builtin type name '" + value.name.text +
-                                       "' is protected");
-              if (!type_names.insert(value.name.text).second)
-                report(value.span,
-                       "duplicate type name '" + value.name.text + "'");
-              structures_[value.name.text].ast = &value;
-            } else if constexpr (std::is_same_v<T, ast::Function>) {
-              record_symbol(value.id, "function", value.name.text);
-              if (protected_builtin_value(value.name.text))
-                report(value.span, "the builtin value name '" +
-                                       value.name.text + "' is protected");
-              if (!value_names.insert(value.name.text).second)
-                report(value.span,
-                       "duplicate value name '" + value.name.text + "'");
-              functions_[value.name.text].ast = &value;
-            } else if constexpr (std::is_same_v<T, ast::Constant>) {
-              record_symbol(value.id, "constant", value.name.text);
-              if (protected_builtin_value(value.name.text))
-                report(value.span, "the builtin value name '" +
-                                       value.name.text + "' is protected");
-              if (!value_names.insert(value.name.text).second)
-                report(value.span,
-                       "duplicate value name '" + value.name.text + "'");
-              constants_[value.name.text].ast = &value;
-            } else if constexpr (std::is_same_v<T, ast::Impl>) {
-              impls_.push_back(&value);
-            } else {
-              static_assert(std::is_same_v<T, ast::Use>,
-                            "unhandled AST declaration");
-              (void)value;
-            }
-          });
+      ast::visit(item, [&](const ast::Node &, const auto &value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, ast::Struct>) {
+          record_symbol(value.id, "struct", value.name.text);
+          if (builtin_type(value.name.text))
+            report(value.span, "the builtin type name '" + value.name.text +
+                                   "' is protected");
+          if (!type_names.insert(value.name.text).second)
+            report(value.span, "duplicate type name '" + value.name.text + "'");
+          structures_[value.name.text].ast = &value;
+        } else if constexpr (std::is_same_v<T, ast::Function>) {
+          record_symbol(value.id, "function", value.name.text);
+          if (protected_builtin_value(value.name.text))
+            report(value.span, "the builtin value name '" + value.name.text +
+                                   "' is protected");
+          if (!value_names.insert(value.name.text).second)
+            report(value.span,
+                   "duplicate value name '" + value.name.text + "'");
+          functions_[value.name.text].ast = &value;
+        } else if constexpr (std::is_same_v<T, ast::Constant>) {
+          record_symbol(value.id, "constant", value.name.text);
+          if (protected_builtin_value(value.name.text))
+            report(value.span, "the builtin value name '" + value.name.text +
+                                   "' is protected");
+          if (!value_names.insert(value.name.text).second)
+            report(value.span,
+                   "duplicate value name '" + value.name.text + "'");
+          constants_[value.name.text].ast = &value;
+        } else if constexpr (std::is_same_v<T, ast::Impl>) {
+          impls_.push_back(&value);
+        } else {
+          static_assert(std::is_same_v<T, ast::Use>,
+                        "unhandled AST declaration");
+          (void)value;
+        }
+      });
     }
   }
 
@@ -306,7 +304,9 @@ private:
     return ast::visit(
         *syntax,
         ast::Overloaded{
-            [&](const ast::TypeSyntax &, const ast::UnitType &) { return ty(Ty::Kind::Unit); },
+            [&](const ast::TypeSyntax &, const ast::UnitType &) {
+              return ty(Ty::Kind::Unit);
+            },
             [&](const ast::TypeSyntax &, const ast::ParenType &p) {
               return resolve_type(p.inner, self_name);
             },
@@ -432,30 +432,29 @@ private:
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
-        ast::visit(member,
-            [&](const ast::Node &, const auto &declaration) {
-              using T = std::decay_t<decltype(declaration)>;
-              const auto &name = declaration.name.text;
-              auto key = owner + "::" + name;
-              record_symbol(declaration.id,
-                            std::is_same_v<T, ast::Function>
-                                ? "associated-function"
-                                : "associated-constant",
-                            key, owner_symbol);
-              if (!associated_names.insert(name).second ||
-                  associated_functions_.contains(key) ||
-                  associated_constants_.contains(key))
-                report(declaration.span,
-                       "duplicate associated item '" + name + "'");
-              if constexpr (std::is_same_v<T, ast::Function>) {
-                associated_functions_[key].ast = &declaration;
-                associated_functions_[key].owner = owner;
-              } else {
-                static_assert(std::is_same_v<T, ast::Constant>);
-                associated_constants_[key].ast = &declaration;
-                associated_constants_[key].owner = owner;
-              }
-            });
+        ast::visit(member, [&](const ast::Node &, const auto &declaration) {
+          using T = std::decay_t<decltype(declaration)>;
+          const auto &name = declaration.name.text;
+          auto key = owner + "::" + name;
+          record_symbol(declaration.id,
+                        std::is_same_v<T, ast::Function>
+                            ? "associated-function"
+                            : "associated-constant",
+                        key, owner_symbol);
+          if (!associated_names.insert(name).second ||
+              associated_functions_.contains(key) ||
+              associated_constants_.contains(key))
+            report(declaration.span,
+                   "duplicate associated item '" + name + "'");
+          if constexpr (std::is_same_v<T, ast::Function>) {
+            associated_functions_[key].ast = &declaration;
+            associated_functions_[key].owner = owner;
+          } else {
+            static_assert(std::is_same_v<T, ast::Constant>);
+            associated_constants_[key].ast = &declaration;
+            associated_constants_[key].owner = owner;
+          }
+        });
       }
     }
 
@@ -883,8 +882,7 @@ private:
         *expression,
         ast::Overloaded{
             [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
-              return {
-                  literal_type(p.literal.spelling, expected, node.span)};
+              return {literal_type(p.literal.spelling, expected, node.span)};
             },
             [&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
               return {ty(Ty::Kind::Bool)};
@@ -897,14 +895,18 @@ private:
               inner.adjustments.clear();
               return inner;
             },
-            [&](const ast::Expr &, const ast::PathExpr &) { return check_path(expression); },
+            [&](const ast::Expr &, const ast::PathExpr &) {
+              return check_path(expression);
+            },
             [&](const ast::Expr &, const ast::ArrayExpr &) {
               return check_array(expression, expected);
             },
             [&](const ast::Expr &, const ast::RepeatArrayExpr &) {
               return check_repeat_array(expression, expected);
             },
-            [&](const ast::Expr &, const ast::StructExpr &) { return check_struct(expression); },
+            [&](const ast::Expr &, const ast::StructExpr &) {
+              return check_struct(expression);
+            },
             [&](const ast::Expr &, const ast::BlockExpr &p) {
               return check_block(*p.block, expected);
             },
@@ -914,32 +916,48 @@ private:
             [&](const ast::Expr &, const ast::LoopExpr &) {
               return check_loop(expression, expected);
             },
-            [&](const ast::Expr &, const ast::WhileExpr &) { return check_while(expression); },
+            [&](const ast::Expr &, const ast::WhileExpr &) {
+              return check_while(expression);
+            },
             [&](const ast::Expr &, const ast::UnaryExpr &) {
               return check_unary(expression, expected);
             },
-            [&](const ast::Expr &, const ast::BorrowExpr &) { return check_borrow(expression); },
-            [&](const ast::Expr &, const ast::BinaryExpr &) { return check_binary(expression); },
+            [&](const ast::Expr &, const ast::BorrowExpr &) {
+              return check_borrow(expression);
+            },
+            [&](const ast::Expr &, const ast::BinaryExpr &) {
+              return check_binary(expression);
+            },
             [&](const ast::Expr &, const ast::AssignExpr &) {
               return check_assignment(expression);
             },
             [&](const ast::Expr &, const ast::CompoundAssignExpr &) {
               return check_compound_assignment(expression);
             },
-            [&](const ast::Expr &, const ast::CastExpr &) { return check_cast(expression); },
-            [&](const ast::Expr &, const ast::CallExpr &) { return check_call(expression); },
+            [&](const ast::Expr &, const ast::CastExpr &) {
+              return check_cast(expression);
+            },
+            [&](const ast::Expr &, const ast::CallExpr &) {
+              return check_call(expression);
+            },
             [&](const ast::Expr &, const ast::MethodCallExpr &) {
               return check_method(expression);
             },
-            [&](const ast::Expr &, const ast::FieldExpr &) { return check_field(expression); },
-            [&](const ast::Expr &, const ast::IndexExpr &) { return check_index(expression); },
+            [&](const ast::Expr &, const ast::FieldExpr &) {
+              return check_field(expression);
+            },
+            [&](const ast::Expr &, const ast::IndexExpr &) {
+              return check_index(expression);
+            },
             [&](const ast::Expr &, const ast::BreakExpr &) {
               return check_break(expression, expected);
             },
             [&](const ast::Expr &, const ast::ContinueExpr &) {
               return check_continue(expression);
             },
-            [&](const ast::Expr &, const ast::ReturnExpr &) { return check_return(expression); }});
+            [&](const ast::Expr &, const ast::ReturnExpr &) {
+              return check_return(expression);
+            }});
     if (expected && !ast::get_if<ast::ParenExpr>(*expression) &&
         coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);

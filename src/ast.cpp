@@ -54,7 +54,8 @@ public:
   std::string print(const Crate &crate) {
     heading("Crate", crate, 0);
     for (const auto &item : crate.items)
-      visit(item, [&](const auto &, const auto &value) { declaration(value, 1); });
+      visit(item,
+            [&](const auto &, const auto &value) { declaration(value, 1); });
     return out_.str();
   }
 
@@ -92,27 +93,30 @@ private:
     }
   }
   void type(const TypePtr &syntax) {
-    visit(*syntax,
-          Overloaded{[&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
-                     [&](const TypeSyntax &, const PathType &value) { path(value.path); },
-                     [&](const TypeSyntax &, const ReferenceType &value) {
-                       out_ << '&';
-                       if (value.lifetime)
-                         out_ << value.lifetime->text << ' ';
-                       if (value.mutability == Mutability::Mutable)
-                         out_ << "mut ";
-                       type(value.referent);
-                     },
-                     [&](const TypeSyntax &, const ArrayType &value) {
-                       out_ << '[';
-                       type(value.element);
-                       out_ << "; " << source_.slice(value.length->span) << ']';
-                     },
-                     [&](const TypeSyntax &, const ParenType &value) {
-                       out_ << '(';
-                       type(value.inner);
-                       out_ << ')';
-                     }});
+    visit(
+        *syntax,
+        Overloaded{[&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
+                   [&](const TypeSyntax &, const PathType &value) {
+                     path(value.path);
+                   },
+                   [&](const TypeSyntax &, const ReferenceType &value) {
+                     out_ << '&';
+                     if (value.lifetime)
+                       out_ << value.lifetime->text << ' ';
+                     if (value.mutability == Mutability::Mutable)
+                       out_ << "mut ";
+                     type(value.referent);
+                   },
+                   [&](const TypeSyntax &, const ArrayType &value) {
+                     out_ << '[';
+                     type(value.element);
+                     out_ << "; " << source_.slice(value.length->span) << ']';
+                   },
+                   [&](const TypeSyntax &, const ParenType &value) {
+                     out_ << '(';
+                     type(value.inner);
+                     out_ << ')';
+                   }});
   }
   void generics(const std::optional<GenericParameters> &value) {
     if (!value)
@@ -137,18 +141,19 @@ private:
     indent(level);
     out_ << "Where\n";
     for (const auto &predicate : value->predicates)
-      visit(predicate, Overloaded{[&](const Node &, const LifetimePredicate &p) {
-                              indent(level + 1);
-                              out_ << p.subject.text;
-                              bounds(p.bounds);
-                              out_ << '\n';
-                            },
-                            [&](const Node &, const TypePredicate &p) {
-                              indent(level + 1);
-                              type(p.subject);
-                              bounds(p.bounds);
-                              out_ << '\n';
-                            }});
+      visit(predicate,
+            Overloaded{[&](const Node &, const LifetimePredicate &p) {
+                         indent(level + 1);
+                         out_ << p.subject.text;
+                         bounds(p.bounds);
+                         out_ << '\n';
+                       },
+                       [&](const Node &, const TypePredicate &p) {
+                         indent(level + 1);
+                         type(p.subject);
+                         bounds(p.bounds);
+                         out_ << '\n';
+                       }});
   }
   void use_tree(const UseTree &tree) {
     if (tree.prefix.root == PathRoot::Absolute)
@@ -159,34 +164,34 @@ private:
       out_ << name_text(tree.prefix.segments[i]);
     }
     visit(tree,
-        Overloaded{[&](const UseTree &, const NameImport &name) {
-                     if (name.alias) {
-                       out_ << " as ";
-                       std::visit(Overloaded{[&](const Identifier &value) {
-                                               out_ << value.text;
-                                             },
-                                             [&](const UnderscoreAlias &) {
-                                               out_ << '_';
-                                             }},
-                                  *name.alias);
-                     }
-                   },
-                   [&](const UseTree &owner, const GlobImport &) {
-                     if (!owner.prefix.segments.empty())
-                       out_ << "::";
-                     out_ << '*';
-                   },
-                   [&](const UseTree &owner, const GroupImport &group) {
-                     if (!owner.prefix.segments.empty())
-                       out_ << "::";
-                     out_ << '{';
-                     for (std::size_t i = 0; i < group.children.size(); ++i) {
-                       if (i)
-                         out_ << ", ";
-                       use_tree(group.children[i]);
-                     }
-                     out_ << '}';
-                   }});
+          Overloaded{[&](const UseTree &, const NameImport &name) {
+                       if (name.alias) {
+                         out_ << " as ";
+                         std::visit(Overloaded{[&](const Identifier &value) {
+                                                 out_ << value.text;
+                                               },
+                                               [&](const UnderscoreAlias &) {
+                                                 out_ << '_';
+                                               }},
+                                    *name.alias);
+                       }
+                     },
+                     [&](const UseTree &owner, const GlobImport &) {
+                       if (!owner.prefix.segments.empty())
+                         out_ << "::";
+                       out_ << '*';
+                     },
+                     [&](const UseTree &owner, const GroupImport &group) {
+                       if (!owner.prefix.segments.empty())
+                         out_ << "::";
+                       out_ << '{';
+                       for (std::size_t i = 0; i < group.children.size(); ++i) {
+                         if (i)
+                           out_ << ", ";
+                         use_tree(group.children[i]);
+                       }
+                       out_ << '}';
+                     }});
   }
   void declaration(const Use &value, int level) {
     heading("Use", value, level);
@@ -207,16 +212,16 @@ private:
       indent(level + 1);
       out_ << "Self ";
       visit(self, Overloaded{[&](const SelfParam &, const ValueSelf &p) {
-                              if (p.mutability == Mutability::Mutable)
-                                out_ << "mut ";
-                            },
-                            [&](const SelfParam &, const ReferenceSelf &p) {
-                              out_ << '&';
-                              if (p.lifetime)
-                                out_ << p.lifetime->text << ' ';
-                              if (p.mutability == Mutability::Mutable)
-                                out_ << "mut ";
-                            }});
+                               if (p.mutability == Mutability::Mutable)
+                                 out_ << "mut ";
+                             },
+                             [&](const SelfParam &, const ReferenceSelf &p) {
+                               out_ << '&';
+                               if (p.lifetime)
+                                 out_ << p.lifetime->text << ' ';
+                               if (p.mutability == Mutability::Mutable)
+                                 out_ << "mut ";
+                             }});
       out_ << "self\n";
     }
     for (const auto &parameter : value.signature.parameters) {
@@ -275,7 +280,8 @@ private:
     }
     where_clause(value.where_clause, level + 1);
     for (const auto &member : value.members)
-      visit(member, [&](const auto &, const auto &p) { declaration(p, level + 1); });
+      visit(member,
+            [&](const auto &, const auto &p) { declaration(p, level + 1); });
   }
   void expression(const ExprPtr &value, int level);
   void block(const Block &value, int level);
@@ -331,132 +337,136 @@ void Printer::conditional(const IfExpr &value, int level) {
                *value.else_branch);
 }
 void Printer::expression(const ExprPtr &value, int level) {
-  auto label = [&](const Expr &node, std::string text) { heading(text, node, level); };
+  auto label = [&](const Expr &node, std::string text) {
+    heading(text, node, level);
+  };
   auto child = [&](const ExprPtr &p) { expression(p, level + 1); };
   visit(*value,
-        Overloaded{[&](const Expr &node, const IntegerExpr &p) {
-                     label(node, "Integer " + p.literal.spelling);
-                   },
-                   [&](const Expr &node, const BooleanExpr &p) {
-                     label(node, p.value ? "Boolean true" : "Boolean false");
-                   },
-                   [&](const Expr &node, const UnitExpr &) { label(node, "Unit"); },
-                   [&](const Expr &node, const PathExpr &p) {
-                     label(node, "Path");
-                     indent(level + 1);
-                     path(p.path);
-                     out_ << '\n';
-                   },
-                   [&](const Expr &node, const ParenExpr &p) {
-                     label(node, "Paren");
-                     child(p.inner);
-                   },
-                   [&](const Expr &node, const ArrayExpr &p) {
-                     label(node, "Array");
-                     for (const auto &element : p.elements)
-                       child(element);
-                   },
-                   [&](const Expr &node, const RepeatArrayExpr &p) {
-                     label(node, "RepeatArray");
-                     child(p.element);
-                     child(p.count);
-                   },
-                   [&](const Expr &node, const StructExpr &p) {
-                     label(node, "StructExpr");
-                     indent(level + 1);
-                     path(p.path);
-                     out_ << '\n';
-                     for (const auto &field : p.fields) {
-                       heading("FieldInit " + field.name.text, field,
-                               level + 1);
-                       expression(field.value, level + 2);
-                     }
-                   },
-                   [&](const Expr &node, const BlockExpr &p) {
-                     label(node, "BlockExpr");
-                     block(*p.block, level + 1);
-                   },
-                   [&](const Expr &node, const IfExpr &p) {
-                     label(node, "If");
-                     conditional(p, level + 1);
-                   },
-                   [&](const Expr &node, const LoopExpr &p) {
-                     label(node, "Loop");
-                     block(*p.body, level + 1);
-                   },
-                   [&](const Expr &node, const WhileExpr &p) {
-                     label(node, "While");
-                     child(p.condition);
-                     block(*p.body, level + 1);
-                   },
-                   [&](const Expr &node, const UnaryExpr &p) {
-                     label(node, "Unary " + std::string(spelling(p.op)));
-                     child(p.operand);
-                   },
-                   [&](const Expr &node, const BorrowExpr &p) {
-                     label(node, p.mutability == Mutability::Mutable ? "Borrow &mut"
-                                                               : "Borrow &");
-                     child(p.operand);
-                   },
-                   [&](const Expr &node, const BinaryExpr &p) {
-                     label(node, "Binary " + std::string(spelling(p.op)));
-                     child(p.left);
-                     child(p.right);
-                   },
-                   [&](const Expr &node, const AssignExpr &p) {
-                     label(node, "Assign =");
-                     child(p.target);
-                     child(p.value);
-                   },
-                   [&](const Expr &node, const CompoundAssignExpr &p) {
-                     label(node, "CompoundAssign " + std::string(spelling(p.op)));
-                     child(p.target);
-                     child(p.value);
-                   },
-                   [&](const Expr &node, const CastExpr &p) {
-                     label(node, "Cast");
-                     child(p.value);
-                     indent(level + 1);
-                     type(p.target_type);
-                     out_ << '\n';
-                   },
-                   [&](const Expr &node, const CallExpr &p) {
-                     label(node, "Call");
-                     child(p.callee);
-                     for (const auto &arg : p.arguments)
-                       child(arg);
-                   },
-                   [&](const Expr &node, const MethodCallExpr &p) {
-                     label(node, "MethodCall " + p.method.text);
-                     child(p.receiver);
-                     if (p.generic_args) {
-                       indent(level + 1);
-                       arguments(*p.generic_args);
-                       out_ << '\n';
-                     }
-                     for (const auto &arg : p.arguments)
-                       child(arg);
-                   },
-                   [&](const Expr &node, const FieldExpr &p) {
-                     label(node, "Field " + p.field.text);
-                     child(p.base);
-                   },
-                   [&](const Expr &node, const IndexExpr &p) {
-                     label(node, "Index");
-                     child(p.base);
-                     child(p.index);
-                   },
-                   [&](const Expr &node, const BreakExpr &p) {
-                     label(node, "Break");
-                     if (p.value)
-                       child(*p.value);
-                   },
-                   [&](const Expr &node, const ContinueExpr &) { label(node, "Continue"); },
-                   [&](const Expr &node, const ReturnExpr &p) {
-                     label(node, "Return");
-                     if (p.value)
-                       child(*p.value);
-                   }});
+        Overloaded{
+            [&](const Expr &node, const IntegerExpr &p) {
+              label(node, "Integer " + p.literal.spelling);
+            },
+            [&](const Expr &node, const BooleanExpr &p) {
+              label(node, p.value ? "Boolean true" : "Boolean false");
+            },
+            [&](const Expr &node, const UnitExpr &) { label(node, "Unit"); },
+            [&](const Expr &node, const PathExpr &p) {
+              label(node, "Path");
+              indent(level + 1);
+              path(p.path);
+              out_ << '\n';
+            },
+            [&](const Expr &node, const ParenExpr &p) {
+              label(node, "Paren");
+              child(p.inner);
+            },
+            [&](const Expr &node, const ArrayExpr &p) {
+              label(node, "Array");
+              for (const auto &element : p.elements)
+                child(element);
+            },
+            [&](const Expr &node, const RepeatArrayExpr &p) {
+              label(node, "RepeatArray");
+              child(p.element);
+              child(p.count);
+            },
+            [&](const Expr &node, const StructExpr &p) {
+              label(node, "StructExpr");
+              indent(level + 1);
+              path(p.path);
+              out_ << '\n';
+              for (const auto &field : p.fields) {
+                heading("FieldInit " + field.name.text, field, level + 1);
+                expression(field.value, level + 2);
+              }
+            },
+            [&](const Expr &node, const BlockExpr &p) {
+              label(node, "BlockExpr");
+              block(*p.block, level + 1);
+            },
+            [&](const Expr &node, const IfExpr &p) {
+              label(node, "If");
+              conditional(p, level + 1);
+            },
+            [&](const Expr &node, const LoopExpr &p) {
+              label(node, "Loop");
+              block(*p.body, level + 1);
+            },
+            [&](const Expr &node, const WhileExpr &p) {
+              label(node, "While");
+              child(p.condition);
+              block(*p.body, level + 1);
+            },
+            [&](const Expr &node, const UnaryExpr &p) {
+              label(node, "Unary " + std::string(spelling(p.op)));
+              child(p.operand);
+            },
+            [&](const Expr &node, const BorrowExpr &p) {
+              label(node, p.mutability == Mutability::Mutable ? "Borrow &mut"
+                                                              : "Borrow &");
+              child(p.operand);
+            },
+            [&](const Expr &node, const BinaryExpr &p) {
+              label(node, "Binary " + std::string(spelling(p.op)));
+              child(p.left);
+              child(p.right);
+            },
+            [&](const Expr &node, const AssignExpr &p) {
+              label(node, "Assign =");
+              child(p.target);
+              child(p.value);
+            },
+            [&](const Expr &node, const CompoundAssignExpr &p) {
+              label(node, "CompoundAssign " + std::string(spelling(p.op)));
+              child(p.target);
+              child(p.value);
+            },
+            [&](const Expr &node, const CastExpr &p) {
+              label(node, "Cast");
+              child(p.value);
+              indent(level + 1);
+              type(p.target_type);
+              out_ << '\n';
+            },
+            [&](const Expr &node, const CallExpr &p) {
+              label(node, "Call");
+              child(p.callee);
+              for (const auto &arg : p.arguments)
+                child(arg);
+            },
+            [&](const Expr &node, const MethodCallExpr &p) {
+              label(node, "MethodCall " + p.method.text);
+              child(p.receiver);
+              if (p.generic_args) {
+                indent(level + 1);
+                arguments(*p.generic_args);
+                out_ << '\n';
+              }
+              for (const auto &arg : p.arguments)
+                child(arg);
+            },
+            [&](const Expr &node, const FieldExpr &p) {
+              label(node, "Field " + p.field.text);
+              child(p.base);
+            },
+            [&](const Expr &node, const IndexExpr &p) {
+              label(node, "Index");
+              child(p.base);
+              child(p.index);
+            },
+            [&](const Expr &node, const BreakExpr &p) {
+              label(node, "Break");
+              if (p.value)
+                child(*p.value);
+            },
+            [&](const Expr &node, const ContinueExpr &) {
+              label(node, "Continue");
+            },
+            [&](const Expr &node, const ReturnExpr &p) {
+              label(node, "Return");
+              if (p.value)
+                child(*p.value);
+            }});
 }
 
 } // namespace

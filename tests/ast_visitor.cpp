@@ -7,7 +7,8 @@
 
 namespace ast = rx::ast;
 struct IdentityVisitor {
-  template <class T> ast::NodeId operator()(const ast::Node &node, const T &) const {
+  template <class T>
+  ast::NodeId operator()(const ast::Node &node, const T &) const {
     return node.id;
   }
 };
@@ -19,10 +20,14 @@ struct DifferentReturns {
   void operator()(const ast::Expr &, const ast::BinaryExpr &) {}
 };
 struct MutablePayload {
-  template <class T> void operator()(const ast::Node &, T &) requires (!std::is_const_v<T>) {}
+  template <class T>
+  void operator()(const ast::Node &, T &)
+    requires(!std::is_const_v<T>)
+  {}
 };
 struct ReferenceVisitor {
-  template <class P> const ast::NodeId &operator()(const ast::Node &node, const P &) {
+  template <class P>
+  const ast::NodeId &operator()(const ast::Node &node, const P &) {
     return node.id;
   }
 };
@@ -30,7 +35,9 @@ struct WrongOwner {
   template <class P> void operator()(const ast::TypeSyntax &, const P &) {}
 };
 struct DifferentItems {
-  template <class P> int operator()(const ast::Node &, const P &) const { return 0; }
+  template <class P> int operator()(const ast::Node &, const P &) const {
+    return 0;
+  }
   void operator()(const ast::Function &, const ast::Function &) const {}
 };
 static_assert(ast::ExhaustiveVisitor<IdentityVisitor, ast::Expr>);
@@ -48,9 +55,10 @@ static_assert(!ast::ExhaustiveVisitor<MutablePayload, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<IdentityVisitor, int>);
 static_assert(!ast::ExhaustiveVisitor<WrongOwner, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<DifferentItems, ast::Item>);
-static_assert(std::same_as<decltype(ast::visit(std::declval<const ast::Expr &>(),
-                                            std::declval<ReferenceVisitor &>())),
-                           const ast::NodeId &>);
+static_assert(
+    std::same_as<decltype(ast::visit(std::declval<const ast::Expr &>(),
+                                     std::declval<ReferenceVisitor &>())),
+                 const ast::NodeId &>);
 
 struct BinaryObserver : ast::DefaultVisitor {
   using DefaultVisitor::enter;
@@ -86,15 +94,21 @@ struct WrongControl : ast::DefaultVisitor {
   bool enter(const ast::Expr &, const ast::BinaryExpr &) { return true; }
 };
 struct MissingBinary {
-  template <class P> requires (!std::same_as<P, ast::BinaryExpr>)
-  ast::WalkControl enter(const ast::Node &, const P &) { return ast::WalkControl::Continue; }
+  template <class P>
+    requires(!std::same_as<P, ast::BinaryExpr>)
+  ast::WalkControl enter(const ast::Node &, const P &) {
+    return ast::WalkControl::Continue;
+  }
   template <class P> void leave(const ast::Node &, const P &) {}
 };
 struct BothInterfaces : BinaryObserver {
   int callback_calls{};
-  template <class P> void operator()(const ast::Node &, const P &) { ++callback_calls; }
+  template <class P> void operator()(const ast::Node &, const P &) {
+    ++callback_calls;
+  }
 };
-template <class T> concept CanWalk = requires(const T &node, TraceVisitor &visitor) {
+template <class T>
+concept CanWalk = requires(const T &node, TraceVisitor &visitor) {
   ast::walk(node, visitor);
 };
 static_assert(!ast::TraversalVisitor<MissingBinary>);
@@ -124,19 +138,22 @@ void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   assert(item.entered.size() == 6 && item.left.size() == 6);
   TraceVisitor full;
   assert(ast::walk(crate, full) == ast::WalkResult::Completed);
-  assert(full.entered.size() == 7 && full.left.size() == 7 && full.stack.empty());
+  assert(full.entered.size() == 7 && full.left.size() == 7 &&
+         full.stack.empty());
   assert(full.entered[4] == expr.id && full.entered[5] == binary.left->id &&
          full.entered[6] == binary.right->id);
   TraceVisitor skipped;
   skipped.target = expr.id;
   skipped.action = ast::WalkControl::SkipChildren;
   assert(ast::walk(crate, skipped) == ast::WalkResult::Completed);
-  assert(skipped.entered.size() == 5 && skipped.left.size() == 5 && skipped.stack.empty());
+  assert(skipped.entered.size() == 5 && skipped.left.size() == 5 &&
+         skipped.stack.empty());
   TraceVisitor stopped;
   stopped.target = binary.left->id;
   stopped.action = ast::WalkControl::Stop;
   assert(ast::walk(crate, stopped) == ast::WalkResult::Stopped);
-  assert(stopped.entered.size() == 6 && stopped.left.size() == 6 && stopped.stack.empty());
+  assert(stopped.entered.size() == 6 && stopped.left.size() == 6 &&
+         stopped.stack.empty());
   TraceVisitor root_stop;
   root_stop.target = crate.id;
   root_stop.action = ast::WalkControl::Stop;
@@ -144,14 +161,15 @@ void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   assert(root_stop.entered.size() == 1 && root_stop.left.size() == 1);
   std::vector<ast::NodeId> callback_ids;
   assert(ast::walk(crate, [&](const ast::Node &node, const auto &) {
-    callback_ids.push_back(node.id);
-  }) == ast::WalkResult::Completed);
+           callback_ids.push_back(node.id);
+         }) == ast::WalkResult::Completed);
   assert(callback_ids == full.entered);
   callback_ids.clear();
   assert(ast::walk(crate, [&](const ast::Node &node, const auto &) {
-    callback_ids.push_back(node.id);
-    return node.id == expr.id ? ast::WalkControl::Stop : ast::WalkControl::Continue;
-  }) == ast::WalkResult::Stopped);
+           callback_ids.push_back(node.id);
+           return node.id == expr.id ? ast::WalkControl::Stop
+                                     : ast::WalkControl::Continue;
+         }) == ast::WalkResult::Stopped);
   assert(callback_ids.size() == 5);
 }
 
@@ -162,20 +180,22 @@ int main() {
   const auto &function = std::get<ast::Function>(parsed.crate->items[0]);
   const auto &statement = *function.body->statements[0];
   const auto &expr = *std::get<ast::ExprStmt>(statement.data).expression;
-  const auto id = ast::visit(expr, ast::Overloaded{
-    [&](const ast::Expr &owner, const ast::BinaryExpr &value) {
-      assert(&owner == &expr && &value == ast::get_if<ast::BinaryExpr>(expr));
-      assert(parsed.crate->source.slice(owner.span) == "1 + 2");
-      assert(value.op == ast::BinaryOp::Add);
-      return owner.id;
-    }, IdentityVisitor{}});
+  const auto id = ast::visit(
+      expr, ast::Overloaded{
+                [&](const ast::Expr &owner, const ast::BinaryExpr &value) {
+                  assert(&owner == &expr &&
+                         &value == ast::get_if<ast::BinaryExpr>(expr));
+                  assert(parsed.crate->source.slice(owner.span) == "1 + 2");
+                  assert(value.op == ast::BinaryOp::Add);
+                  return owner.id;
+                },
+                IdentityVisitor{}});
   assert(id == expr.id);
   assert(&ast::visit(expr, ReferenceVisitor{}) == &expr.id);
   assert(ast::visit(parsed.crate->items[0], IdentityVisitor{}) == function.id);
   std::vector<ast::NodeId> child_ids;
-  ast::for_each_child(expr, [&](const ast::Node &child) {
-    child_ids.push_back(child.id);
-  });
+  ast::for_each_child(
+      expr, [&](const ast::Node &child) { child_ids.push_back(child.id); });
   const auto &binary = *ast::get_if<ast::BinaryExpr>(expr);
   assert((child_ids == std::vector{binary.left->id, binary.right->id}));
   child_ids.clear();
