@@ -80,6 +80,32 @@ std::vector<std::string> verify_instruction(const Instruction &node) {
     [&](const Instruction &, const Unreachable &) {}});
   return errors;
 }
-// Module-level validation follows after instruction contracts.
-std::vector<VerificationError> verify(const Module &) { return {}; }
+namespace {
+struct Signature { Type result; std::vector<Type> parameters; };
+using Signatures = std::map<std::string, Signature>;
+void verify_function(const Function &, const Signatures &, std::vector<VerificationError> &) {}
+} // namespace
+
+std::vector<VerificationError> verify(const Module &module) {
+  std::vector<VerificationError> errors;
+  Signatures signatures;
+  auto add = [&](const std::string &name, Type result, std::vector<Type> parameters) {
+    auto error = [&](const char *message) { errors.push_back({name, {}, {}, message}); };
+    if (name.empty()) error("function name is empty");
+    if (result != Type::Void && !is_value_type(result)) error("invalid function result type");
+    for (auto type : parameters)
+      if (!is_value_type(type)) error("invalid function parameter type");
+    if (!signatures.emplace(name, Signature{result, std::move(parameters)}).second)
+      error("duplicate function name");
+  };
+  for (const auto &declaration : module.declarations)
+    add(declaration.name, declaration.result, declaration.parameters);
+  for (const auto &function : module.functions) {
+    std::vector<Type> parameters;
+    for (const auto &parameter : function.parameters) parameters.push_back(parameter.type);
+    add(function.name, function.result, std::move(parameters));
+  }
+  for (const auto &function : module.functions) verify_function(function, signatures, errors);
+  return errors;
+}
 } // namespace rx::ir

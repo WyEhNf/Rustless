@@ -47,4 +47,20 @@ template <class V> void for_each_operand(const Instruction &node, V &&visitor) {
     [&](const Instruction &, const Return &p) { if (p.value) visitor(*p.value); },
     [&](const Instruction &, const Unreachable &) {}});
 }
+template <class V> void for_each_successor(const Instruction &node, V &&visitor) {
+  visit(node, ast::Overloaded{
+    [&](const Instruction &, const Alloca &) {},
+    [&](const Instruction &, const Load &) {},
+    [&](const Instruction &, const Store &) {},
+    [&](const Instruction &, const Gep &) {},
+    [&](const Instruction &, const Binary &) {},
+    [&](const Instruction &, const Compare &) {},
+    [&](const Instruction &, const Cast &) {},
+    [&](const Instruction &, const Call &) {},
+    [&](const Instruction &, const Phi &) {},
+    [&](const Instruction &, const Branch &p) { visitor(p.target); },
+    [&](const Instruction &, const CondBranch &p) { visitor(p.consequent); visitor(p.alternative); },
+    [&](const Instruction &, const Return &) {},
+    [&](const Instruction &, const Unreachable &) {}});
+}
 } // namespace rx::ir
