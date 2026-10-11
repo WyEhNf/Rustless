@@ -92,10 +92,10 @@ private:
     }
   }
   void type(const TypePtr &syntax) {
-    visit(*syntax,
-          Overloaded{[&](const UnitType &) { out_ << "()"; },
-                     [&](const PathType &value) { path(value.path); },
-                     [&](const ReferenceType &value) {
+    dispatch(*syntax,
+          Overloaded{[&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
+                     [&](const TypeSyntax &, const PathType &value) { path(value.path); },
+                     [&](const TypeSyntax &, const ReferenceType &value) {
                        out_ << '&';
                        if (value.lifetime)
                          out_ << value.lifetime->text << ' ';
@@ -103,12 +103,12 @@ private:
                          out_ << "mut ";
                        type(value.referent);
                      },
-                     [&](const ArrayType &value) {
+                     [&](const TypeSyntax &, const ArrayType &value) {
                        out_ << '[';
                        type(value.element);
                        out_ << "; " << source_.slice(value.length->span) << ']';
                      },
-                     [&](const ParenType &value) {
+                     [&](const TypeSyntax &, const ParenType &value) {
                        out_ << '(';
                        type(value.inner);
                        out_ << ')';
@@ -290,18 +290,18 @@ private:
 void Printer::block(const Block &value, int level) {
   heading("Block", value, level);
   for (const auto &statement : value.statements)
-    visit(*statement,
-          Overloaded{[&](const EmptyStmt &) {
-                       heading("EmptyStmt", *statement, level + 1);
+    dispatch(*statement,
+          Overloaded{[&](const Stmt &node, const EmptyStmt &) {
+                       heading("EmptyStmt", node, level + 1);
                      },
-                     [&](const LetStmt &p) {
+                     [&](const Stmt &node, const LetStmt &p) {
                        heading("Let " +
                                    std::string(p.binding.mutability ==
                                                        Mutability::Mutable
                                                    ? "mut "
                                                    : "") +
                                    p.binding.name.text,
-                               *statement, level + 1);
+                               node, level + 1);
                        if (p.annotation) {
                          indent(level + 2);
                          type(*p.annotation);
@@ -309,11 +309,11 @@ void Printer::block(const Block &value, int level) {
                        }
                        expression(p.initializer, level + 2);
                      },
-                     [&](const ExprStmt &p) {
+                     [&](const Stmt &node, const ExprStmt &p) {
                        heading(p.termination == Termination::Semicolon
                                    ? "ExprStmt"
                                    : "ExprStmt omitted-semicolon",
-                               *statement, level + 1);
+                               node, level + 1);
                        expression(p.expression, level + 2);
                      }});
   if (value.tail) {
