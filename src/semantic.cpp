@@ -400,25 +400,6 @@ private:
       constant.type_state = ConstantInfo::TypeState::Done;
   }
 
-  static bool parse_unsigned(std::string text, std::uint64_t &value) {
-    text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
-    int base = 10;
-    std::size_t offset = 0;
-    if (text.starts_with("0x")) {
-      base = 16;
-      offset = 2;
-    } else if (text.starts_with("0o")) {
-      base = 8;
-      offset = 2;
-    } else if (text.starts_with("0b")) {
-      base = 2;
-      offset = 2;
-    }
-    auto [end, error] = std::from_chars(text.data() + offset,
-                                        text.data() + text.size(), value, base);
-    return error == std::errc{} && end == text.data() + text.size();
-  }
-
   void resolve_declarations() {
     // Register every associated item before resolving declaration types.
     for (const auto *implementation : impls_) {
@@ -541,51 +522,17 @@ private:
     constant.state = ConstantInfo::State::Done;
   }
 
-  std::pair<TyPtr, std::int64_t>
-  constant_value(const ast::ExprPtr &expression, TyPtr expected = {},
-                 std::string_view self_name = {}) {
-    if (auto *paren = ast::get_if<ast::ParenExpr>(*expression)) {
-      auto result = constant_value(paren->inner, expected, self_name);
-      record_expression(expression, ExprInfo{result.first});
-      return result;
-    }
-    if (ast::get_if<ast::BooleanExpr>(*expression)) {
-      auto type = ty(Ty::Kind::Bool);
-      record_expression(expression, ExprInfo{type});
-      return {type, std::get<ast::BooleanExpr>(expression->data).value};
-    }
-    if (ast::get_if<ast::IntegerExpr>(*expression)) {
-      auto type = literal_type(
-          std::get<ast::IntegerExpr>(expression->data).literal,
-          expected, expression->span);
-      std::string digits =
-          std::get<ast::IntegerExpr>(expression->data).literal.spelling;
-      for (auto suffix : {"usize", "isize", "u32", "i32"})
-        if (digits.ends_with(suffix))
-          digits.resize(digits.size() - std::string_view(suffix).size());
-      std::uint64_t value{};
-      parse_unsigned(digits, value);
-      record_expression(expression, ExprInfo{type});
-      return {type, static_cast<std::int64_t>(value)};
-    }
-    if (ast::get_if<ast::UnaryExpr>(*expression) &&
-        std::get<ast::UnaryExpr>(expression->data).op == ast::UnaryOp::Negate) {
-      auto [type, value] =
-          constant_value(std::get<ast::UnaryExpr>(expression->data).operand,
-                         expected, self_name);
-      if (!signed_integer(type))
-        report(expression->span, "only signed constants may be negated");
-      record_expression(expression, ExprInfo{type});
-      return {type, -value};
-    }
-    if (ast::get_if<ast::PathExpr>(*expression)) {
+  using EvaluatedConstant = std::pair<TyPtr, std::int64_t>;
+  EvaluatedConstant constant_path(const ast::Expr &node,
+                                 const ast::PathExpr &path,
+                                 std::string_view self_name) {
       auto name =
-          ast::path_name(std::get<ast::PathExpr>(expression->data).path);
+          ast::path_name(path.path);
       if (!self_name.empty() && name.starts_with("Self::"))
         name = std::string(self_name) + name.substr(4);
       if (auto it = constants_.find(name); it != constants_.end()) {
         evaluate_constant(it->second);
-        record_expression(expression,
+        record_node(node,
                           ExprInfo{it->second.type, false, false, false,
                                    symbol_for(it->second.ast->id), name});
         return {it->second.type, it->second.value};
@@ -593,19 +540,57 @@ private:
       if (auto it = associated_constants_.find(name);
           it != associated_constants_.end()) {
         evaluate_constant(it->second);
-        record_expression(expression,
+        record_node(node,
                           ExprInfo{it->second.type, false, false, false,
                                    symbol_for(it->second.ast->id), name});
         return {it->second.type, it->second.value};
       }
-      report(expression->span, "constant path does not resolve to a constant");
+      report(node.span, "constant path does not resolve to a constant");
       auto error = ty(Ty::Kind::Error);
-      record_expression(expression, ExprInfo{error});
+      record_node(node, ExprInfo{error});
       return {error, 0};
-    }
-    report(expression->span, "invalid constant expression");
+
+  }
+  EvaluatedConstant constant_value(const ast::ExprPtr &expression,
+                                  TyPtr expected = {},
+                                  std::string_view self_name = {}) {
+    return ast::visit(*expression, ast::Overloaded{
+      [&](const ast::Expr &node, const ast::ParenExpr &p) -> EvaluatedConstant {
+        auto value = constant_value(p.inner, expected, self_name);
+        record_node(node, ExprInfo{value.first});
+        return value;
+      },
+      [&](const ast::Expr &node, const ast::BooleanExpr &p) -> EvaluatedConstant {
+        auto type = ty(Ty::Kind::Bool);
+        record_node(node, ExprInfo{type});
+        return {type, p.value};
+      },
+      [&](const ast::Expr &node, const ast::IntegerExpr &p) -> EvaluatedConstant {
+        auto type = literal_type(p.literal, expected, node.span);
+        auto magnitude = integer_magnitude(p.literal).value_or(0);
+        record_node(node, ExprInfo{type});
+        return {type, static_cast<std::int64_t>(magnitude)};
+      },
+      [&](const ast::Expr &node, const ast::UnaryExpr &p) -> EvaluatedConstant {
+        if (p.op != ast::UnaryOp::Negate)
+          return invalid_constant(node);
+        auto [type, value] = constant_value(p.operand, expected, self_name);
+        if (!signed_integer(type))
+          report(node.span, "only signed constants may be negated");
+        record_node(node, ExprInfo{type});
+        return {type, -value};
+      },
+      [&](const ast::Expr &node, const ast::PathExpr &p) -> EvaluatedConstant {
+        return constant_path(node, p, self_name);
+      },
+      [&](const ast::Expr &node, const auto &) -> EvaluatedConstant {
+        return invalid_constant(node);
+      }});
+  }
+  EvaluatedConstant invalid_constant(const ast::Expr &node) {
+    report(node.span, "invalid constant expression");
     auto error = ty(Ty::Kind::Error);
-    record_expression(expression, ExprInfo{error});
+    record_node(node, ExprInfo{error});
     return {error, 0};
   }
 
