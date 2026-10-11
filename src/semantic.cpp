@@ -568,6 +568,9 @@ private:
       [&](const ast::Expr &node, const ast::IntegerExpr &p) -> EvaluatedConstant {
         auto type = literal_type(p.literal, expected, node.span);
         auto magnitude = integer_magnitude(p.literal).value_or(0);
+        // Invalid magnitudes must not overflow signed arithmetic during recovery.
+        if (magnitude > std::numeric_limits<std::uint32_t>::max())
+          magnitude = 0;
         record_node(node, ExprInfo{type});
         return {type, static_cast<std::int64_t>(magnitude)};
       },
@@ -853,13 +856,12 @@ private:
         result.is_mutable, result.access_locked, result.symbol,
         result.target,     result.adjustments};
   }
-  void record_expression(const ast::ExprPtr &expression,
-                         const ExprInfo &result) {
-    record_node(*expression, result);
-  }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
+    return check_expr(*expression, std::move(expected));
+  }
+  ExprInfo check_expr(const ast::Expr &expression, TyPtr expected = {}) {
     auto result = ast::visit(
-        *expression,
+        expression,
         ast::Overloaded{
             [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
               return {literal_type(p.literal, expected, node.span)};
@@ -938,13 +940,13 @@ private:
             [&](const ast::Expr &node, const ast::ReturnExpr &p) {
               return check_return(node, p);
             }});
-    if (expected && !ast::get_if<ast::ParenExpr>(*expression) &&
+    if (expected && !ast::get_if<ast::ParenExpr>(expression) &&
         coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
       result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
                                 adjustments.end());
     }
-    record_expression(expression, result);
+    record_node(expression, result);
     return result;
   }
 
@@ -1198,8 +1200,10 @@ private:
                                    },
                                    [&](const ast::Box<ast::IfBranch> &p) {
                                      else_id = p->id;
-                                     auto result =
-                                         check_if(*p, p->data, expected);
+                                     auto result = ast::visit(*p,
+                                       [&](const ast::IfBranch &owner, const ast::IfExpr &payload) {
+                                         return check_if(owner, payload, expected);
+                                       });
                                      record_node(*p, result);
                                      return result;
                                    }},
