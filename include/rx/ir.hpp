@@ -83,6 +83,32 @@ struct Gep {
   Operand offset;
 };
 
+enum class BinaryOp { Add, Sub, Mul, SDiv, UDiv, SRem, URem, And, Or, Xor, Shl, LShr, AShr };
+enum class CastOp { ZExt, Trunc, PtrToInt, IntToPtr };
+struct Binary {
+  Result result;
+  BinaryOp op;
+  Operand left;
+  Operand right;
+};
+struct Compare {
+  ValueId result;
+  Predicate predicate;
+  Operand left;
+  Operand right;
+};
+struct Cast {
+  Result result;
+  CastOp op;
+  Operand operand;
+};
+struct Call {
+  // A missing result means a void call, rather than an SSA id of zero.
+  std::optional<Result> result;
+  std::string callee;
+  std::vector<Operand> arguments;
+};
+
 struct Instruction {
   Op op{Op::Unreachable};
   ValueId result{}; // Zero means no result; SSA IDs start at one.
