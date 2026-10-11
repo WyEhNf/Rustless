@@ -919,11 +919,11 @@ private:
             [&](const ast::Expr &node, const ast::WhileExpr &while_expr) {
               return check_while(node, while_expr);
             },
-            [&](const ast::Expr &, const ast::UnaryExpr &) {
-              return check_unary(expression, expected);
+            [&](const ast::Expr &node, const ast::UnaryExpr &unary) {
+              return check_unary(node, unary, expected);
             },
-            [&](const ast::Expr &, const ast::BorrowExpr &) {
-              return check_borrow(expression);
+            [&](const ast::Expr &node, const ast::BorrowExpr &borrow) {
+              return check_borrow(node, borrow);
             },
             [&](const ast::Expr &, const ast::BinaryExpr &) {
               return check_binary(expression);
@@ -1278,8 +1278,7 @@ private:
     return {ty(Ty::Kind::Unit)};
   }
 
-  ExprInfo check_borrow(const ast::ExprPtr &expression) {
-    const auto &borrow = std::get<ast::BorrowExpr>(expression->data);
+  ExprInfo check_borrow(const ast::Expr &node, const ast::BorrowExpr &borrow) {
     auto operand = check_expr(borrow.operand);
     bool mutable_ref = borrow.mutability == ast::Mutability::Mutable;
     if (mutable_ref &&
@@ -1287,14 +1286,13 @@ private:
       report(borrow.operator_span, "mutable borrow requires a mutable place");
     return {compound(Ty::Kind::Ref, operand.type, mutable_ref)};
   }
-  ExprInfo check_unary(const ast::ExprPtr &expression, const TyPtr &expected) {
-    const auto &unary = std::get<ast::UnaryExpr>(expression->data);
+  ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary, const TyPtr &expected) {
     auto op = unary.op;
     auto operand = check_expr(unary.operand, expected);
     if (op == ast::UnaryOp::Dereference) {
       if (operand.type->kind != Ty::Kind::Ref &&
           operand.type->kind != Ty::Kind::Box) {
-        report(expression->span,
+        report(node.span,
                "type " + type_name(operand.type) + " cannot be dereferenced");
         return {};
       }
@@ -1312,11 +1310,11 @@ private:
       scalar = scalar->element;
     if (op == ast::UnaryOp::Not) {
       if (!integer(scalar) && scalar->kind != Ty::Kind::Bool)
-        report(expression->span, "operator ! requires bool or integer");
+        report(node.span, "operator ! requires bool or integer");
       return {scalar};
     }
     if (op == ast::UnaryOp::Negate && !signed_integer(scalar))
-      report(expression->span, "unary minus requires a signed integer");
+      report(node.span, "unary minus requires a signed integer");
     return {scalar};
   }
 
