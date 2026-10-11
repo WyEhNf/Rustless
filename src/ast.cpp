@@ -208,6 +208,72 @@ private:
   const SourceFile &source_;
 };
 
+void Printer::block(const Block &value, int level) {
+  heading("Block", value, level);
+  for (const auto &statement : value.statements) visit(*statement, Overloaded{
+    [&](const EmptyStmt &) { heading("EmptyStmt", *statement, level + 1); },
+    [&](const LetStmt &p) {
+      heading("Let " + std::string(p.binding.mutability == Mutability::Mutable ? "mut " : "")
+          + p.binding.name.text, *statement, level + 1);
+      if (p.annotation) { indent(level + 2); type(*p.annotation); out_ << '\n'; }
+      expression(p.initializer, level + 2);
+    },
+    [&](const ExprStmt &p) {
+      heading(p.termination == Termination::Semicolon ? "ExprStmt" : "ExprStmt omitted-semicolon", *statement, level + 1);
+      expression(p.expression, level + 2);
+    }
+  });
+  if (value.tail) { indent(level + 1); out_ << "TailExpr\n"; expression(*value.tail, level + 2); }
+}
+void Printer::conditional(const IfExpr &value, int level) {
+  expression(value.condition, level);
+  block(*value.then_block, level);
+  if (value.else_branch) std::visit(Overloaded{
+    [&](const Box<Block> &p) { block(*p, level); },
+    [&](const Box<IfBranch> &p) { heading("If", *p, level); conditional(p->data, level + 1); }
+  }, *value.else_branch);
+}
+void Printer::expression(const ExprPtr &value, int level) {
+  auto label = [&](std::string text) { heading(text, *value, level); };
+  auto child = [&](const ExprPtr &p) { expression(p, level + 1); };
+  visit(*value, Overloaded{
+    [&](const IntegerExpr &p) { label("Integer " + p.literal.spelling); },
+    [&](const BooleanExpr &p) { label(p.value ? "Boolean true" : "Boolean false"); },
+    [&](const UnitExpr &) { label("Unit"); },
+    [&](const PathExpr &p) { label("Path"); indent(level + 1); path(p.path); out_ << '\n'; },
+    [&](const ParenExpr &p) { label("Paren"); child(p.inner); },
+    [&](const ArrayExpr &p) { label("Array"); for (const auto &element : p.elements) child(element); },
+    [&](const RepeatArrayExpr &p) { label("RepeatArray"); child(p.element); child(p.count); },
+    [&](const StructExpr &p) {
+      label("StructExpr"); indent(level + 1); path(p.path); out_ << '\n';
+      for (const auto &field : p.fields) {
+        heading("FieldInit " + field.name.text, field, level + 1); expression(field.value, level + 2);
+      }
+    },
+    [&](const BlockExpr &p) { label("BlockExpr"); block(*p.block, level + 1); },
+    [&](const IfExpr &p) { label("If"); conditional(p, level + 1); },
+    [&](const LoopExpr &p) { label("Loop"); block(*p.body, level + 1); },
+    [&](const WhileExpr &p) { label("While"); child(p.condition); block(*p.body, level + 1); },
+    [&](const UnaryExpr &p) { label("Unary " + std::string(spelling(p.op))); child(p.operand); },
+    [&](const BorrowExpr &p) { label(p.mutability == Mutability::Mutable ? "Borrow &mut" : "Borrow &"); child(p.operand); },
+    [&](const BinaryExpr &p) { label("Binary " + std::string(spelling(p.op))); child(p.left); child(p.right); },
+    [&](const AssignExpr &p) { label("Assign ="); child(p.target); child(p.value); },
+    [&](const CompoundAssignExpr &p) { label("CompoundAssign " + std::string(spelling(p.op))); child(p.target); child(p.value); },
+    [&](const CastExpr &p) { label("Cast"); child(p.value); indent(level + 1); type(p.target_type); out_ << '\n'; },
+    [&](const CallExpr &p) { label("Call"); child(p.callee); for (const auto &arg : p.arguments) child(arg); },
+    [&](const MethodCallExpr &p) {
+      label("MethodCall " + p.method.text); child(p.receiver);
+      if (p.generic_args) { indent(level + 1); arguments(*p.generic_args); out_ << '\n'; }
+      for (const auto &arg : p.arguments) child(arg);
+    },
+    [&](const FieldExpr &p) { label("Field " + p.field.text); child(p.base); },
+    [&](const IndexExpr &p) { label("Index"); child(p.base); child(p.index); },
+    [&](const BreakExpr &p) { label("Break"); if (p.value) child(*p.value); },
+    [&](const ContinueExpr &) { label("Continue"); },
+    [&](const ReturnExpr &p) { label("Return"); if (p.value) child(*p.value); }
+  });
+}
+
 } // namespace
 std::string dump(const Crate &crate) { return Printer(crate).print(crate); }
 } // namespace rx::ast
