@@ -4,17 +4,21 @@
 
 #include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace rx::ir {
 
 enum class Type { Void, I1, I8, I32, Ptr };
 
+struct ConstantOperand { std::uint32_t bits; };
+struct LocalOperand { ValueId id; };
+struct GlobalOperand { std::string symbol; };
 struct Operand {
-  Type type{Type::Void};
-  enum class Kind { Constant, Local, Global } kind{Kind::Constant};
-  std::uint32_t value{};
-  std::string symbol;
+  using Data = std::variant<ConstantOperand, LocalOperand, GlobalOperand>;
+  Operand(Type type, Data data) : type(type), data(std::move(data)) {}
+  Type type;
+  Data data;
 
   static Operand constant(Type type, std::uint32_t bits);
   static Operand local(Type type, ValueId id);

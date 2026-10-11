@@ -9,13 +9,12 @@ namespace rx::ir {
 namespace {
 
 std::string value(const Operand &operand) {
-  if (operand.kind == Operand::Kind::Local)
-    return "%v" + std::to_string(operand.value);
-  if (operand.kind == Operand::Kind::Global)
-    return "@" + operand.symbol;
-  if (operand.type == Type::Ptr)
-    return "null";
-  return std::to_string(operand.value);
+  return std::visit(ast::Overloaded{
+    [](const LocalOperand &p) { return "%v" + std::to_string(p.id.value); },
+    [](const GlobalOperand &p) { return "@" + p.symbol; },
+    [&](const ConstantOperand &p) {
+      return operand.type == Type::Ptr ? std::string("null") : std::to_string(p.bits);
+    }}, operand.data);
 }
 
 std::string typed(const Operand &operand) {

@@ -12,9 +12,9 @@ int main() {
   const auto one = Operand::constant(Type::I32, 1);
   const auto condition = Operand::local(Type::I1, ValueId{1});
   const auto external = Operand::global("printInt");
-  assert(one.kind == Operand::Kind::Constant && one.value == 1);
-  assert(condition.kind == Operand::Kind::Local && condition.value == 1);
-  assert(external.kind == Operand::Kind::Global && external.type == Type::Ptr);
+  assert(std::get<ConstantOperand>(one.data).bits == 1);
+  assert(std::get<LocalOperand>(condition.data).id == ValueId{1});
+  assert(std::get<GlobalOperand>(external.data).symbol == "printInt" && external.type == Type::Ptr);
   assert(type_name(Type::I32) == "i32" && type_name(Type::Ptr) == "ptr");
   assert(is_terminator(Op::CondBr) && !is_terminator(Op::Load));
   assert(has_side_effects(Instruction{.op = Op::Store}));
