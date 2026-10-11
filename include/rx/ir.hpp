@@ -3,6 +3,7 @@
 #include "rx/ir_ids.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -109,16 +110,30 @@ struct Call {
   std::vector<Operand> arguments;
 };
 
+struct PhiIncoming {
+  Operand value;
+  BlockId predecessor;
+};
+struct Phi {
+  Result result;
+  std::vector<PhiIncoming> incoming;
+};
+struct Branch { BlockId target; };
+struct CondBranch {
+  Operand condition;
+  BlockId consequent;
+  BlockId alternative;
+};
+struct Return { std::optional<Operand> value; };
+struct Unreachable {};
+
 struct Instruction {
-  Op op{Op::Unreachable};
-  ValueId result{}; // Zero means no result; SSA IDs start at one.
-  Type type{Type::Void};
-  std::vector<Operand> operands;
-  std::vector<BlockId> targets; // Phi predecessors or branch successors.
-  std::string callee;
-  Predicate predicate{Predicate::Eq};
-  std::uint32_t bytes{}; // Fixed-size entry-block alloca.
-  std::uint32_t alignment{4};
+  using Data = std::variant<Alloca, Load, Store, Gep, Binary, Compare, Cast,
+                           Call, Phi, Branch, CondBranch, Return, Unreachable>;
+  explicit Instruction(Data data, std::optional<Origin> origin = {})
+      : data(std::move(data)), origin(origin) {}
+  Data data;
+  std::optional<Origin> origin;
 };
 
 struct Block {
@@ -153,6 +168,9 @@ struct Module {
 };
 
 bool is_terminator(Op op);
+Op opcode(const Instruction &instruction);
+std::optional<Result> definition(const Instruction &instruction);
+bool is_terminator(const Instruction &instruction);
 bool has_side_effects(const Instruction &instruction);
 std::string type_name(Type type);
 std::string print(const Module &module);
