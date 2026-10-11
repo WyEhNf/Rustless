@@ -1,4 +1,5 @@
 #include "rx/ir_visit.hpp"
+#include "rx/ir_verify.hpp"
 
 #include <array>
 #include <sstream>
@@ -125,6 +126,8 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
 } // namespace
 
 std::string print(const Module &module) {
+  if (auto errors = verify(module); !errors.empty())
+    throw std::invalid_argument("invalid IR in " + errors.front().function + ": " + errors.front().message);
   std::ostringstream out;
   out << "; Rx LLVM IR: RV32IM / ILP32\n"
       << "target datalayout = \"e-m:e-p:32:32-i64:64-n32-S128\"\n"

@@ -1,5 +1,6 @@
 #include "rx/ir_verify.hpp"
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
 
@@ -87,10 +88,36 @@ using Signatures = std::map<std::string, Signature>;
 using Blocks = std::map<BlockId, const Block *>;
 using Predecessors = std::map<BlockId, std::set<BlockId>>;
 using Dominators = std::map<BlockId, std::set<BlockId>>;
-Dominators dominators(const Function &, const Blocks &blocks, const Predecessors &) {
+Dominators dominators(const Function &function, const Blocks &blocks, const Predecessors &predecessors) {
+  const auto entry = function.blocks.front().id;
+  std::set<BlockId> reachable;
+  std::vector<BlockId> pending{entry};
+  while (!pending.empty()) {
+    auto id = pending.back();
+    pending.pop_back();
+    if (!reachable.insert(id).second) continue;
+    for_each_successor(blocks.at(id)->instructions.back(), [&](BlockId target) { pending.push_back(target); });
+  }
   Dominators result;
   for (const auto &[id, _] : blocks)
-    for (const auto &[other, _] : blocks) result[id].insert(other);
+    result[id] = id == entry || !reachable.contains(id) ? std::set{id} : reachable;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (auto id : reachable) {
+      if (id == entry) continue;
+      auto next = reachable;
+      for (auto predecessor : predecessors.at(id)) {
+        if (!reachable.contains(predecessor)) continue;
+        std::set<BlockId> intersection;
+        std::set_intersection(next.begin(), next.end(), result.at(predecessor).begin(),
+            result.at(predecessor).end(), std::inserter(intersection, intersection.end()));
+        next = std::move(intersection);
+      }
+      next.insert(id);
+      if (next != result.at(id)) { result[id] = std::move(next); changed = true; }
+    }
+  }
   return result;
 }
 void verify_ssa(const Function &function, const Blocks &blocks, const Predecessors &predecessors,
@@ -129,7 +156,7 @@ void verify_ssa(const Function &function, const Blocks &blocks, const Predecesso
       const auto &node = block.instructions[i];
       if (const auto *phi = std::get_if<Phi>(&node.data)) {
         for (const auto &incoming : phi->incoming)
-          use(incoming.value, incoming.predecessor, blocks.at(incoming.predecessor)->instructions.size(), block.id, node);
+          use(incoming.value, incoming.predecessor, blocks.at(incoming.predecessor)->instructions.size() - 1, block.id, node);
       } else for_each_operand(node, [&](const Operand &operand) { use(operand, block.id, i, block.id, node); });
     }
 }
