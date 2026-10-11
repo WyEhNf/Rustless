@@ -7,14 +7,14 @@
 namespace rx::ir {
 
 Operand Operand::constant(Type type, std::uint32_t bits) {
-  if (type == Type::Void || (type == Type::I1 && bits > 1) ||
+  if (!is_value_type(type) || (type == Type::I1 && bits > 1) ||
       (type == Type::I8 && bits > 255) || (type == Type::Ptr && bits != 0))
     throw std::invalid_argument("constant does not fit its IR type");
   return {type, ConstantOperand{bits}};
 }
 
 Operand Operand::local(Type type, ValueId id) {
-  if (!id.value || type == Type::Void)
+  if (!id.value || !is_value_type(type))
     throw std::invalid_argument("local operand requires a value identity and type");
   return {type, LocalOperand{id}};
 }
@@ -92,6 +92,18 @@ std::string type_name(Type type) {
     return "ptr";
   }
   throw std::logic_error("unknown IR type");
+}
+
+bool is_value_type(Type type) {
+  return type == Type::I1 || type == Type::I8 || type == Type::I32 || type == Type::Ptr;
+}
+unsigned integer_width(Type type) {
+  switch (type) {
+  case Type::I1: return 1;
+  case Type::I8: return 8;
+  case Type::I32: return 32;
+  default: return 0;
+  }
 }
 
 } // namespace rx::ir

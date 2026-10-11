@@ -173,6 +173,8 @@ std::optional<Result> definition(const Instruction &instruction);
 bool is_terminator(const Instruction &instruction);
 bool has_side_effects(const Instruction &instruction);
 std::string type_name(Type type);
+bool is_value_type(Type type);
+unsigned integer_width(Type type);
 std::string print(const Module &module);
 
 } // namespace rx::ir
