@@ -917,11 +917,11 @@ private:
             [&](const ast::Expr &node, const ast::CastExpr &cast) {
               return check_cast(node, cast);
             },
-            [&](const ast::Expr &, const ast::CallExpr &) {
-              return check_call(expression);
+            [&](const ast::Expr &node, const ast::CallExpr &call) {
+              return check_call(node, call);
             },
-            [&](const ast::Expr &, const ast::MethodCallExpr &) {
-              return check_method(expression);
+            [&](const ast::Expr &node, const ast::MethodCallExpr &method) {
+              return check_method(node, method);
             },
             [&](const ast::Expr &node, const ast::FieldExpr &projection) {
               return check_field(node, projection);
@@ -1405,14 +1405,13 @@ private:
     return {destination};
   }
 
-  ExprInfo check_call(const ast::ExprPtr &expression) {
-    const auto &call = std::get<ast::CallExpr>(expression->data);
+  ExprInfo check_call(const ast::Expr &node, const ast::CallExpr &call) {
     auto callee = check_expr(call.callee);
     auto *path = ast::get_if<ast::PathExpr>(*ast::unparen(call.callee));
     auto arguments =
         path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
     if (callee.type->kind != Ty::Kind::Function) {
-      report(expression->span, "called expression is not a function");
+      report(node.span, "called expression is not a function");
       for (const auto &argument : call.arguments)
         check_expr(argument);
       return {};
@@ -1427,13 +1426,13 @@ private:
         !name.starts_with("Vec::"))
       report(call.callee->span, "functions have no type parameters");
     if (name == "get_i32" || name == "getInt")
-      return finish(check_signature(*expression, call.arguments, {}, ty(Ty::Kind::I32)));
+      return finish(check_signature(node, call.arguments, {}, ty(Ty::Kind::I32)));
     if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
         name == "printlnInt")
       return finish(
-          check_signature(*expression, call.arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
+          check_signature(node, call.arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
     if (auto it = functions_.find(name); it != functions_.end())
-      return finish(check_signature(*expression, call.arguments, it->second.parameters,
+      return finish(check_signature(node, call.arguments, it->second.parameters,
                                     it->second.result));
     if (auto it = associated_functions_.find(name);
         it != associated_functions_.end()) {
@@ -1446,26 +1445,26 @@ private:
                           ast::is_mutable(*it->second.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
-      return finish(check_signature(*expression, call.arguments, parameters, it->second.result));
+      return finish(check_signature(node, call.arguments, parameters, it->second.result));
     }
     if (name == "Box::new" || name == "Vec::new") {
       if (arguments.size() != 1) {
-        report(expression->span,
+        report(node.span,
                name.substr(0, 3) + " constructor requires one type argument");
         return finish({});
       }
       auto element = resolve_type(*arguments.front());
       if (name == "Box::new")
-        return finish(check_signature(*expression, call.arguments, {element},
+        return finish(check_signature(node, call.arguments, {element},
                                       compound(Ty::Kind::Box, element)));
       return finish(
-          check_signature(*expression, call.arguments, {}, compound(Ty::Kind::Vec, element)));
+          check_signature(node, call.arguments, {}, compound(Ty::Kind::Vec, element)));
     }
     if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
         name == "Vec::is_empty" || name == "Vec::push" ||
         name == "Vec::remove") {
       if (arguments.size() != 1) {
-        report(expression->span,
+        report(node.span,
                "container associated function requires one type argument");
         return finish({});
       }
@@ -1474,32 +1473,31 @@ private:
           name.starts_with("Box") ? Ty::Kind::Box : Ty::Kind::Vec, element);
       if (name.ends_with("clone")) {
         if (!supports(container, "Clone", "", {}))
-          report(expression->span,
+          report(node.span,
                  "clone is not available for " + type_name(container));
         return finish(check_signature(
-            *expression, call.arguments, {compound(Ty::Kind::Ref, container)}, container));
+            node, call.arguments, {compound(Ty::Kind::Ref, container)}, container));
       }
       if (name.ends_with("push"))
         return finish(check_signature(
-            *expression, call.arguments, {compound(Ty::Kind::Ref, container, true), element},
+            node, call.arguments, {compound(Ty::Kind::Ref, container, true), element},
             ty(Ty::Kind::Unit)));
       if (name.ends_with("remove"))
         return finish(check_signature(
-            *expression, call.arguments,
+            node, call.arguments,
             {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
             element));
-      return finish(check_signature(
-          expression, {compound(Ty::Kind::Ref, container)},
+      return finish(check_signature(node, call.arguments, {compound(Ty::Kind::Ref, container)},
           name.ends_with("len") ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool)));
     }
     if (name.ends_with("::clone")) {
       auto owner = name.substr(0, name.size() - 7);
       auto result = ty(Ty::Kind::Struct);
       result->name = owner;
-      return finish(check_signature(*expression, call.arguments,
+      return finish(check_signature(node, call.arguments,
                                     {compound(Ty::Kind::Ref, result)}, result));
     }
-    report(expression->span, "unknown function '" + name + "'");
+    report(node.span, "unknown function '" + name + "'");
     return finish({});
   }
 
@@ -1522,10 +1520,9 @@ private:
     return {std::move(result)};
   }
 
-  ExprInfo check_method(const ast::ExprPtr &expression) {
-    const auto &method = std::get<ast::MethodCallExpr>(expression->data);
+  ExprInfo check_method(const ast::Expr &node, const ast::MethodCallExpr &method) {
     if (!type_arguments(method.generic_args).empty())
-      report(expression->span, "method segments have no type parameters");
+      report(node.span, "method segments have no type parameters");
     auto receiver = check_expr(method.receiver);
     TyPtr base = receiver.type;
     std::vector<Adjustment> receiver_adjustments;
@@ -1553,8 +1550,8 @@ private:
           !(receiver.type->kind == Ty::Kind::Ref &&
             (receiver.type->element->kind == Ty::Kind::Vec ||
              receiver.type->element->kind == Ty::Kind::Array)))
-        report(expression->span, name + " is only available on arrays and Vec");
-      return finish(check_method_signature(*expression, method.arguments, {},
+        report(node.span, name + " is only available on arrays and Vec");
+      return finish(check_method_signature(node, method.arguments, {},
                                            name == "len" ? ty(Ty::Kind::Usize)
                                                          : ty(Ty::Kind::Bool)),
                     "builtin::" + name, {}, Adjustment::Kind::BorrowShared);
@@ -1564,17 +1561,17 @@ private:
       if (vector->kind == Ty::Kind::Ref)
         vector = vector->element;
       if (vector->kind != Ty::Kind::Vec) {
-        report(expression->span, name + " is only available on Vec");
+        report(node.span, name + " is only available on Vec");
         return finish({}, "builtin::Vec::" + name);
       }
       if (!writable(receiver))
-        report(expression->span, name + " requires mutable access to Vec");
+        report(node.span, name + " requires mutable access to Vec");
       if (name == "push")
-        return finish(check_method_signature(*expression, method.arguments, {vector->element},
+        return finish(check_method_signature(node, method.arguments, {vector->element},
                                              ty(Ty::Kind::Unit)),
                       "builtin::Vec::push", {},
                       Adjustment::Kind::BorrowMutable);
-      return finish(check_method_signature(*expression, method.arguments, {ty(Ty::Kind::Usize)},
+      return finish(check_method_signature(node, method.arguments, {ty(Ty::Kind::Usize)},
                                            vector->element),
                     "builtin::Vec::remove", {},
                     Adjustment::Kind::BorrowMutable);
@@ -1587,9 +1584,9 @@ private:
            cloned->element->kind == Ty::Kind::Array))
         cloned = cloned->element;
       if (!supports(cloned, "Clone", "", {}))
-        report(expression->span,
+        report(node.span,
                "clone is not available for " + type_name(cloned));
-      return finish(check_method_signature(*expression, method.arguments, {}, cloned),
+      return finish(check_method_signature(node, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
     if (base->kind == Ty::Kind::Struct) {
@@ -1598,16 +1595,16 @@ private:
           it != associated_functions_.end()) {
         const auto &function = it->second;
         if (!function.ast->signature.receiver.has_value()) {
-          report(expression->span, "associated function without self cannot be "
+          report(node.span, "associated function without self cannot be "
                                    "called with dot syntax");
           return finish({}, key, symbol_for(function.ast->id));
         }
         if (ast::by_reference(*function.ast->signature.receiver) &&
             ast::is_mutable(*function.ast->signature.receiver) &&
             !writable(receiver))
-          report(expression->span, "method requires a mutable receiver");
+          report(node.span, "method requires a mutable receiver");
         return finish(
-            check_method_signature(*expression, method.arguments, function.parameters,
+            check_method_signature(node, method.arguments, function.parameters,
                                    function.result),
             key, symbol_for(function.ast->id),
             ast::by_reference(*function.ast->signature.receiver)
@@ -1618,7 +1615,7 @@ private:
                 : std::nullopt);
       }
     }
-    report(expression->span, "unknown method '" + name + "'");
+    report(node.span, "unknown method '" + name + "'");
     return finish({}, name);
   }
 
