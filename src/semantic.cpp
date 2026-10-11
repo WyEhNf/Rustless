@@ -1031,44 +1031,42 @@ private:
     return {result};
   }
 
-  ExprInfo check_if(const ast::ExprPtr &expression, const TyPtr &expected) {
-    auto condition = check_expr(expression->operands[0], ty(Ty::Kind::Bool));
-    if (!same(condition.type, ty(Ty::Kind::Bool)))
-      mismatch(expression->operands[0]->span, condition.type,
-               ty(Ty::Kind::Bool));
-    auto then_value = check_expr(expression->operands[1], expected);
-    if (expression->operands.size() == 2) {
-      if (then_value.type->kind != Ty::Kind::Unit &&
-          then_value.type->kind != Ty::Kind::Never)
-        report(expression->span, "if without else requires a unit consequent");
+  ExprInfo check_if(const ast::Node &node, const ast::IfExpr &branch, const TyPtr &expected) {
+    auto condition = check_expr(branch.condition, ty(Ty::Kind::Bool));
+    if (!same(condition.type, ty(Ty::Kind::Bool))) mismatch(branch.condition->span, condition.type, ty(Ty::Kind::Bool));
+    auto then_value = check_block(*branch.then_block, expected);
+    if (!branch.else_branch) {
+      if (then_value.type->kind != Ty::Kind::Unit && then_value.type->kind != Ty::Kind::Never)
+        report(node.span, "if without else requires a unit consequent");
       return {ty(Ty::Kind::Unit)};
     }
-    auto else_value = check_expr(expression->operands[2], expected);
-    if (then_value.type->kind == Ty::Kind::Never)
-      return else_value;
-    if (else_value.type->kind == Ty::Kind::Never)
-      return then_value;
+    ast::NodeId else_id;
+    auto else_value = std::visit(ast::Overloaded{
+      [&](const ast::Box<ast::Block> &p) { else_id = p->id; return check_block(*p, expected); },
+      [&](const ast::Box<ast::IfBranch> &p) {
+        else_id = p->id;
+        auto result = check_if(*p, p->data, expected);
+        record_node(*p, result);
+        return result;
+      }
+    }, *branch.else_branch);
+    if (then_value.type->kind == Ty::Kind::Never) return else_value;
+    if (else_value.type->kind == Ty::Kind::Never) return then_value;
     if (coercible(else_value.type, then_value.type)) {
-      append_adjustments(
-          expression->operands[2]->id,
-          coercion_adjustments(else_value.type, then_value.type));
-      return then_value;
+      append_adjustments(else_id, coercion_adjustments(else_value.type, then_value.type)); return then_value;
     }
     if (coercible(then_value.type, else_value.type)) {
-      append_adjustments(
-          expression->operands[1]->id,
-          coercion_adjustments(then_value.type, else_value.type));
-      return else_value;
+      append_adjustments(branch.then_block->id, coercion_adjustments(then_value.type, else_value.type)); return else_value;
     }
-    mismatch(expression->span, else_value.type, then_value.type);
-    return {};
+    mismatch(node.span, else_value.type, then_value.type); return {};
   }
 
   ExprInfo check_loop(const ast::ExprPtr &expression, const TyPtr &expected) {
+    const auto &loop_expr = std::get<ast::LoopExpr>(expression->data);
     loops_.push_back({expected, {}});
-    auto body = check_expr(expression->operands.front());
+    auto body = check_block(*loop_expr.body);
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
-      report(expression->operands.front()->span,
+      report(loop_expr.body->span,
              "loop body must have unit type");
     auto loop = std::move(loops_.back());
     loops_.pop_back();
@@ -1083,17 +1081,18 @@ private:
 
   ExprInfo check_while(const ast::ExprPtr &expression) {
     // A condition may only break or continue loops nested inside itself.
+    const auto &while_expr = std::get<ast::WhileExpr>(expression->data);
     auto surrounding_loops = std::move(loops_);
     loops_.clear();
-    auto condition = check_expr(expression->operands[0], ty(Ty::Kind::Bool));
+    auto condition = check_expr(while_expr.condition, ty(Ty::Kind::Bool));
     loops_ = std::move(surrounding_loops);
     if (!same(condition.type, ty(Ty::Kind::Bool)))
-      mismatch(expression->operands[0]->span, condition.type,
+      mismatch(while_expr.condition->span, condition.type,
                ty(Ty::Kind::Bool));
     loops_.push_back({ty(Ty::Kind::Unit), {}});
-    auto body = check_expr(expression->operands[1], ty(Ty::Kind::Unit));
+    auto body = check_block(*while_expr.body, ty(Ty::Kind::Unit));
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
-      report(expression->operands[1]->span, "while body must have unit type");
+      report(while_expr.body->span, "while body must have unit type");
     for (const auto &value : loops_.back().break_types)
       if (value->kind != Ty::Kind::Unit)
         report(expression->span, "break with a value is not allowed in while");
@@ -1101,21 +1100,19 @@ private:
     return {ty(Ty::Kind::Unit)};
   }
 
+  ExprInfo check_borrow(const ast::ExprPtr &expression) {
+    const auto &borrow = std::get<ast::BorrowExpr>(expression->data);
+    auto operand = check_expr(borrow.operand);
+    bool mutable_ref = borrow.mutability == ast::Mutability::Mutable;
+    if (mutable_ref && ((operand.is_place && !operand.is_mutable) || operand.access_locked))
+      report(borrow.operator_span, "mutable borrow requires a mutable place");
+    return {compound(Ty::Kind::Ref, operand.type, mutable_ref)};
+  }
   ExprInfo check_unary(const ast::ExprPtr &expression, const TyPtr &expected) {
-    const auto &op = expression->text;
-    if (op == "&" || op == "&mut" || op == "&&" || op == "&&mut") {
-      auto operand = check_expr(expression->operands.front());
-      const bool mutable_ref = op.ends_with("mut");
-      if (mutable_ref &&
-          ((operand.is_place && !operand.is_mutable) || operand.access_locked))
-        report(expression->span, "mutable borrow requires a mutable place");
-      auto result = compound(Ty::Kind::Ref, operand.type, mutable_ref);
-      if (op.starts_with("&&"))
-        result = compound(Ty::Kind::Ref, result, false);
-      return {result};
-    }
-    auto operand = check_expr(expression->operands.front(), expected);
-    if (op == "*") {
+    const auto &unary = std::get<ast::UnaryExpr>(expression->data);
+    auto op = unary.op;
+    auto operand = check_expr(unary.operand, expected);
+    if (op == ast::UnaryOp::Dereference) {
       if (operand.type->kind != Ty::Kind::Ref &&
           operand.type->kind != Ty::Kind::Box) {
         report(expression->span,
@@ -1134,36 +1131,37 @@ private:
     TyPtr scalar = operand.type;
     if (scalar->kind == Ty::Kind::Ref && !scalar->is_mutable)
       scalar = scalar->element;
-    if (op == "!") {
+    if (op == ast::UnaryOp::Not) {
       if (!integer(scalar) && scalar->kind != Ty::Kind::Bool)
         report(expression->span, "operator ! requires bool or integer");
       return {scalar};
     }
-    if (op == "-" && !signed_integer(scalar))
+    if (op == ast::UnaryOp::Negate && !signed_integer(scalar))
       report(expression->span, "unary minus requires a signed integer");
     return {scalar};
   }
 
   ExprInfo check_binary(const ast::ExprPtr &expression) {
-    auto left = check_expr(expression->operands[0]);
-    auto right = check_expr(expression->operands[1], left.type);
+    const auto &binary = std::get<ast::BinaryExpr>(expression->data);
+    auto left = check_expr(binary.left);
+    auto right = check_expr(binary.right, left.type);
     auto lhs = scalar_operand(left.type);
     auto rhs = scalar_operand(right.type);
-    const auto &op = expression->text;
-    if (op == "&&" || op == "||") {
+    auto op = binary.op;
+    if (op == ast::BinaryOp::LogicalAnd || op == ast::BinaryOp::LogicalOr) {
       if (left.type->kind != Ty::Kind::Bool ||
           right.type->kind != Ty::Kind::Bool)
         report(expression->span, "logical operators require bool operands");
       return {ty(Ty::Kind::Bool)};
     }
-    if (op == "==" || op == "!=") {
+    if (op == ast::BinaryOp::Eq || op == ast::BinaryOp::Ne) {
       if (!same(lhs, rhs))
         mismatch(expression->span, rhs, lhs);
       if (!supports(lhs, "PartialEq", "", {}))
         report(expression->span, "equality requires PartialEq");
       return {ty(Ty::Kind::Bool)};
     }
-    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+    if (op == ast::BinaryOp::Lt || op == ast::BinaryOp::Le || op == ast::BinaryOp::Gt || op == ast::BinaryOp::Ge) {
       auto ordering_left = left.type;
       auto ordering_right = right.type;
       if ((ordering_left->kind == Ty::Kind::Ref) !=
@@ -1184,12 +1182,12 @@ private:
         report(expression->span, "ordering requires matching scalar operands");
       return {ty(Ty::Kind::Bool)};
     }
-    if (op == "<<" || op == ">>") {
+    if (op == ast::BinaryOp::Shl || op == ast::BinaryOp::Shr) {
       if (!integer(lhs) || !integer(rhs))
         report(expression->span, "shift operands must be integers");
       return {lhs};
     }
-    if ((op == "&" || op == "|" || op == "^") && lhs->kind == Ty::Kind::Bool &&
+    if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr || op == ast::BinaryOp::BitXor) && lhs->kind == Ty::Kind::Bool &&
         rhs->kind == Ty::Kind::Bool)
       return {ty(Ty::Kind::Bool)};
     if (!integer(lhs) || !same(lhs, rhs))
@@ -1205,38 +1203,36 @@ private:
   }
 
   ExprInfo check_assignment(const ast::ExprPtr &expression) {
-    auto destination = check_expr(expression->operands[0]);
-    auto source = check_expr(expression->operands[1], destination.type);
-    if (!destination.is_place)
-      report(expression->operands[0]->span,
-             "assignment destination is not a place");
-    else if (!destination.is_mutable)
-      report(expression->operands[0]->span,
-             "assignment destination is immutable");
-    if (expression->text == "=") {
-      if (!coercible(source.type, destination.type))
-        mismatch(expression->operands[1]->span, source.type, destination.type);
-    } else {
-      auto source_scalar = scalar_operand(source.type);
-      if ((expression->text == "<<=" || expression->text == ">>=") &&
-          integer(source_scalar) && integer(destination.type)) {
-        // Shift counts may use any of the four integer types.
-      } else if (!same(source_scalar, destination.type)) {
-        mismatch(expression->operands[1]->span, source_scalar,
-                 destination.type);
-      }
-      if (!integer(destination.type) &&
-          destination.type->kind != Ty::Kind::Bool)
-        report(expression->span,
-               "compound assignment requires a scalar destination");
-    }
+    const auto &assignment = std::get<ast::AssignExpr>(expression->data);
+    auto destination = check_expr(assignment.target);
+    auto source = check_expr(assignment.value, destination.type);
+    check_assignment_target(assignment.target, destination);
+    if (!coercible(source.type, destination.type)) mismatch(assignment.value->span, source.type, destination.type);
+    return {ty(Ty::Kind::Unit)};
+  }
+  void check_assignment_target(const ast::ExprPtr &target, const ExprInfo &destination) {
+    if (!destination.is_place) report(target->span, "assignment destination is not a place");
+    else if (!destination.is_mutable) report(target->span, "assignment destination is immutable");
+  }
+  ExprInfo check_compound_assignment(const ast::ExprPtr &expression) {
+    const auto &assignment = std::get<ast::CompoundAssignExpr>(expression->data);
+    auto destination = check_expr(assignment.target);
+    auto source = check_expr(assignment.value, destination.type);
+    check_assignment_target(assignment.target, destination);
+    auto scalar = scalar_operand(source.type);
+    bool shift = assignment.op == ast::CompoundAssignOp::Shl || assignment.op == ast::CompoundAssignOp::Shr;
+    if (!(shift && integer(scalar) && integer(destination.type)) && !same(scalar, destination.type))
+      mismatch(assignment.value->span, scalar, destination.type);
+    if (!integer(destination.type) && destination.type->kind != Ty::Kind::Bool)
+      report(expression->span, "compound assignment requires a scalar destination");
     return {ty(Ty::Kind::Unit)};
   }
 
   ExprInfo check_cast(const ast::ExprPtr &expression) {
-    auto source = check_expr(expression->operands.front());
+    const auto &cast = std::get<ast::CastExpr>(expression->data);
+    auto source = check_expr(cast.value);
     auto destination =
-        resolve_type(expression->cast_type,
+        resolve_type(cast.target_type,
                      current_function_ ? current_function_->owner : "");
     const bool valid =
         (integer(source.type) && integer(destination)) ||
@@ -1551,9 +1547,9 @@ private:
       return {ty(Ty::Kind::Never)};
     }
     auto value =
-        expression->operands.empty()
-            ? ExprInfo{ty(Ty::Kind::Unit)}
-            : check_expr(expression->operands.front(), loops_.back().expected);
+        std::get<ast::BreakExpr>(expression->data).value
+            ? check_expr(*std::get<ast::BreakExpr>(expression->data).value, loops_.back().expected)
+            : ExprInfo{ty(Ty::Kind::Unit)};
     loops_.back().break_types.push_back(value.type);
     return {ty(Ty::Kind::Never)};
   }
@@ -1567,9 +1563,9 @@ private:
   ExprInfo check_return(const ast::ExprPtr &expression) {
     auto expected =
         current_function_ ? current_function_->result : ty(Ty::Kind::Error);
-    auto value = expression->operands.empty()
-                     ? ExprInfo{ty(Ty::Kind::Unit)}
-                     : check_expr(expression->operands.front(), expected);
+    auto value = std::get<ast::ReturnExpr>(expression->data).value
+                     ? check_expr(*std::get<ast::ReturnExpr>(expression->data).value, expected)
+                     : ExprInfo{ty(Ty::Kind::Unit)};
     if (!coercible(value.type, expected))
       mismatch(expression->span, value.type, expected);
     return {ty(Ty::Kind::Never)};
