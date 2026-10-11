@@ -302,27 +302,27 @@ private:
   }
   TyPtr resolve_type_impl(const ast::TypePtr &syntax,
                           std::string_view self_name) {
-    return ast::visit(
+    return ast::dispatch(
         *syntax,
         ast::Overloaded{
-            [&](const ast::UnitType &) { return ty(Ty::Kind::Unit); },
-            [&](const ast::ParenType &p) {
+            [&](const ast::TypeSyntax &, const ast::UnitType &) { return ty(Ty::Kind::Unit); },
+            [&](const ast::TypeSyntax &, const ast::ParenType &p) {
               return resolve_type(p.inner, self_name);
             },
-            [&](const ast::ReferenceType &p) {
+            [&](const ast::TypeSyntax &, const ast::ReferenceType &p) {
               return compound(Ty::Kind::Ref,
                               resolve_type(p.referent, self_name),
                               p.mutability == ast::Mutability::Mutable);
             },
-            [&](const ast::ArrayType &p) {
+            [&](const ast::TypeSyntax &, const ast::ArrayType &p) {
               auto value =
                   compound(Ty::Kind::Array, resolve_type(p.element, self_name));
               if (auto length = evaluate_length(p.length, self_name))
                 value->length = *length;
               return value;
             },
-            [&](const ast::PathType &p) {
-              return resolve_path_type(p.path, syntax->span, self_name);
+            [&](const ast::TypeSyntax &node, const ast::PathType &p) {
+              return resolve_path_type(p.path, node.span, self_name);
             }});
   }
   TyPtr resolve_path_type(const ast::Path &path, Span span,
