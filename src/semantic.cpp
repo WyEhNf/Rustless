@@ -929,14 +929,14 @@ private:
             [&](const ast::Expr &node, const ast::IndexExpr &projection) {
               return check_index(node, projection);
             },
-            [&](const ast::Expr &, const ast::BreakExpr &) {
-              return check_break(expression, expected);
+            [&](const ast::Expr &node, const ast::BreakExpr &p) {
+              return check_break(node, p);
             },
-            [&](const ast::Expr &, const ast::ContinueExpr &) {
-              return check_continue(expression);
+            [&](const ast::Expr &node, const ast::ContinueExpr &p) {
+              return check_continue(node, p);
             },
-            [&](const ast::Expr &, const ast::ReturnExpr &) {
-              return check_return(expression);
+            [&](const ast::Expr &node, const ast::ReturnExpr &p) {
+              return check_return(node, p);
             }});
     if (expected && !ast::get_if<ast::ParenExpr>(*expression) &&
         coercible(result.type, expected)) {
@@ -1706,36 +1706,32 @@ private:
             std::nullopt,       "index", std::move(adjustments)};
   }
 
-  ExprInfo check_break(const ast::ExprPtr &expression, const TyPtr &) {
+  ExprInfo check_break(const ast::Expr &node, const ast::BreakExpr &p) {
     if (loops_.empty()) {
-      report(expression->span, "break is only available inside a loop");
+      report(node.span, "break is only available inside a loop");
       return {ty(Ty::Kind::Never)};
     }
     auto value =
-        std::get<ast::BreakExpr>(expression->data).value
-            ? check_expr(*std::get<ast::BreakExpr>(expression->data).value,
-                         loops_.back().expected)
+        p.value ? check_expr(*p.value, loops_.back().expected)
             : ExprInfo{ty(Ty::Kind::Unit)};
     loops_.back().break_types.push_back(value.type);
     return {ty(Ty::Kind::Never)};
   }
 
-  ExprInfo check_continue(const ast::ExprPtr &expression) {
+  ExprInfo check_continue(const ast::Expr &node, const ast::ContinueExpr &) {
     if (loops_.empty())
-      report(expression->span, "continue is only available inside a loop");
+      report(node.span, "continue is only available inside a loop");
     return {ty(Ty::Kind::Never)};
   }
 
-  ExprInfo check_return(const ast::ExprPtr &expression) {
+  ExprInfo check_return(const ast::Expr &node, const ast::ReturnExpr &p) {
     auto expected =
         current_function_ ? current_function_->result : ty(Ty::Kind::Error);
     auto value =
-        std::get<ast::ReturnExpr>(expression->data).value
-            ? check_expr(*std::get<ast::ReturnExpr>(expression->data).value,
-                         expected)
+        p.value ? check_expr(*p.value, expected)
             : ExprInfo{ty(Ty::Kind::Unit)};
     if (!coercible(value.type, expected))
-      mismatch(expression->span, value.type, expected);
+      mismatch(node.span, value.type, expected);
     return {ty(Ty::Kind::Never)};
   }
 
