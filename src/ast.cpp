@@ -54,7 +54,7 @@ public:
   std::string print(const Crate &crate) {
     heading("Crate", crate, 0);
     for (const auto &item : crate.items)
-      std::visit([&](const auto &value) { declaration(value, 1); }, item);
+      dispatch(item, [&](const auto &, const auto &value) { declaration(value, 1); });
     return out_.str();
   }
 
@@ -137,19 +137,18 @@ private:
     indent(level);
     out_ << "Where\n";
     for (const auto &predicate : value->predicates)
-      std::visit(Overloaded{[&](const LifetimePredicate &p) {
+      dispatch(predicate, Overloaded{[&](const Node &, const LifetimePredicate &p) {
                               indent(level + 1);
                               out_ << p.subject.text;
                               bounds(p.bounds);
                               out_ << '\n';
                             },
-                            [&](const TypePredicate &p) {
+                            [&](const Node &, const TypePredicate &p) {
                               indent(level + 1);
                               type(p.subject);
                               bounds(p.bounds);
                               out_ << '\n';
-                            }},
-                 predicate);
+                            }});
   }
   void use_tree(const UseTree &tree) {
     if (tree.prefix.root == PathRoot::Absolute)
@@ -159,8 +158,8 @@ private:
         out_ << "::";
       out_ << name_text(tree.prefix.segments[i]);
     }
-    std::visit(
-        Overloaded{[&](const NameImport &name) {
+    dispatch(tree,
+        Overloaded{[&](const UseTree &, const NameImport &name) {
                      if (name.alias) {
                        out_ << " as ";
                        std::visit(Overloaded{[&](const Identifier &value) {
@@ -172,13 +171,13 @@ private:
                                   *name.alias);
                      }
                    },
-                   [&](const GlobImport &) {
-                     if (!tree.prefix.segments.empty())
+                   [&](const UseTree &owner, const GlobImport &) {
+                     if (!owner.prefix.segments.empty())
                        out_ << "::";
                      out_ << '*';
                    },
-                   [&](const GroupImport &group) {
-                     if (!tree.prefix.segments.empty())
+                   [&](const UseTree &owner, const GroupImport &group) {
+                     if (!owner.prefix.segments.empty())
                        out_ << "::";
                      out_ << '{';
                      for (std::size_t i = 0; i < group.children.size(); ++i) {
@@ -187,8 +186,7 @@ private:
                        use_tree(group.children[i]);
                      }
                      out_ << '}';
-                   }},
-        tree.target);
+                   }});
   }
   void declaration(const Use &value, int level) {
     heading("Use", value, level);
@@ -208,18 +206,17 @@ private:
       const auto &self = *value.signature.receiver;
       indent(level + 1);
       out_ << "Self ";
-      std::visit(Overloaded{[&](const ValueSelf &p) {
+      dispatch(self, Overloaded{[&](const SelfParam &, const ValueSelf &p) {
                               if (p.mutability == Mutability::Mutable)
                                 out_ << "mut ";
                             },
-                            [&](const ReferenceSelf &p) {
+                            [&](const SelfParam &, const ReferenceSelf &p) {
                               out_ << '&';
                               if (p.lifetime)
                                 out_ << p.lifetime->text << ' ';
                               if (p.mutability == Mutability::Mutable)
                                 out_ << "mut ";
-                            }},
-                 self.data);
+                            }});
       out_ << "self\n";
     }
     for (const auto &parameter : value.signature.parameters) {
@@ -278,7 +275,7 @@ private:
     }
     where_clause(value.where_clause, level + 1);
     for (const auto &member : value.members)
-      std::visit([&](const auto &p) { declaration(p, level + 1); }, member);
+      dispatch(member, [&](const auto &, const auto &p) { declaration(p, level + 1); });
   }
   void expression(const ExprPtr &value, int level);
   void block(const Block &value, int level);
