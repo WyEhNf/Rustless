@@ -501,99 +501,99 @@ private:
   }
 
   ast::ExprPtr build_unary(ParseContext *context) {
-    std::string operator_text;
-    ast::ExprPtr operand;
+    ParseContext *operator_context = nullptr;
+    std::optional<ast::ExprPtr> operand;
     for (auto *child : context->children) {
-      auto *child_context = as_context(child);
-      if (!child_context)
-        continue;
-      if (rule(child_context) == "unaryOperator")
-        operator_text = child_context->getText();
-      else if (is_expression_context(child_context))
-        operand = build_expression(child_context);
+      auto *part = as_context(child);
+      if (!part) continue;
+      if (rule(part) == "unaryOperator") operator_context = part;
+      else if (is_expression_context(part)) operand.emplace(build_expression(part));
     }
-    if (operator_text.empty())
-      return operand;
-    auto result =
-        make_expr(ast::Expr::Kind::Unary, context, std::move(operator_text));
-    result->operands.push_back(std::move(operand));
-    return result;
+    if (!operand) throw std::logic_error("missing unary operand");
+    if (!operator_context) return std::move(*operand);
+    auto op = operator_context->getText();
+    if (op.starts_with("&")) {
+      auto inner = make_expr(context, ast::BorrowExpr{
+          mutability(op.ends_with("mut")), source_span(operator_context), std::move(*operand)});
+      if (op.starts_with("&&")) {
+        ++inner->span.begin;
+        ++inner->span.column;
+        ++std::get<ast::BorrowExpr>(inner->data).operator_span.begin;
+        ++std::get<ast::BorrowExpr>(inner->data).operator_span.column;
+        auto outer_span = source_span(operator_context);
+        outer_span.end = outer_span.begin + 1;
+        return make_expr(context, ast::BorrowExpr{
+            ast::Mutability::Immutable, outer_span, std::move(inner)});
+      }
+      return inner;
+    }
+    return make_expr(context, ast::UnaryExpr{ast::unary_operator(op),
+        source_span(operator_context), std::move(*operand)});
   }
-
   ast::ExprPtr build_cast(ParseContext *context) {
-    ast::ExprPtr result;
+    std::optional<ast::ExprPtr> result;
     for (auto *child : context->children) {
-      auto *child_context = as_context(child);
-      if (!child_context)
-        continue;
-      const auto name = rule(child_context);
-      if (is_expression_context(child_context)) {
-        result = build_expression(child_context);
-      } else if (name == "typeRef" || name == "closedCastType") {
-        auto cast = make_expr(ast::Expr::Kind::Cast, context, "as");
-        cast->span = merge(result->span, source_span(child_context));
-        cast->operands.push_back(std::move(result));
-        cast->cast_type = build_type(child_context);
+      auto *part = as_context(child);
+      if (!part) continue;
+      auto name = rule(part);
+      if (is_expression_context(part)) result.emplace(build_expression(part));
+      else if (name == "typeRef" || name == "closedCastType") {
+        if (!result) throw std::logic_error("missing cast operand");
+        auto span = merge((*result)->span, source_span(part));
+        auto cast = make_expr(context, ast::CastExpr{std::move(*result), build_type(part)});
+        cast->span = span;
         result = std::move(cast);
       }
     }
-    return result;
+    if (!result) throw std::logic_error("missing cast expression");
+    return std::move(*result);
   }
-
   ast::ExprPtr fold_binary(ParseContext *context) {
-    ast::ExprPtr result;
-    std::string operator_text;
     // Precedence is already encoded by the generated parser rule hierarchy.
+    std::optional<ast::ExprPtr> result;
+    std::string operator_text;
+    Span operator_span;
     for (auto *child : context->children) {
       if (auto *terminal = as_terminal(child)) {
         operator_text = terminal->getText();
+        operator_span = token_span(terminal->getSymbol());
         continue;
       }
-      auto *child_context = as_context(child);
-      if (!child_context)
-        continue;
-      if (is_operator_rule(rule(child_context))) {
-        operator_text = child_context->getText();
-        continue;
+      auto *part = as_context(child);
+      if (!part) continue;
+      if (is_operator_rule(rule(part))) {
+        operator_text = part->getText(); operator_span = source_span(part); continue;
       }
-      if (!is_expression_context(child_context))
-        continue;
-      auto operand = build_expression(child_context);
-      if (!result) {
-        result = std::move(operand);
-        continue;
-      }
-      auto binary = make_expr(ast::Expr::Kind::Binary, context, operator_text);
-      binary->span = merge(result->span, operand->span);
-      binary->operands = {std::move(result), std::move(operand)};
+      if (!is_expression_context(part)) continue;
+      auto operand = build_expression(part);
+      if (!result) { result.emplace(std::move(operand)); continue; }
+      auto span = merge((*result)->span, operand->span);
+      auto binary = make_expr(context, ast::BinaryExpr{ast::binary_operator(operator_text),
+          operator_span, std::move(*result), std::move(operand)});
+      binary->span = span;
       result = std::move(binary);
     }
-    return result;
+    if (!result) throw std::logic_error("missing binary expression");
+    return std::move(*result);
   }
-
   ast::ExprPtr build_assignment(ParseContext *context) {
-    ast::ExprPtr left;
-    ast::ExprPtr right;
-    std::string operator_text;
+    std::optional<ast::ExprPtr> left, right;
+    ParseContext *operator_context = nullptr;
     for (auto *child : context->children) {
-      auto *child_context = as_context(child);
-      if (!child_context)
-        continue;
-      if (is_operator_rule(rule(child_context)))
-        operator_text = child_context->getText();
-      else if (is_expression_context(child_context)) {
-        if (!left)
-          left = build_expression(child_context);
-        else
-          right = build_expression(child_context);
+      auto *part = as_context(child);
+      if (!part) continue;
+      if (is_operator_rule(rule(part))) operator_context = part;
+      else if (is_expression_context(part)) {
+        if (!left) left.emplace(build_expression(part));
+        else right.emplace(build_expression(part));
       }
     }
-    if (!right)
-      return left;
-    auto assignment =
-        make_expr(ast::Expr::Kind::Assign, context, std::move(operator_text));
-    assignment->operands = {std::move(left), std::move(right)};
-    return assignment;
+    if (!left) throw std::logic_error("missing assignment target");
+    if (!right) return std::move(*left);
+    auto op = operator_context->getText();
+    if (op == "=") return make_expr(context, ast::AssignExpr{std::move(*left), std::move(*right)});
+    return make_expr(context, ast::CompoundAssignExpr{ast::compound_operator(op),
+        source_span(operator_context), std::move(*left), std::move(*right)});
   }
 
   ast::ExprPtr build_expression(ParseContext *context) {
