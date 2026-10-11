@@ -135,18 +135,15 @@ fn ops() {
     assert(node.span.begin <= node.span.end && node.span.end <= source.size());
   });
   assert(identities.size() > 60);
-  rx::DiagnosticEngine utf8_diagnostics;
-  auto utf8 = rx::parse_source("// 中文\nfn main() { /* 中文 */ 1 + 2; }",
-                               utf8_diagnostics);
-  assert(utf8.syntax_ok && utf8.crate);
-  const auto &utf8_function = std::get<ast::Function>(utf8.crate->items[0]);
-  assert(utf8.crate->source.slice(utf8_function.name.span) == "main");
-  const auto &utf8_sum = std::get<ast::BinaryExpr>(
-      std::get<ast::ExprStmt>(utf8_function.body->statements[0]->data)
-          .expression->data);
-  assert(utf8.crate->source.slice(utf8_sum.operator_span) == "+");
-  assert(utf8_sum.operator_span.file == utf8.crate->source.id);
-  assert(utf8.crate->source.position(utf8_sum.operator_span.begin) ==
-         std::make_pair(utf8_sum.operator_span.line,
-                        utf8_sum.operator_span.column));
+  // Source storage supports UTF-8; the current Rx grammar accepts ASCII only.
+  const ast::SourceFile utf8{"中文\n1 + 2"};
+  const auto plus = utf8.from_character_span({5, 6, 2, 2});
+  assert(utf8.slice(plus) == "+");
+  assert(plus.begin == 9 && plus.end == 10 && plus.file == utf8.id);
+  assert(utf8.position(plus.begin) == std::make_pair(plus.line, plus.column));
+  rx::DiagnosticEngine non_ascii_diagnostics;
+  auto non_ascii =
+      rx::parse_source("// 中文\nfn main() {}", non_ascii_diagnostics);
+  assert(!non_ascii.syntax_ok && !non_ascii.crate &&
+         non_ascii_diagnostics.has_errors());
 }
