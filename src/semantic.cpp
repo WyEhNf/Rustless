@@ -1427,13 +1427,13 @@ private:
         !name.starts_with("Vec::"))
       report(call.callee->span, "functions have no type parameters");
     if (name == "get_i32" || name == "getInt")
-      return finish(check_signature(expression, {}, ty(Ty::Kind::I32)));
+      return finish(check_signature(*expression, call.arguments, {}, ty(Ty::Kind::I32)));
     if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
         name == "printlnInt")
       return finish(
-          check_signature(expression, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
+          check_signature(*expression, call.arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
     if (auto it = functions_.find(name); it != functions_.end())
-      return finish(check_signature(expression, it->second.parameters,
+      return finish(check_signature(*expression, call.arguments, it->second.parameters,
                                     it->second.result));
     if (auto it = associated_functions_.find(name);
         it != associated_functions_.end()) {
@@ -1446,7 +1446,7 @@ private:
                           ast::is_mutable(*it->second.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
-      return finish(check_signature(expression, parameters, it->second.result));
+      return finish(check_signature(*expression, call.arguments, parameters, it->second.result));
     }
     if (name == "Box::new" || name == "Vec::new") {
       if (arguments.size() != 1) {
@@ -1456,10 +1456,10 @@ private:
       }
       auto element = resolve_type(*arguments.front());
       if (name == "Box::new")
-        return finish(check_signature(expression, {element},
+        return finish(check_signature(*expression, call.arguments, {element},
                                       compound(Ty::Kind::Box, element)));
       return finish(
-          check_signature(expression, {}, compound(Ty::Kind::Vec, element)));
+          check_signature(*expression, call.arguments, {}, compound(Ty::Kind::Vec, element)));
     }
     if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
         name == "Vec::is_empty" || name == "Vec::push" ||
@@ -1477,15 +1477,15 @@ private:
           report(expression->span,
                  "clone is not available for " + type_name(container));
         return finish(check_signature(
-            expression, {compound(Ty::Kind::Ref, container)}, container));
+            *expression, call.arguments, {compound(Ty::Kind::Ref, container)}, container));
       }
       if (name.ends_with("push"))
         return finish(check_signature(
-            expression, {compound(Ty::Kind::Ref, container, true), element},
+            *expression, call.arguments, {compound(Ty::Kind::Ref, container, true), element},
             ty(Ty::Kind::Unit)));
       if (name.ends_with("remove"))
         return finish(check_signature(
-            expression,
+            *expression, call.arguments,
             {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
             element));
       return finish(check_signature(
@@ -1496,19 +1496,19 @@ private:
       auto owner = name.substr(0, name.size() - 7);
       auto result = ty(Ty::Kind::Struct);
       result->name = owner;
-      return finish(check_signature(expression,
+      return finish(check_signature(*expression, call.arguments,
                                     {compound(Ty::Kind::Ref, result)}, result));
     }
     report(expression->span, "unknown function '" + name + "'");
     return finish({});
   }
 
-  ExprInfo check_signature(const ast::ExprPtr &expression,
+  ExprInfo check_signature(const ast::Node &node,
+                           const std::vector<ast::ExprPtr> &arguments,
                            const std::vector<TyPtr> &parameters, TyPtr result) {
-    const auto &arguments = std::get<ast::CallExpr>(expression->data).arguments;
     const auto count = arguments.size();
     if (count != parameters.size())
-      report(expression->span, "wrong number of function arguments");
+      report(node.span, "wrong number of function arguments");
     for (std::size_t i = 0; i < count; ++i) {
       auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
       auto argument = check_expr(arguments[i], expected);
@@ -1554,7 +1554,7 @@ private:
             (receiver.type->element->kind == Ty::Kind::Vec ||
              receiver.type->element->kind == Ty::Kind::Array)))
         report(expression->span, name + " is only available on arrays and Vec");
-      return finish(check_method_signature(expression, {},
+      return finish(check_method_signature(*expression, method.arguments, {},
                                            name == "len" ? ty(Ty::Kind::Usize)
                                                          : ty(Ty::Kind::Bool)),
                     "builtin::" + name, {}, Adjustment::Kind::BorrowShared);
@@ -1570,11 +1570,11 @@ private:
       if (!writable(receiver))
         report(expression->span, name + " requires mutable access to Vec");
       if (name == "push")
-        return finish(check_method_signature(expression, {vector->element},
+        return finish(check_method_signature(*expression, method.arguments, {vector->element},
                                              ty(Ty::Kind::Unit)),
                       "builtin::Vec::push", {},
                       Adjustment::Kind::BorrowMutable);
-      return finish(check_method_signature(expression, {ty(Ty::Kind::Usize)},
+      return finish(check_method_signature(*expression, method.arguments, {ty(Ty::Kind::Usize)},
                                            vector->element),
                     "builtin::Vec::remove", {},
                     Adjustment::Kind::BorrowMutable);
@@ -1589,7 +1589,7 @@ private:
       if (!supports(cloned, "Clone", "", {}))
         report(expression->span,
                "clone is not available for " + type_name(cloned));
-      return finish(check_method_signature(expression, {}, cloned),
+      return finish(check_method_signature(*expression, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
     if (base->kind == Ty::Kind::Struct) {
@@ -1607,7 +1607,7 @@ private:
             !writable(receiver))
           report(expression->span, "method requires a mutable receiver");
         return finish(
-            check_method_signature(expression, function.parameters,
+            check_method_signature(*expression, method.arguments, function.parameters,
                                    function.result),
             key, symbol_for(function.ast->id),
             ast::by_reference(*function.ast->signature.receiver)
@@ -1622,14 +1622,13 @@ private:
     return finish({}, name);
   }
 
-  ExprInfo check_method_signature(const ast::ExprPtr &expression,
+  ExprInfo check_method_signature(const ast::Node &node,
+                           const std::vector<ast::ExprPtr> &arguments,
                                   const std::vector<TyPtr> &parameters,
                                   TyPtr result) {
-    const auto &arguments =
-        std::get<ast::MethodCallExpr>(expression->data).arguments;
     const auto count = arguments.size();
     if (count != parameters.size())
-      report(expression->span, "wrong number of method arguments");
+      report(node.span, "wrong number of method arguments");
     for (std::size_t i = 0; i < count; ++i) {
       auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
       auto value = check_expr(arguments[i], expected);
