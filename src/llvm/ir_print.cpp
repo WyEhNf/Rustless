@@ -1,4 +1,4 @@
-#include "rx/ir.hpp"
+#include "rx/ir_visit.hpp"
 
 #include <array>
 #include <sstream>
@@ -64,101 +64,61 @@ std::string_view binary_opcode(Op op) {
 
 void print_instruction(std::ostringstream &out, const Instruction &instruction) {
   out << "  ";
-  if (instruction.result.value)
-    out << "%v" << instruction.result << " = ";
-  switch (instruction.op) {
-  case Op::Alloca:
-    out << "alloca i8, i32 " << instruction.bytes << ", align "
-        << instruction.alignment;
-    break;
-  case Op::Load:
-    out << "load " << type_name(instruction.type) << ", "
-        << typed(instruction.operands.at(0)) << ", align "
-        << instruction.alignment;
-    break;
-  case Op::Store:
-    out << "store " << typed(instruction.operands.at(0)) << ", "
-        << typed(instruction.operands.at(1)) << ", align "
-        << instruction.alignment;
-    break;
-  case Op::Gep:
-    out << "getelementptr i8, " << typed(instruction.operands.at(0))
-        << ", " << typed(instruction.operands.at(1));
-    break;
-  case Op::Add:
-  case Op::Sub:
-  case Op::Mul:
-  case Op::SDiv:
-  case Op::UDiv:
-  case Op::SRem:
-  case Op::URem:
-  case Op::And:
-  case Op::Or:
-  case Op::Xor:
-  case Op::Shl:
-  case Op::LShr:
-  case Op::AShr:
-    out << binary_opcode(instruction.op) << ' '
-        << typed(instruction.operands.at(0)) << ", "
-        << value(instruction.operands.at(1));
-    break;
-  case Op::ICmp:
-    out << "icmp " << predicate_name(instruction.predicate) << ' '
-        << typed(instruction.operands.at(0)) << ", "
-        << value(instruction.operands.at(1));
-    break;
-  case Op::ZExt:
-  case Op::Trunc:
-  case Op::PtrToInt:
-  case Op::IntToPtr: {
-    const auto opcode = instruction.op == Op::ZExt      ? "zext"
-                        : instruction.op == Op::Trunc    ? "trunc"
-                        : instruction.op == Op::PtrToInt ? "ptrtoint"
-                                                       : "inttoptr";
-    out << opcode << ' ' << typed(instruction.operands.at(0)) << " to "
-        << type_name(instruction.type);
-    break;
-  }
-  case Op::Call:
-    out << "call " << type_name(instruction.type) << " @"
-        << instruction.callee << '(';
-    for (std::size_t i = 0; i < instruction.operands.size(); ++i) {
-      if (i)
-        out << ", ";
-      out << typed(instruction.operands[i]);
-    }
-    out << ')';
-    break;
-  case Op::Phi:
-    out << "phi " << type_name(instruction.type) << ' ';
-    for (std::size_t i = 0; i < instruction.operands.size(); ++i) {
-      if (i)
-        out << ", ";
-      out << "[ " << value(instruction.operands[i]) << ", "
-          << label(instruction.targets.at(i)) << " ]";
-    }
-    break;
-  case Op::Br:
-    out << "br label " << label(instruction.targets.at(0));
-    break;
-  case Op::CondBr:
-    out << "br " << typed(instruction.operands.at(0)) << ", label "
-        << label(instruction.targets.at(0)) << ", label "
-        << label(instruction.targets.at(1));
-    break;
-  case Op::Ret:
-    out << "ret ";
-    if (instruction.operands.empty())
-      out << "void";
-    else
-      out << typed(instruction.operands.at(0));
-    break;
-  case Op::Unreachable:
-    out << "unreachable";
-    break;
-  default:
-    throw std::logic_error("IR printer does not support this opcode yet");
-  }
+  if (auto result = definition(instruction))
+    out << "%v" << result->id << " = ";
+  visit(instruction, ast::Overloaded{
+    [&](const Instruction &, const Alloca &p) {
+      out << "alloca i8, i32 " << p.bytes << ", align " << p.alignment;
+    },
+    [&](const Instruction &, const Load &p) {
+      out << "load " << type_name(p.result.type) << ", " << typed(p.address)
+          << ", align " << p.alignment;
+    },
+    [&](const Instruction &, const Store &p) {
+      out << "store " << typed(p.value) << ", " << typed(p.address)
+          << ", align " << p.alignment;
+    },
+    [&](const Instruction &, const Gep &p) {
+      out << "getelementptr i8, " << typed(p.base) << ", " << typed(p.offset);
+    },
+    [&](const Instruction &node, const Binary &p) {
+      out << binary_opcode(opcode(node)) << ' ' << typed(p.left) << ", " << value(p.right);
+    },
+    [&](const Instruction &, const Compare &p) {
+      out << "icmp " << predicate_name(p.predicate) << ' ' << typed(p.left)
+          << ", " << value(p.right);
+    },
+    [&](const Instruction &, const Cast &p) {
+      constexpr std::array names{"zext", "trunc", "ptrtoint", "inttoptr"};
+      out << names.at(static_cast<std::size_t>(p.op)) << ' ' << typed(p.operand)
+          << " to " << type_name(p.result.type);
+    },
+    [&](const Instruction &, const Call &p) {
+      out << "call " << type_name(p.result ? p.result->type : Type::Void)
+          << " @" << p.callee << '(';
+      for (std::size_t i = 0; i < p.arguments.size(); ++i) {
+        if (i) out << ", ";
+        out << typed(p.arguments[i]);
+      }
+      out << ')';
+    },
+    [&](const Instruction &, const Phi &p) {
+      out << "phi " << type_name(p.result.type) << ' ';
+      for (std::size_t i = 0; i < p.incoming.size(); ++i) {
+        if (i) out << ", ";
+        out << "[ " << value(p.incoming[i].value) << ", "
+            << label(p.incoming[i].predecessor) << " ]";
+      }
+    },
+    [&](const Instruction &, const Branch &p) { out << "br label " << label(p.target); },
+    [&](const Instruction &, const CondBranch &p) {
+      out << "br " << typed(p.condition) << ", label " << label(p.consequent)
+          << ", label " << label(p.alternative);
+    },
+    [&](const Instruction &, const Return &p) {
+      out << "ret " << (p.value ? typed(*p.value) : "void");
+    },
+    [&](const Instruction &, const Unreachable &) { out << "unreachable"; }});
   out << '\n';
 }
 
