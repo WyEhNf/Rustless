@@ -19,10 +19,18 @@ public:
   const FunctionSemantics &function(SymbolId id) const;
   const StructSemantics &structure(SymbolId id) const;
   const ConstantValue &constant(SymbolId id) const;
-  const SemanticTypePtr &type(const ast::TypeSyntax &node) const { return type(node.id); }
-  const ExpressionSemantics &expression(const ast::Expr &node) const { return expression(node.id); }
-  const ExpressionSemantics &expression(const ast::Block &node) const { return expression(node.id); }
-  const ExpressionSemantics &expression(const ast::IfBranch &node) const { return expression(node.id); }
+  const SemanticTypePtr &type(const ast::TypeSyntax &node) const {
+    return type(node.id);
+  }
+  const ExpressionSemantics &expression(const ast::Expr &node) const {
+    return expression(node.id);
+  }
+  const ExpressionSemantics &expression(const ast::Block &node) const {
+    return expression(node.id);
+  }
+  const ExpressionSemantics &expression(const ast::IfBranch &node) const {
+    return expression(node.id);
+  }
 
 private:
   void validate_links() const;

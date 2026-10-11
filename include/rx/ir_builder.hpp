@@ -3,7 +3,8 @@
 #include "rx/ir_verify.hpp"
 
 namespace rx::ir {
-// Borrows a function; blocks are selected by identity, so vector growth is safe.
+// Borrows a function; blocks are selected by identity, so vector growth is
+// safe.
 class Builder {
 public:
   explicit Builder(Function &function);
@@ -18,7 +19,8 @@ public:
   Operand binary(BinaryOp op, Operand left, Operand right);
   Operand compare(Predicate predicate, Operand left, Operand right);
   Operand cast(CastOp op, Type target, Operand operand);
-  std::optional<Operand> call(Type result, std::string callee, std::vector<Operand> arguments);
+  std::optional<Operand> call(Type result, std::string callee,
+                              std::vector<Operand> arguments);
   Operand phi(Type type, std::vector<PhiIncoming> incoming);
   void branch(BlockId target);
   void cond_branch(Operand condition, BlockId consequent, BlockId alternative);

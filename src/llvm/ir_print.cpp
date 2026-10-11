@@ -1,5 +1,5 @@
-#include "rx/ir_visit.hpp"
 #include "rx/ir_verify.hpp"
+#include "rx/ir_visit.hpp"
 
 #include <array>
 #include <sstream>
@@ -10,12 +10,18 @@ namespace rx::ir {
 namespace {
 
 std::string value(const Operand &operand) {
-  return std::visit(ast::Overloaded{
-    [](const LocalOperand &p) { return "%v" + std::to_string(p.id.value); },
-    [](const GlobalOperand &p) { return "@" + symbol_name(p.symbol); },
-    [&](const ConstantOperand &p) {
-      return operand.type == Type::Ptr ? std::string("null") : std::to_string(p.bits);
-    }}, operand.data);
+  return std::visit(ast::Overloaded{[](const LocalOperand &p) {
+                                      return "%v" + std::to_string(p.id.value);
+                                    },
+                                    [](const GlobalOperand &p) {
+                                      return "@" + symbol_name(p.symbol);
+                                    },
+                                    [&](const ConstantOperand &p) {
+                                      return operand.type == Type::Ptr
+                                                 ? std::string("null")
+                                                 : std::to_string(p.bits);
+                                    }},
+                    operand.data);
 }
 
 std::string typed(const Operand &operand) {
@@ -63,63 +69,74 @@ std::string_view binary_opcode(Op op) {
   }
 }
 
-void print_instruction(std::ostringstream &out, const Instruction &instruction) {
+void print_instruction(std::ostringstream &out,
+                       const Instruction &instruction) {
   out << "  ";
   if (auto result = definition(instruction))
     out << "%v" << result->id << " = ";
-  visit(instruction, ast::Overloaded{
-    [&](const Instruction &, const Alloca &p) {
-      out << "alloca i8, i32 " << p.bytes << ", align " << p.alignment;
-    },
-    [&](const Instruction &, const Load &p) {
-      out << "load " << type_name(p.result.type) << ", " << typed(p.address)
-          << ", align " << p.alignment;
-    },
-    [&](const Instruction &, const Store &p) {
-      out << "store " << typed(p.value) << ", " << typed(p.address)
-          << ", align " << p.alignment;
-    },
-    [&](const Instruction &, const Gep &p) {
-      out << "getelementptr i8, " << typed(p.base) << ", " << typed(p.offset);
-    },
-    [&](const Instruction &node, const Binary &p) {
-      out << binary_opcode(opcode(node)) << ' ' << typed(p.left) << ", " << value(p.right);
-    },
-    [&](const Instruction &, const Compare &p) {
-      out << "icmp " << predicate_name(p.predicate) << ' ' << typed(p.left)
-          << ", " << value(p.right);
-    },
-    [&](const Instruction &, const Cast &p) {
-      constexpr std::array names{"zext", "trunc", "ptrtoint", "inttoptr"};
-      out << names.at(static_cast<std::size_t>(p.op)) << ' ' << typed(p.operand)
-          << " to " << type_name(p.result.type);
-    },
-    [&](const Instruction &, const Call &p) {
-      out << "call " << type_name(p.result ? p.result->type : Type::Void)
-          << " @" << symbol_name(p.callee) << '(';
-      for (std::size_t i = 0; i < p.arguments.size(); ++i) {
-        if (i) out << ", ";
-        out << typed(p.arguments[i]);
-      }
-      out << ')';
-    },
-    [&](const Instruction &, const Phi &p) {
-      out << "phi " << type_name(p.result.type) << ' ';
-      for (std::size_t i = 0; i < p.incoming.size(); ++i) {
-        if (i) out << ", ";
-        out << "[ " << value(p.incoming[i].value) << ", "
-            << label(p.incoming[i].predecessor) << " ]";
-      }
-    },
-    [&](const Instruction &, const Branch &p) { out << "br label " << label(p.target); },
-    [&](const Instruction &, const CondBranch &p) {
-      out << "br " << typed(p.condition) << ", label " << label(p.consequent)
-          << ", label " << label(p.alternative);
-    },
-    [&](const Instruction &, const Return &p) {
-      out << "ret " << (p.value ? typed(*p.value) : "void");
-    },
-    [&](const Instruction &, const Unreachable &) { out << "unreachable"; }});
+  visit(
+      instruction,
+      ast::Overloaded{
+          [&](const Instruction &, const Alloca &p) {
+            out << "alloca i8, i32 " << p.bytes << ", align " << p.alignment;
+          },
+          [&](const Instruction &, const Load &p) {
+            out << "load " << type_name(p.result.type) << ", "
+                << typed(p.address) << ", align " << p.alignment;
+          },
+          [&](const Instruction &, const Store &p) {
+            out << "store " << typed(p.value) << ", " << typed(p.address)
+                << ", align " << p.alignment;
+          },
+          [&](const Instruction &, const Gep &p) {
+            out << "getelementptr i8, " << typed(p.base) << ", "
+                << typed(p.offset);
+          },
+          [&](const Instruction &node, const Binary &p) {
+            out << binary_opcode(opcode(node)) << ' ' << typed(p.left) << ", "
+                << value(p.right);
+          },
+          [&](const Instruction &, const Compare &p) {
+            out << "icmp " << predicate_name(p.predicate) << ' '
+                << typed(p.left) << ", " << value(p.right);
+          },
+          [&](const Instruction &, const Cast &p) {
+            constexpr std::array names{"zext", "trunc", "ptrtoint", "inttoptr"};
+            out << names.at(static_cast<std::size_t>(p.op)) << ' '
+                << typed(p.operand) << " to " << type_name(p.result.type);
+          },
+          [&](const Instruction &, const Call &p) {
+            out << "call " << type_name(p.result ? p.result->type : Type::Void)
+                << " @" << symbol_name(p.callee) << '(';
+            for (std::size_t i = 0; i < p.arguments.size(); ++i) {
+              if (i)
+                out << ", ";
+              out << typed(p.arguments[i]);
+            }
+            out << ')';
+          },
+          [&](const Instruction &, const Phi &p) {
+            out << "phi " << type_name(p.result.type) << ' ';
+            for (std::size_t i = 0; i < p.incoming.size(); ++i) {
+              if (i)
+                out << ", ";
+              out << "[ " << value(p.incoming[i].value) << ", "
+                  << label(p.incoming[i].predecessor) << " ]";
+            }
+          },
+          [&](const Instruction &, const Branch &p) {
+            out << "br label " << label(p.target);
+          },
+          [&](const Instruction &, const CondBranch &p) {
+            out << "br " << typed(p.condition) << ", label "
+                << label(p.consequent) << ", label " << label(p.alternative);
+          },
+          [&](const Instruction &, const Return &p) {
+            out << "ret " << (p.value ? typed(*p.value) : "void");
+          },
+          [&](const Instruction &, const Unreachable &) {
+            out << "unreachable";
+          }});
   out << '\n';
 }
 
@@ -127,26 +144,31 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
 
 std::string symbol_name(std::string_view name) {
   auto initial = [](unsigned char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           c == '_' || c == '.' || c == '$' || c == '-';
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
+           c == '.' || c == '$' || c == '-';
   };
   bool plain = !name.empty() && initial(name.front());
   for (unsigned char c : name)
     plain &= initial(c) || (c >= '0' && c <= '9');
-  if (plain) return std::string(name);
+  if (plain)
+    return std::string(name);
   std::string result = "\"";
   constexpr std::string_view hex = "0123456789ABCDEF";
   for (unsigned char c : name) {
     if (c == '"' || c == '\\' || c < 32 || c >= 127) {
-      result += '\\'; result += hex[c >> 4]; result += hex[c & 15];
-    } else result += static_cast<char>(c);
+      result += '\\';
+      result += hex[c >> 4];
+      result += hex[c & 15];
+    } else
+      result += static_cast<char>(c);
   }
   return result + '"';
 }
 
 std::string print(const Module &module) {
   if (auto errors = verify(module); !errors.empty())
-    throw std::invalid_argument("invalid IR in " + errors.front().function + ": " + errors.front().message);
+    throw std::invalid_argument("invalid IR in " + errors.front().function +
+                                ": " + errors.front().message);
   std::ostringstream out;
   out << "; Rx LLVM IR: RV32IM / ILP32\n"
       << "target datalayout = \"e-m:e-p:32:32-i64:64-n32-S128\"\n"

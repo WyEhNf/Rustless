@@ -6,12 +6,30 @@
 #include <set>
 
 namespace rx::ir {
-struct Layout { std::uint32_t bytes; std::uint32_t alignment; };
-struct FieldLayout { SymbolId symbol; std::uint32_t offset; Layout layout; };
-struct StructLayout { SymbolId symbol; Layout layout; std::vector<FieldLayout> fields; };
+struct Layout {
+  std::uint32_t bytes;
+  std::uint32_t alignment;
+};
+struct FieldLayout {
+  SymbolId symbol;
+  std::uint32_t offset;
+  Layout layout;
+};
+struct StructLayout {
+  SymbolId symbol;
+  Layout layout;
+  std::vector<FieldLayout> fields;
+};
 enum class Passing { Direct, Indirect };
-struct AbiValue { Type type; Passing passing; Layout layout; };
-struct AbiParameter { SymbolId symbol; AbiValue value; };
+struct AbiValue {
+  Type type;
+  Passing passing;
+  Layout layout;
+};
+struct AbiParameter {
+  SymbolId symbol;
+  AbiValue value;
+};
 struct FunctionAbi {
   SymbolId symbol;
   std::string name;
@@ -31,12 +49,16 @@ public:
   SemanticBridge(SemanticIndex &&) = delete;
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
-  const StructLayout &structure(SymbolId symbol) const { return layouts_.at(symbol); }
+  const StructLayout &structure(SymbolId symbol) const {
+    return layouts_.at(symbol);
+  }
   FunctionAbi function(const ast::Function &node) const;
   Declaration declaration(const ast::Function &node) const;
   std::vector<Declaration> declarations() const;
-  BinaryLowering binary(const ast::Expr &node, const ast::BinaryExpr &payload) const;
-  BinaryOp compound(const ast::Expr &node, const ast::CompoundAssignExpr &payload) const;
+  BinaryLowering binary(const ast::Expr &node,
+                        const ast::BinaryExpr &payload) const;
+  BinaryOp compound(const ast::Expr &node,
+                    const ast::CompoundAssignExpr &payload) const;
 
 private:
   StructLayout &resolve_structure(SymbolId symbol);

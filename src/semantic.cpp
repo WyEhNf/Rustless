@@ -214,7 +214,8 @@ private:
   }
 
   SymbolId symbol_for(ast::NodeId node) {
-    auto [entry, inserted] = declaration_symbols_.try_emplace(node, next_symbol_);
+    auto [entry, inserted] =
+        declaration_symbols_.try_emplace(node, next_symbol_);
     if (inserted)
       ++next_symbol_.value;
     return entry->second;
@@ -226,8 +227,7 @@ private:
     if (owner)
       parent = symbol_for(*owner);
     if (recorded_symbols_.insert(id).second)
-      result_.symbols.push_back(
-          {id, kind, std::move(name), parent, node});
+      result_.symbols.push_back({id, kind, std::move(name), parent, node});
   }
   void record_symbol_type(ast::NodeId declaration, const TyPtr &type) {
     symbol_types_[symbol_for(declaration)] = type;
@@ -481,7 +481,8 @@ private:
           !structure.derives.contains("PartialEq"))
         report(structure.ast->span, "Eq requires an explicit PartialEq derive");
       for (const auto &field : structure.ast->fields) {
-        record_symbol(field.id, SymbolKind::Field, field.name.text, structure.ast->id);
+        record_symbol(field.id, SymbolKind::Field, field.name.text,
+                      structure.ast->id);
         if (!fields.insert(field.name.text).second)
           report(field.span, "duplicate field '" + field.name.text + "'");
         structure.fields[field.name.text] = resolve_type(field.type, name);
@@ -546,71 +547,76 @@ private:
 
   using EvaluatedConstant = std::pair<TyPtr, std::int64_t>;
   EvaluatedConstant constant_path(const ast::Expr &node,
-                                 const ast::PathExpr &path,
-                                 std::string_view self_name) {
-      auto name =
-          ast::path_name(path.path);
-      if (!self_name.empty() && name.starts_with("Self::"))
-        name = std::string(self_name) + name.substr(4);
-      if (auto it = constants_.find(name); it != constants_.end()) {
-        evaluate_constant(it->second);
-        record_node(node,
-                          ExprInfo{it->second.type, false, false, false,
-                                   symbol_for(it->second.ast->id), name});
-        return {it->second.type, it->second.value};
-      }
-      if (auto it = associated_constants_.find(name);
-          it != associated_constants_.end()) {
-        evaluate_constant(it->second);
-        record_node(node,
-                          ExprInfo{it->second.type, false, false, false,
-                                   symbol_for(it->second.ast->id), name});
-        return {it->second.type, it->second.value};
-      }
-      report(node.span, "constant path does not resolve to a constant");
-      auto error = ty(Ty::Kind::Error);
-      record_node(node, ExprInfo{error});
-      return {error, 0};
-
+                                  const ast::PathExpr &path,
+                                  std::string_view self_name) {
+    auto name = ast::path_name(path.path);
+    if (!self_name.empty() && name.starts_with("Self::"))
+      name = std::string(self_name) + name.substr(4);
+    if (auto it = constants_.find(name); it != constants_.end()) {
+      evaluate_constant(it->second);
+      record_node(node, ExprInfo{it->second.type, false, false, false,
+                                 symbol_for(it->second.ast->id), name});
+      return {it->second.type, it->second.value};
+    }
+    if (auto it = associated_constants_.find(name);
+        it != associated_constants_.end()) {
+      evaluate_constant(it->second);
+      record_node(node, ExprInfo{it->second.type, false, false, false,
+                                 symbol_for(it->second.ast->id), name});
+      return {it->second.type, it->second.value};
+    }
+    report(node.span, "constant path does not resolve to a constant");
+    auto error = ty(Ty::Kind::Error);
+    record_node(node, ExprInfo{error});
+    return {error, 0};
   }
   EvaluatedConstant constant_value(const ast::ExprPtr &expression,
-                                  TyPtr expected = {},
-                                  std::string_view self_name = {}) {
-    return ast::visit(*expression, ast::Overloaded{
-      [&](const ast::Expr &node, const ast::ParenExpr &p) -> EvaluatedConstant {
-        auto value = constant_value(p.inner, expected, self_name);
-        record_node(node, ExprInfo{value.first});
-        return value;
-      },
-      [&](const ast::Expr &node, const ast::BooleanExpr &p) -> EvaluatedConstant {
-        auto type = ty(Ty::Kind::Bool);
-        record_node(node, ExprInfo{type});
-        return {type, p.value};
-      },
-      [&](const ast::Expr &node, const ast::IntegerExpr &p) -> EvaluatedConstant {
-        auto type = literal_type(p.literal, expected, node.span);
-        auto magnitude = integer_magnitude(p.literal).value_or(0);
-        // Invalid magnitudes must not overflow signed arithmetic during recovery.
-        if (magnitude > std::numeric_limits<std::uint32_t>::max())
-          magnitude = 0;
-        record_node(node, ExprInfo{type});
-        return {type, static_cast<std::int64_t>(magnitude)};
-      },
-      [&](const ast::Expr &node, const ast::UnaryExpr &p) -> EvaluatedConstant {
-        if (p.op != ast::UnaryOp::Negate)
-          return invalid_constant(node);
-        auto [type, value] = constant_value(p.operand, expected, self_name);
-        if (!signed_integer(type))
-          report(node.span, "only signed constants may be negated");
-        record_node(node, ExprInfo{type});
-        return {type, -value};
-      },
-      [&](const ast::Expr &node, const ast::PathExpr &p) -> EvaluatedConstant {
-        return constant_path(node, p, self_name);
-      },
-      [&](const ast::Expr &node, const auto &) -> EvaluatedConstant {
-        return invalid_constant(node);
-      }});
+                                   TyPtr expected = {},
+                                   std::string_view self_name = {}) {
+    return ast::visit(
+        *expression,
+        ast::Overloaded{
+            [&](const ast::Expr &node,
+                const ast::ParenExpr &p) -> EvaluatedConstant {
+              auto value = constant_value(p.inner, expected, self_name);
+              record_node(node, ExprInfo{value.first});
+              return value;
+            },
+            [&](const ast::Expr &node,
+                const ast::BooleanExpr &p) -> EvaluatedConstant {
+              auto type = ty(Ty::Kind::Bool);
+              record_node(node, ExprInfo{type});
+              return {type, p.value};
+            },
+            [&](const ast::Expr &node,
+                const ast::IntegerExpr &p) -> EvaluatedConstant {
+              auto type = literal_type(p.literal, expected, node.span);
+              auto magnitude = integer_magnitude(p.literal).value_or(0);
+              // Invalid magnitudes must not overflow signed arithmetic during
+              // recovery.
+              if (magnitude > std::numeric_limits<std::uint32_t>::max())
+                magnitude = 0;
+              record_node(node, ExprInfo{type});
+              return {type, static_cast<std::int64_t>(magnitude)};
+            },
+            [&](const ast::Expr &node,
+                const ast::UnaryExpr &p) -> EvaluatedConstant {
+              if (p.op != ast::UnaryOp::Negate)
+                return invalid_constant(node);
+              auto [type, value] =
+                  constant_value(p.operand, expected, self_name);
+              if (!signed_integer(type))
+                report(node.span, "only signed constants may be negated");
+              record_node(node, ExprInfo{type});
+              return {type, -value};
+            },
+            [&](const ast::Expr &node,
+                const ast::PathExpr &p) -> EvaluatedConstant {
+              return constant_path(node, p, self_name);
+            },
+            [&](const ast::Expr &node, const auto &) -> EvaluatedConstant {
+              return invalid_constant(node);
+            }});
   }
   EvaluatedConstant invalid_constant(const ast::Expr &node) {
     report(node.span, "invalid constant expression");
@@ -722,7 +728,8 @@ private:
   }
 
   void check_function(const FunctionInfo &function) {
-    FunctionSemantics signature{symbol_for(function.ast->id), {}, {}, function.result};
+    FunctionSemantics signature{
+        symbol_for(function.ast->id), {}, {}, function.result};
     // Every function starts with isolated scopes and loop context.
     scopes_.clear();
     scopes_.emplace_back();
@@ -735,8 +742,8 @@ private:
       if (ast::by_reference(*function.ast->signature.receiver))
         self = compound(Ty::Kind::Ref, self,
                         ast::is_mutable(*function.ast->signature.receiver));
-      record_symbol(function.ast->signature.receiver->id, SymbolKind::Receiver, "self",
-                    function.ast->id);
+      record_symbol(function.ast->signature.receiver->id, SymbolKind::Receiver,
+                    "self", function.ast->id);
       record_symbol_type(function.ast->signature.receiver->id, self);
       signature.receiver = ParameterSemantics{
           symbol_for(function.ast->signature.receiver->id), self};
@@ -749,10 +756,11 @@ private:
       const auto &parameter = function.ast->signature.parameters[i];
       if (protected_builtin_value(parameter.binding.name.text))
         report(parameter.span, "cannot shadow a protected builtin");
-      record_symbol(parameter.id, SymbolKind::Parameter, parameter.binding.name.text,
-                    function.ast->id);
+      record_symbol(parameter.id, SymbolKind::Parameter,
+                    parameter.binding.name.text, function.ast->id);
       record_symbol_type(parameter.id, function.parameters[i]);
-      signature.parameters.push_back({symbol_for(parameter.id), function.parameters[i]});
+      signature.parameters.push_back(
+          {symbol_for(parameter.id), function.parameters[i]});
       scopes_.back()[parameter.binding.name.text] = {
           function.parameters[i],
           parameter.binding.mutability == ast::Mutability::Mutable,
@@ -822,10 +830,18 @@ private:
     TyPtr result;
     if (literal.suffix) {
       switch (*literal.suffix) {
-      case ast::IntegerSuffix::I32: result = ty(Ty::Kind::I32); break;
-      case ast::IntegerSuffix::U32: result = ty(Ty::Kind::U32); break;
-      case ast::IntegerSuffix::Isize: result = ty(Ty::Kind::Isize); break;
-      case ast::IntegerSuffix::Usize: result = ty(Ty::Kind::Usize); break;
+      case ast::IntegerSuffix::I32:
+        result = ty(Ty::Kind::I32);
+        break;
+      case ast::IntegerSuffix::U32:
+        result = ty(Ty::Kind::U32);
+        break;
+      case ast::IntegerSuffix::Isize:
+        result = ty(Ty::Kind::Isize);
+        break;
+      case ast::IntegerSuffix::Usize:
+        result = ty(Ty::Kind::Usize);
+        break;
       }
     } else if (integer(expected))
       result = expected;
@@ -942,7 +958,8 @@ private:
             [&](const ast::Expr &node, const ast::AssignExpr &assignment) {
               return check_assignment(node, assignment);
             },
-            [&](const ast::Expr &node, const ast::CompoundAssignExpr &assignment) {
+            [&](const ast::Expr &node,
+                const ast::CompoundAssignExpr &assignment) {
               return check_compound_assignment(node, assignment);
             },
             [&](const ast::Expr &node, const ast::CastExpr &cast) {
@@ -1066,14 +1083,14 @@ private:
            (structures_.contains(first) && second == "clone");
   }
 
-  ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array, const TyPtr &expected) {
+  ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array,
+                       const TyPtr &expected) {
     auto expected_element = expected && expected->kind == Ty::Kind::Array
                                 ? expected->element
                                 : TyPtr{};
     if (array.elements.empty()) {
       if (!expected_element) {
-        report(node.span,
-               "an empty array requires an expected array type");
+        report(node.span, "an empty array requires an expected array type");
         return {};
       }
       return {compound(Ty::Kind::Array, expected_element)};
@@ -1099,7 +1116,8 @@ private:
       mismatch(node.span, result, expected);
     return {result};
   }
-  ExprInfo check_repeat_array(const ast::Expr &node, const ast::RepeatArrayExpr &array,
+  ExprInfo check_repeat_array(const ast::Expr &node,
+                              const ast::RepeatArrayExpr &array,
                               const TyPtr &expected) {
     auto expected_element = expected && expected->kind == Ty::Kind::Array
                                 ? expected->element
@@ -1118,7 +1136,8 @@ private:
     return {result};
   }
 
-  ExprInfo check_struct(const ast::Expr &node, const ast::StructExpr &structure) {
+  ExprInfo check_struct(const ast::Expr &node,
+                        const ast::StructExpr &structure) {
     auto name = ast::path_name(structure.path);
     if (name == "Self" && current_function_ &&
         !current_function_->owner.empty())
@@ -1230,10 +1249,12 @@ private:
                                    },
                                    [&](const ast::Box<ast::IfBranch> &p) {
                                      else_id = p->id;
-                                     auto result = ast::visit(*p,
-                                       [&](const ast::IfBranch &owner, const ast::IfExpr &payload) {
-                                         return check_if(owner, payload, expected);
-                                       });
+                                     auto result = ast::visit(
+                                         *p, [&](const ast::IfBranch &owner,
+                                                 const ast::IfExpr &payload) {
+                                           return check_if(owner, payload,
+                                                           expected);
+                                         });
                                      record_node(*p, result);
                                      return result;
                                    }},
@@ -1257,7 +1278,8 @@ private:
     return {};
   }
 
-  ExprInfo check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr, const TyPtr &expected) {
+  ExprInfo check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr,
+                      const TyPtr &expected) {
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
@@ -1273,7 +1295,8 @@ private:
     return {result};
   }
 
-  ExprInfo check_while(const ast::Expr &node, const ast::WhileExpr &while_expr) {
+  ExprInfo check_while(const ast::Expr &node,
+                       const ast::WhileExpr &while_expr) {
     // A condition may only break or continue loops nested inside itself.
     auto surrounding_loops = std::move(loops_);
     loops_.clear();
@@ -1300,7 +1323,8 @@ private:
       report(borrow.operator_span, "mutable borrow requires a mutable place");
     return {compound(Ty::Kind::Ref, operand.type, mutable_ref)};
   }
-  ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary, const TyPtr &expected) {
+  ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary,
+                       const TyPtr &expected) {
     auto op = unary.op;
     auto operand = check_expr(unary.operand, expected);
     if (op == ast::UnaryOp::Dereference) {
@@ -1364,7 +1388,7 @@ private:
              ordering_right->kind == Ty::Kind::Ref) {
         if (ordering_left->is_mutable && !ordering_right->is_mutable)
           report(node.span, "ordering cannot coerce a mutable left "
-                                   "reference to a shared right reference");
+                            "reference to a shared right reference");
         ordering_left = ordering_left->element;
         ordering_right = ordering_right->element;
       }
@@ -1383,8 +1407,7 @@ private:
         lhs->kind == Ty::Kind::Bool && rhs->kind == Ty::Kind::Bool)
       return {ty(Ty::Kind::Bool)};
     if (!integer(lhs) || !same(lhs, rhs))
-      report(node.span,
-             "integer operator requires matching integer operands");
+      report(node.span, "integer operator requires matching integer operands");
     return {lhs};
   }
 
@@ -1394,7 +1417,8 @@ private:
     return value;
   }
 
-  ExprInfo check_assignment(const ast::Expr &node, const ast::AssignExpr &assignment) {
+  ExprInfo check_assignment(const ast::Expr &node,
+                            const ast::AssignExpr &assignment) {
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
@@ -1409,7 +1433,9 @@ private:
     else if (!destination.is_mutable)
       report(target->span, "assignment destination is immutable");
   }
-  ExprInfo check_compound_assignment(const ast::Expr &node, const ast::CompoundAssignExpr &assignment) {
+  ExprInfo
+  check_compound_assignment(const ast::Expr &node,
+                            const ast::CompoundAssignExpr &assignment) {
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
@@ -1420,8 +1446,7 @@ private:
         !same(scalar, destination.type))
       mismatch(assignment.value->span, scalar, destination.type);
     if (!integer(destination.type) && destination.type->kind != Ty::Kind::Bool)
-      report(node.span,
-             "compound assignment requires a scalar destination");
+      report(node.span, "compound assignment requires a scalar destination");
     return {ty(Ty::Kind::Unit)};
   }
 
@@ -1433,9 +1458,8 @@ private:
         (integer(source.type) && integer(destination)) ||
         (source.type->kind == Ty::Kind::Bool && integer(destination));
     if (!valid)
-      report(node.span, "unsupported cast from " +
-                                   type_name(source.type) + " to " +
-                                   type_name(destination));
+      report(node.span, "unsupported cast from " + type_name(source.type) +
+                            " to " + type_name(destination));
     return {destination};
   }
 
@@ -1460,11 +1484,12 @@ private:
         !name.starts_with("Vec::"))
       report(call.callee->span, "functions have no type parameters");
     if (name == "get_i32" || name == "getInt")
-      return finish(check_signature(node, call.arguments, {}, ty(Ty::Kind::I32)));
+      return finish(
+          check_signature(node, call.arguments, {}, ty(Ty::Kind::I32)));
     if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
         name == "printlnInt")
-      return finish(
-          check_signature(node, call.arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit)));
+      return finish(check_signature(node, call.arguments, {ty(Ty::Kind::I32)},
+                                    ty(Ty::Kind::Unit)));
     if (auto it = functions_.find(name); it != functions_.end())
       return finish(check_signature(node, call.arguments, it->second.parameters,
                                     it->second.result));
@@ -1479,7 +1504,8 @@ private:
                           ast::is_mutable(*it->second.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
-      return finish(check_signature(node, call.arguments, parameters, it->second.result));
+      return finish(
+          check_signature(node, call.arguments, parameters, it->second.result));
     }
     if (name == "Box::new" || name == "Vec::new") {
       if (arguments.size() != 1) {
@@ -1491,8 +1517,8 @@ private:
       if (name == "Box::new")
         return finish(check_signature(node, call.arguments, {element},
                                       compound(Ty::Kind::Box, element)));
-      return finish(
-          check_signature(node, call.arguments, {}, compound(Ty::Kind::Vec, element)));
+      return finish(check_signature(node, call.arguments, {},
+                                    compound(Ty::Kind::Vec, element)));
     }
     if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
         name == "Vec::is_empty" || name == "Vec::push" ||
@@ -1509,19 +1535,22 @@ private:
         if (!supports(container, "Clone", "", {}))
           report(node.span,
                  "clone is not available for " + type_name(container));
-        return finish(check_signature(
-            node, call.arguments, {compound(Ty::Kind::Ref, container)}, container));
+        return finish(check_signature(node, call.arguments,
+                                      {compound(Ty::Kind::Ref, container)},
+                                      container));
       }
       if (name.ends_with("push"))
-        return finish(check_signature(
-            node, call.arguments, {compound(Ty::Kind::Ref, container, true), element},
-            ty(Ty::Kind::Unit)));
+        return finish(
+            check_signature(node, call.arguments,
+                            {compound(Ty::Kind::Ref, container, true), element},
+                            ty(Ty::Kind::Unit)));
       if (name.ends_with("remove"))
         return finish(check_signature(
             node, call.arguments,
             {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
             element));
-      return finish(check_signature(node, call.arguments, {compound(Ty::Kind::Ref, container)},
+      return finish(check_signature(
+          node, call.arguments, {compound(Ty::Kind::Ref, container)},
           name.ends_with("len") ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool)));
     }
     if (name.ends_with("::clone")) {
@@ -1554,7 +1583,8 @@ private:
     return {std::move(result)};
   }
 
-  ExprInfo check_method(const ast::Expr &node, const ast::MethodCallExpr &method) {
+  ExprInfo check_method(const ast::Expr &node,
+                        const ast::MethodCallExpr &method) {
     if (!type_arguments(method.generic_args).empty())
       report(node.span, "method segments have no type parameters");
     auto receiver = check_expr(method.receiver);
@@ -1601,14 +1631,14 @@ private:
       if (!writable(receiver))
         report(node.span, name + " requires mutable access to Vec");
       if (name == "push")
-        return finish(check_method_signature(node, method.arguments, {vector->element},
-                                             ty(Ty::Kind::Unit)),
-                      "builtin::Vec::push", {},
-                      Adjustment::Kind::BorrowMutable);
-      return finish(check_method_signature(node, method.arguments, {ty(Ty::Kind::Usize)},
-                                           vector->element),
-                    "builtin::Vec::remove", {},
-                    Adjustment::Kind::BorrowMutable);
+        return finish(
+            check_method_signature(node, method.arguments, {vector->element},
+                                   ty(Ty::Kind::Unit)),
+            "builtin::Vec::push", {}, Adjustment::Kind::BorrowMutable);
+      return finish(
+          check_method_signature(node, method.arguments, {ty(Ty::Kind::Usize)},
+                                 vector->element),
+          "builtin::Vec::remove", {}, Adjustment::Kind::BorrowMutable);
     }
     if (name == "clone") {
       auto cloned = receiver.type;
@@ -1618,8 +1648,7 @@ private:
            cloned->element->kind == Ty::Kind::Array))
         cloned = cloned->element;
       if (!supports(cloned, "Clone", "", {}))
-        report(node.span,
-               "clone is not available for " + type_name(cloned));
+        report(node.span, "clone is not available for " + type_name(cloned));
       return finish(check_method_signature(node, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
@@ -1630,7 +1659,7 @@ private:
         const auto &function = it->second;
         if (!function.ast->signature.receiver.has_value()) {
           report(node.span, "associated function without self cannot be "
-                                   "called with dot syntax");
+                            "called with dot syntax");
           return finish({}, key, symbol_for(function.ast->id));
         }
         if (ast::by_reference(*function.ast->signature.receiver) &&
@@ -1654,7 +1683,7 @@ private:
   }
 
   ExprInfo check_method_signature(const ast::Node &node,
-                           const std::vector<ast::ExprPtr> &arguments,
+                                  const std::vector<ast::ExprPtr> &arguments,
                                   const std::vector<TyPtr> &parameters,
                                   TyPtr result) {
     const auto count = arguments.size();
@@ -1669,7 +1698,8 @@ private:
     return {std::move(result)};
   }
 
-  ExprInfo check_field(const ast::Expr &node, const ast::FieldExpr &projection) {
+  ExprInfo check_field(const ast::Expr &node,
+                       const ast::FieldExpr &projection) {
     auto receiver = check_expr(projection.base);
     auto base = receiver.type;
     bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
@@ -1706,7 +1736,8 @@ private:
             std::move(adjustments)};
   }
 
-  ExprInfo check_index(const ast::Expr &node, const ast::IndexExpr &projection) {
+  ExprInfo check_index(const ast::Expr &node,
+                       const ast::IndexExpr &projection) {
     auto base = check_expr(projection.base);
     auto index = check_expr(projection.index, ty(Ty::Kind::Usize));
     if (!same(index.type, ty(Ty::Kind::Usize)))
@@ -1730,8 +1761,7 @@ private:
     }
     if (container->kind != Ty::Kind::Array &&
         container->kind != Ty::Kind::Vec) {
-      report(node.span,
-             "type " + type_name(container) + " cannot be indexed");
+      report(node.span, "type " + type_name(container) + " cannot be indexed");
       return {};
     }
     if (container->kind == Ty::Kind::Vec && !mutable_access)
@@ -1745,9 +1775,8 @@ private:
       report(node.span, "break is only available inside a loop");
       return {ty(Ty::Kind::Never)};
     }
-    auto value =
-        p.value ? check_expr(*p.value, loops_.back().expected)
-            : ExprInfo{ty(Ty::Kind::Unit)};
+    auto value = p.value ? check_expr(*p.value, loops_.back().expected)
+                         : ExprInfo{ty(Ty::Kind::Unit)};
     loops_.back().break_types.push_back(value.type);
     return {ty(Ty::Kind::Never)};
   }
@@ -1762,8 +1791,7 @@ private:
     auto expected =
         current_function_ ? current_function_->result : ty(Ty::Kind::Error);
     auto value =
-        p.value ? check_expr(*p.value, expected)
-            : ExprInfo{ty(Ty::Kind::Unit)};
+        p.value ? check_expr(*p.value, expected) : ExprInfo{ty(Ty::Kind::Unit)};
     if (!coercible(value.type, expected))
       mismatch(node.span, value.type, expected);
     return {ty(Ty::Kind::Never)};
@@ -1797,8 +1825,15 @@ private:
 } // namespace
 
 std::string_view symbol_kind_name(SymbolKind kind) {
-  constexpr std::array names{"struct", "function", "constant", "associated-function",
-      "associated-constant", "field", "parameter", "receiver", "local"};
+  constexpr std::array names{"struct",
+                             "function",
+                             "constant",
+                             "associated-function",
+                             "associated-constant",
+                             "field",
+                             "parameter",
+                             "receiver",
+                             "local"};
   return names.at(static_cast<std::size_t>(kind));
 }
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics) {
@@ -1813,8 +1848,8 @@ std::string dump_semantic(const SemanticResult &result) {
       << " constants=" << result.summary.constants << '\n';
   out << "  Symbols\n";
   for (const auto &symbol : result.symbols) {
-    out << "    #" << symbol.id << ' ' << symbol_kind_name(symbol.kind) << ' ' << symbol.name
-        << " declaration=#" << symbol.declaration;
+    out << "    #" << symbol.id << ' ' << symbol_kind_name(symbol.kind) << ' '
+        << symbol.name << " declaration=#" << symbol.declaration;
     if (symbol.owner)
       out << " owner=#" << *symbol.owner;
     out << '\n';

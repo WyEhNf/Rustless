@@ -26,11 +26,13 @@ fn main() {
   printInt(a[0]);
   if true { printInt(1); } else if false { printInt(2); }
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   assert(!diagnostics.has_errors());
-  assert(checked.success && checked.structures.size() == 1 && checked.functions.size() == 2);
+  assert(checked.success && checked.structures.size() == 1 &&
+         checked.functions.size() == 2);
   assert(checked.structures[0].fields.size() == 1);
   assert(!checked.symbol_types.empty());
   bool saw_receiver = false;
@@ -51,8 +53,11 @@ fn main() {
   auto missing = checked;
   missing.expressions.pop_back();
   bool rejected = false;
-  try { rx::SemanticIndex invalid(*parsed.crate, missing); }
-  catch (const std::exception &) { rejected = true; }
+  try {
+    rx::SemanticIndex invalid(*parsed.crate, missing);
+  } catch (const std::exception &) {
+    rejected = true;
+  }
   assert(rejected);
   std::set<rx::SymbolId> symbols;
   std::set<ast::NodeId> declarations;

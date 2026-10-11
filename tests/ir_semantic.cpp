@@ -1,6 +1,6 @@
+#include "rx/ir_semantic.hpp"
 #include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
-#include "rx/ir_semantic.hpp"
 
 #undef NDEBUG
 #include <cassert>
@@ -32,7 +32,8 @@ fn main() {
   signed >>= 1;
   unsigned /= 2;
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
@@ -43,27 +44,33 @@ fn main() {
   const auto &layout = bridge.structure(index.declaration(packet.id).id);
   assert(layout.layout.bytes == 12 && layout.layout.alignment == 4);
   assert(layout.fields.size() == 3);
-  assert(layout.fields[0].offset == 0 && layout.fields[1].offset == 4 && layout.fields[2].offset == 8);
+  assert(layout.fields[0].offset == 0 && layout.fields[1].offset == 4 &&
+         layout.fields[2].offset == 8);
   assert(layout.fields[2].layout.bytes == 3);
   auto declarations = bridge.declarations();
   assert(declarations.size() == 4);
   assert(declarations[0].name == "Packet::get");
   assert(declarations[0].parameters == std::vector{ir::Type::Ptr});
   assert(declarations[0].result == ir::Type::I32);
-  assert(declarations[1].name == "Packet::copy" && declarations[1].result == ir::Type::Void);
-  assert(declarations[1].parameters == (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
+  assert(declarations[1].name == "Packet::copy" &&
+         declarations[1].result == ir::Type::Void);
+  assert(declarations[1].parameters ==
+         (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
   assert(declarations[2].name == "take");
-  assert(declarations[2].parameters == (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
+  assert(declarations[2].parameters ==
+         (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
   for (const auto &declaration : declarations) {
     assert(declaration.symbol && declaration.origin);
-    assert(index.symbol(*declaration.symbol).declaration == declaration.origin->node);
+    assert(index.symbol(*declaration.symbol).declaration ==
+           declaration.origin->node);
   }
   const auto &take = std::get<ast::Function>(parsed.crate->items[2]);
   auto abi = bridge.function(take);
   assert(abi.result.passing == ir::Passing::Indirect);
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
-  assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") != std::string::npos);
+  assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") !=
+         std::string::npos);
   std::vector<decltype(ir::BinaryLowering::operation)> operations;
   std::vector<ir::BinaryOp> assignments;
   const ast::Expr *first_binary = nullptr;
@@ -72,27 +79,35 @@ fn main() {
     if constexpr (std::same_as<P, ast::BinaryExpr>) {
       auto lowered = bridge.binary(owner, payload);
       operations.push_back(lowered.operation);
-      if (!first_binary) first_binary = &owner;
-      if (payload.op == ast::BinaryOp::Lt || payload.op == ast::BinaryOp::LogicalAnd ||
+      if (!first_binary)
+        first_binary = &owner;
+      if (payload.op == ast::BinaryOp::Lt ||
+          payload.op == ast::BinaryOp::LogicalAnd ||
           payload.op == ast::BinaryOp::LogicalOr)
         assert(lowered.result_type == ir::Type::I1);
-      else assert(lowered.result_type == ir::Type::I32);
+      else
+        assert(lowered.result_type == ir::Type::I32);
     }
     if constexpr (std::same_as<P, ast::CompoundAssignExpr>)
       assignments.push_back(bridge.compound(owner, payload));
   });
   using Operation = decltype(ir::BinaryLowering::operation);
   const std::vector<Operation> expected{
-    ir::BinaryOp::SDiv, ir::BinaryOp::UDiv, ir::BinaryOp::AShr, ir::BinaryOp::LShr,
-    ir::Predicate::SLt, ir::Predicate::ULt, ir::ShortCircuit::And, ir::ShortCircuit::Or};
+      ir::BinaryOp::SDiv,    ir::BinaryOp::UDiv,  ir::BinaryOp::AShr,
+      ir::BinaryOp::LShr,    ir::Predicate::SLt,  ir::Predicate::ULt,
+      ir::ShortCircuit::And, ir::ShortCircuit::Or};
   assert(operations == expected);
   assert(assignments == (std::vector{ir::BinaryOp::AShr, ir::BinaryOp::UDiv}));
   auto alien = rx::parse_source("fn main() { let x = 1 + 2; }", diagnostics);
   bool rejected = false;
   ast::walk(*alien.crate, [&](const auto &, const auto &payload) {
-    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>, ast::BinaryExpr>) {
-      try { (void)bridge.binary(*first_binary, payload); }
-      catch (const std::invalid_argument &) { rejected = true; }
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
+                               ast::BinaryExpr>) {
+      try {
+        (void)bridge.binary(*first_binary, payload);
+      } catch (const std::invalid_argument &) {
+        rejected = true;
+      }
     }
   });
   assert(rejected);
@@ -103,7 +118,10 @@ fn main() {
   array->element = integer;
   array->length = std::uint64_t{1} << 32;
   rejected = false;
-  try { (void)bridge.layout(array); }
-  catch (const std::overflow_error &) { rejected = true; }
+  try {
+    (void)bridge.layout(array);
+  } catch (const std::overflow_error &) {
+    rejected = true;
+  }
   assert(rejected);
 }

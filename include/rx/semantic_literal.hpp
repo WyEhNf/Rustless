@@ -7,7 +7,8 @@
 #include <optional>
 
 namespace rx {
-// Interpret the parser's typed literal descriptor rather than guessing its kind.
+// Interpret the parser's typed literal descriptor rather than guessing its
+// kind.
 inline std::optional<std::uint64_t>
 integer_magnitude(const ast::IntegerLiteral &literal) {
   std::string digits = literal.spelling;
@@ -21,17 +22,26 @@ integer_magnitude(const ast::IntegerLiteral &literal) {
   digits.erase(std::remove(digits.begin(), digits.end(), '_'), digits.end());
   std::string_view prefix;
   switch (literal.base) {
-  case ast::IntegerBase::Binary: prefix = "0b"; break;
-  case ast::IntegerBase::Octal: prefix = "0o"; break;
-  case ast::IntegerBase::Decimal: break;
-  case ast::IntegerBase::Hex: prefix = "0x"; break;
-  default: return {};
+  case ast::IntegerBase::Binary:
+    prefix = "0b";
+    break;
+  case ast::IntegerBase::Octal:
+    prefix = "0o";
+    break;
+  case ast::IntegerBase::Decimal:
+    break;
+  case ast::IntegerBase::Hex:
+    prefix = "0x";
+    break;
+  default:
+    return {};
   }
   if (!digits.starts_with(prefix) || digits.size() == prefix.size())
     return {};
   std::uint64_t value{};
   auto [end, error] = std::from_chars(digits.data() + prefix.size(),
-      digits.data() + digits.size(), value, static_cast<int>(literal.base));
+                                      digits.data() + digits.size(), value,
+                                      static_cast<int>(literal.base));
   if (error != std::errc{} || end != digits.data() + digits.size())
     return {};
   return value;

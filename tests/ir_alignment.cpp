@@ -9,14 +9,20 @@ namespace ir = rx::ir;
 namespace {
 template <class F> void rejects(F &&f) {
   bool rejected = false;
-  try { f(); } catch (const std::exception &) { rejected = true; }
+  try {
+    f();
+  } catch (const std::exception &) {
+    rejected = true;
+  }
   assert(rejected);
 }
 struct PartialVisitor {
   void operator()(const ir::Instruction &, const ir::Return &) {}
 };
 struct InconsistentVisitor {
-  template <class P> int operator()(const ir::Instruction &, const P &) { return 0; }
+  template <class P> int operator()(const ir::Instruction &, const P &) {
+    return 0;
+  }
   void operator()(const ir::Instruction &, const ir::Return &) {}
 };
 static_assert(!ir::ExhaustiveVisitor<PartialVisitor, ir::Instruction>);
@@ -36,11 +42,13 @@ ir::Module diamond() {
   builder.store(ir::Operand::constant(ir::Type::I32, 8), address);
   auto value = builder.load(ir::Type::I32, address);
   // These pushes may reallocate the block vector while entry stays selected.
-  auto left = builder.create_block("left"), right = builder.create_block("right");
+  auto left = builder.create_block("left"),
+       right = builder.create_block("right");
   auto join = builder.create_block("join");
   builder.cond_branch(ir::Operand::constant(ir::Type::I1, 1), left, right);
   builder.select(left);
-  auto sum = builder.binary(ir::BinaryOp::Add, value, ir::Operand::constant(ir::Type::I32, 1));
+  auto sum = builder.binary(ir::BinaryOp::Add, value,
+                            ir::Operand::constant(ir::Type::I32, 1));
   builder.branch(join);
   builder.select(right);
   builder.branch(join);
@@ -74,8 +82,8 @@ int main() {
   assert(errors[0].origin && errors[0].origin->node.value == 7);
   invalid([](ir::Function &f) {
     auto &ret = std::get<ir::Return>(f.blocks[3].instructions.back().data);
-    ret.value = ir::Operand::local(ir::Type::I32,
-        ir::definition(f.blocks[1].instructions[0])->id);
+    ret.value = ir::Operand::local(
+        ir::Type::I32, ir::definition(f.blocks[1].instructions[0])->id);
   }); // A left-only value cannot dominate the join.
   invalid([](ir::Function &f) {
     auto &phi = std::get<ir::Phi>(f.blocks[3].instructions[0].data);
@@ -83,7 +91,8 @@ int main() {
   });
   invalid([](ir::Function &f) {
     auto &load = std::get<ir::Load>(f.blocks[0].instructions[2].data);
-    load.address = ir::Operand::local(ir::Type::Ptr, ir::definition(f.blocks[1].instructions[0])->id);
+    load.address = ir::Operand::local(
+        ir::Type::Ptr, ir::definition(f.blocks[1].instructions[0])->id);
   });
   invalid([](ir::Function &f) {
     auto &branch = std::get<ir::Branch>(f.blocks[2].instructions[0].data);
@@ -93,16 +102,22 @@ int main() {
     f.blocks[3].instructions.emplace_back(ir::Unreachable{});
   });
   auto integer = ir::Operand::constant(ir::Type::I32, 1);
-  assert(!ir::verify_instruction(ir::Instruction{ir::Cast{
-      {ir::ValueId{1}, ir::Type::I8}, ir::CastOp::ZExt, integer}}).empty());
-  assert(!ir::verify_instruction(ir::Instruction{ir::Load{
-      {ir::ValueId{1}, ir::Type::I32}, integer, 3}}).empty());
+  assert(!ir::verify_instruction(
+              ir::Instruction{ir::Cast{
+                  {ir::ValueId{1}, ir::Type::I8}, ir::CastOp::ZExt, integer}})
+              .empty());
+  assert(
+      !ir::verify_instruction(ir::Instruction{ir::Load{
+                                  {ir::ValueId{1}, ir::Type::I32}, integer, 3}})
+           .empty());
   ir::Function function{"calls", ir::Type::Void};
   ir::Builder builder(function);
   builder.select(builder.create_block("entry"));
   auto before = function.blocks[0].instructions.size();
-  rejects([&] { builder.binary(ir::BinaryOp::Add, integer,
-      ir::Operand::constant(ir::Type::I1, 0)); });
+  rejects([&] {
+    builder.binary(ir::BinaryOp::Add, integer,
+                   ir::Operand::constant(ir::Type::I1, 0));
+  });
   assert(function.blocks[0].instructions.size() == before);
   assert(!builder.call(ir::Type::Void, "external", {}));
   builder.ret();
@@ -114,7 +129,8 @@ int main() {
   assert(!ir::verify(calls).empty());
   calls.functions[0].symbol.reset();
   calls.functions[0].blocks[0].instructions.insert(
-      calls.functions[0].blocks[0].instructions.begin(), ir::Instruction{ir::Load{
-          {ir::ValueId{99}, ir::Type::I32}, ir::Operand::global("missing")}});
+      calls.functions[0].blocks[0].instructions.begin(),
+      ir::Instruction{ir::Load{{ir::ValueId{99}, ir::Type::I32},
+                               ir::Operand::global("missing")}});
   assert(!ir::verify(calls).empty());
 }

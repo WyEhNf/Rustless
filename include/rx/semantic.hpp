@@ -14,8 +14,15 @@ namespace rx {
 
 // Syntax and semantic identities are distinct, even when numerically related.
 enum class SymbolKind {
-  Struct, Function, Constant, AssociatedFunction, AssociatedConstant,
-  Field, Parameter, Receiver, Local
+  Struct,
+  Function,
+  Constant,
+  AssociatedFunction,
+  AssociatedConstant,
+  Field,
+  Parameter,
+  Receiver,
+  Local
 };
 std::string_view symbol_kind_name(SymbolKind kind);
 

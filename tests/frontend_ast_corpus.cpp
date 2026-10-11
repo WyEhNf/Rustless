@@ -34,14 +34,15 @@ int main(int argc, char **argv) {
           parsed.syntax_ok && parsed.crate && !diagnostics.has_errors();
       if (passed) {
         std::set<rx::ast::NodeId> identities;
-        rx::ast::walk(*parsed.crate, [&](const rx::ast::Node &node, const auto &) {
-          if (node.id.value == 0 || !identities.insert(node.id).second)
-            throw std::logic_error("duplicate or missing syntax identity");
-          if (node.span.begin > node.span.end ||
-              node.span.end > source.size() ||
-              node.span.file != parsed.crate->source.id)
-            throw std::logic_error("invalid syntax source span");
-        });
+        rx::ast::walk(
+            *parsed.crate, [&](const rx::ast::Node &node, const auto &) {
+              if (node.id.value == 0 || !identities.insert(node.id).second)
+                throw std::logic_error("duplicate or missing syntax identity");
+              if (node.span.begin > node.span.end ||
+                  node.span.end > source.size() ||
+                  node.span.file != parsed.crate->source.id)
+                throw std::logic_error("invalid syntax source span");
+            });
         const auto dump = rx::ast::dump(*parsed.crate);
         if (!dump.starts_with("Crate"))
           throw std::logic_error("missing AST dump root");

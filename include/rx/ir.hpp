@@ -14,9 +14,15 @@ namespace rx::ir {
 
 enum class Type { Void, I1, I8, I32, Ptr };
 
-struct ConstantOperand { std::uint32_t bits; };
-struct LocalOperand { ValueId id; };
-struct GlobalOperand { std::string symbol; };
+struct ConstantOperand {
+  std::uint32_t bits;
+};
+struct LocalOperand {
+  ValueId id;
+};
+struct GlobalOperand {
+  std::string symbol;
+};
 struct Operand {
   using Data = std::variant<ConstantOperand, LocalOperand, GlobalOperand>;
   Operand(Type type, Data data) : type(type), data(std::move(data)) {}
@@ -86,7 +92,21 @@ struct Gep {
   Operand offset;
 };
 
-enum class BinaryOp { Add, Sub, Mul, SDiv, UDiv, SRem, URem, And, Or, Xor, Shl, LShr, AShr };
+enum class BinaryOp {
+  Add,
+  Sub,
+  Mul,
+  SDiv,
+  UDiv,
+  SRem,
+  URem,
+  And,
+  Or,
+  Xor,
+  Shl,
+  LShr,
+  AShr
+};
 enum class CastOp { ZExt, Trunc, PtrToInt, IntToPtr };
 struct Binary {
   Result result;
@@ -120,18 +140,22 @@ struct Phi {
   Result result;
   std::vector<PhiIncoming> incoming;
 };
-struct Branch { BlockId target; };
+struct Branch {
+  BlockId target;
+};
 struct CondBranch {
   Operand condition;
   BlockId consequent;
   BlockId alternative;
 };
-struct Return { std::optional<Operand> value; };
+struct Return {
+  std::optional<Operand> value;
+};
 struct Unreachable {};
 
 struct Instruction {
   using Data = std::variant<Alloca, Load, Store, Gep, Binary, Compare, Cast,
-                           Call, Phi, Branch, CondBranch, Return, Unreachable>;
+                            Call, Phi, Branch, CondBranch, Return, Unreachable>;
   explicit Instruction(Data data, std::optional<Origin> origin = {})
       : data(std::move(data)), origin(origin) {}
   Data data;

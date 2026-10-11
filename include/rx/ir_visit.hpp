@@ -12,7 +12,10 @@ struct Coverage<V, Owner, std::variant<Ps...>> {
     if constexpr ((std::invocable<V &, const Owner &, const Ps &> && ...)) {
       using First = std::variant_alternative_t<0, std::variant<Ps...>>;
       using R = std::invoke_result_t<V &, const Owner &, const First &>;
-      return (std::same_as<R, std::invoke_result_t<V &, const Owner &, const Ps &>> && ...);
+      return (
+          std::same_as<R,
+                       std::invoke_result_t<V &, const Owner &, const Ps &>> &&
+          ...);
     }
     return false;
   }
@@ -20,47 +23,80 @@ struct Coverage<V, Owner, std::variant<Ps...>> {
 };
 } // namespace detail
 template <class V, class T>
-concept ExhaustiveVisitor = (std::same_as<T, Instruction> || std::same_as<T, Operand>) &&
+concept ExhaustiveVisitor =
+    (std::same_as<T, Instruction> || std::same_as<T, Operand>) &&
     detail::Coverage<V, T, typename T::Data>::value;
 
-template <class T, class V> requires ExhaustiveVisitor<V, T>
+template <class T, class V>
+  requires ExhaustiveVisitor<V, T>
 decltype(auto) visit(const T &node, V &&visitor) {
-  return std::visit([&](const auto &p) -> decltype(auto) {
-    return std::invoke(visitor, node, p);
-  }, node.data);
+  return std::visit(
+      [&](const auto &p) -> decltype(auto) {
+        return std::invoke(visitor, node, p);
+      },
+      node.data);
 }
 
 // Each required operand is enumerated through its named payload field.
 template <class V> void for_each_operand(const Instruction &node, V &&visitor) {
-  visit(node, ast::Overloaded{
-    [&](const Instruction &, const Alloca &) {},
-    [&](const Instruction &, const Load &p) { visitor(p.address); },
-    [&](const Instruction &, const Store &p) { visitor(p.value); visitor(p.address); },
-    [&](const Instruction &, const Gep &p) { visitor(p.base); visitor(p.offset); },
-    [&](const Instruction &, const Binary &p) { visitor(p.left); visitor(p.right); },
-    [&](const Instruction &, const Compare &p) { visitor(p.left); visitor(p.right); },
-    [&](const Instruction &, const Cast &p) { visitor(p.operand); },
-    [&](const Instruction &, const Call &p) { for (const auto &a : p.arguments) visitor(a); },
-    [&](const Instruction &, const Phi &p) { for (const auto &a : p.incoming) visitor(a.value); },
-    [&](const Instruction &, const Branch &) {},
-    [&](const Instruction &, const CondBranch &p) { visitor(p.condition); },
-    [&](const Instruction &, const Return &p) { if (p.value) visitor(*p.value); },
-    [&](const Instruction &, const Unreachable &) {}});
+  visit(node,
+        ast::Overloaded{
+            [&](const Instruction &, const Alloca &) {},
+            [&](const Instruction &, const Load &p) { visitor(p.address); },
+            [&](const Instruction &, const Store &p) {
+              visitor(p.value);
+              visitor(p.address);
+            },
+            [&](const Instruction &, const Gep &p) {
+              visitor(p.base);
+              visitor(p.offset);
+            },
+            [&](const Instruction &, const Binary &p) {
+              visitor(p.left);
+              visitor(p.right);
+            },
+            [&](const Instruction &, const Compare &p) {
+              visitor(p.left);
+              visitor(p.right);
+            },
+            [&](const Instruction &, const Cast &p) { visitor(p.operand); },
+            [&](const Instruction &, const Call &p) {
+              for (const auto &a : p.arguments)
+                visitor(a);
+            },
+            [&](const Instruction &, const Phi &p) {
+              for (const auto &a : p.incoming)
+                visitor(a.value);
+            },
+            [&](const Instruction &, const Branch &) {},
+            [&](const Instruction &, const CondBranch &p) {
+              visitor(p.condition);
+            },
+            [&](const Instruction &, const Return &p) {
+              if (p.value)
+                visitor(*p.value);
+            },
+            [&](const Instruction &, const Unreachable &) {}});
 }
-template <class V> void for_each_successor(const Instruction &node, V &&visitor) {
-  visit(node, ast::Overloaded{
-    [&](const Instruction &, const Alloca &) {},
-    [&](const Instruction &, const Load &) {},
-    [&](const Instruction &, const Store &) {},
-    [&](const Instruction &, const Gep &) {},
-    [&](const Instruction &, const Binary &) {},
-    [&](const Instruction &, const Compare &) {},
-    [&](const Instruction &, const Cast &) {},
-    [&](const Instruction &, const Call &) {},
-    [&](const Instruction &, const Phi &) {},
-    [&](const Instruction &, const Branch &p) { visitor(p.target); },
-    [&](const Instruction &, const CondBranch &p) { visitor(p.consequent); visitor(p.alternative); },
-    [&](const Instruction &, const Return &) {},
-    [&](const Instruction &, const Unreachable &) {}});
+template <class V>
+void for_each_successor(const Instruction &node, V &&visitor) {
+  visit(node,
+        ast::Overloaded{
+            [&](const Instruction &, const Alloca &) {},
+            [&](const Instruction &, const Load &) {},
+            [&](const Instruction &, const Store &) {},
+            [&](const Instruction &, const Gep &) {},
+            [&](const Instruction &, const Binary &) {},
+            [&](const Instruction &, const Compare &) {},
+            [&](const Instruction &, const Cast &) {},
+            [&](const Instruction &, const Call &) {},
+            [&](const Instruction &, const Phi &) {},
+            [&](const Instruction &, const Branch &p) { visitor(p.target); },
+            [&](const Instruction &, const CondBranch &p) {
+              visitor(p.consequent);
+              visitor(p.alternative);
+            },
+            [&](const Instruction &, const Return &) {},
+            [&](const Instruction &, const Unreachable &) {}});
 }
 } // namespace rx::ir
