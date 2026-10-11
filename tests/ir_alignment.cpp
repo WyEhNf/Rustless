@@ -3,6 +3,7 @@
 
 #undef NDEBUG
 #include <cassert>
+#include <fstream>
 #include <stdexcept>
 
 namespace ir = rx::ir;
@@ -60,10 +61,15 @@ ir::Module diamond() {
   return module;
 }
 } // namespace
-int main() {
+int main(int argc, char **argv) {
   auto module = diamond();
   assert(ir::verify(module).empty());
   auto llvm = ir::print(module);
+  if (argc == 2) {
+    std::ofstream output(argv[1]);
+    output << llvm;
+    assert(output.good());
+  }
   assert(llvm.find("@\"Pair::choose\"") != std::string::npos);
   assert(llvm.find("entry comment") != std::string::npos);
   assert(ir::symbol_name("a\"b\\c") == "\"a\\22b\\5Cc\"");

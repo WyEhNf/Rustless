@@ -2,6 +2,7 @@
 
 #undef NDEBUG
 #include <cassert>
+#include <fstream>
 #include <stdexcept>
 #include <type_traits>
 
@@ -11,7 +12,7 @@ static_assert(!std::same_as<ir::ValueId, rx::ast::NodeId>);
 static_assert(!std::is_default_constructible_v<ir::Instruction>);
 static_assert(!std::is_default_constructible_v<ir::Operand>);
 
-int main() {
+int main(int argc, char **argv) {
   using namespace ir;
   auto c = [](std::uint32_t bits) {
     return Operand::constant(Type::I32, bits);
@@ -78,6 +79,11 @@ int main() {
         Instruction{Return{v(Type::I32, 1)}}}}};
   module.functions.push_back(join);
   const auto expanded = print(module);
+  if (argc == 2) {
+    std::ofstream output(argv[1]);
+    output << expanded;
+    assert(output.good());
+  }
   for (const auto *expected :
        {"alloca i8, i32 4, align 4", "store i32 7, ptr %v1",
         "getelementptr i8, ptr %v1, i32 0", "%v4 = add i32 %v3, 1",
