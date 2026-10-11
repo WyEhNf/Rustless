@@ -187,11 +187,11 @@ public:
     for (const auto &[_, constant] : constants_)
       if (constant.state == ConstantInfo::State::Done)
         result_.constants.push_back(
-            {constant.ast->id, static_cast<std::uint32_t>(constant.value)});
+            {symbol_for(constant.ast->id), static_cast<std::uint32_t>(constant.value)});
     for (const auto &[_, constant] : associated_constants_)
       if (constant.state == ConstantInfo::State::Done)
         result_.constants.push_back(
-            {constant.ast->id, static_cast<std::uint32_t>(constant.value)});
+            {symbol_for(constant.ast->id), static_cast<std::uint32_t>(constant.value)});
     std::sort(result_.constants.begin(), result_.constants.end(),
               [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
     return std::move(result_);
@@ -202,10 +202,14 @@ private:
     diagnostics_.error(span, std::move(message));
   }
 
-  void record_symbol(SymbolId id, std::string kind, std::string name,
-                     std::optional<SymbolId> owner = {}) {
+  static SymbolId symbol_for(ast::NodeId node) { return SymbolId{node.value}; }
+  void record_symbol(ast::NodeId node, std::string kind, std::string name,
+                     std::optional<ast::NodeId> owner = {}) {
+    auto id = symbol_for(node);
+    std::optional<SymbolId> parent;
+    if (owner) parent = symbol_for(*owner);
     if (recorded_symbols_.insert(id).second)
-      result_.symbols.push_back({id, std::move(kind), std::move(name), owner});
+      result_.symbols.push_back({id, std::move(kind), std::move(name), parent, node});
   }
 
   void collect_items() {
@@ -443,7 +447,7 @@ private:
         if (!fields.insert(field.name.text).second)
           report(field.span, "duplicate field '" + field.name.text + "'");
         structure.fields[field.name.text] = resolve_type(field.type, name);
-        structure.field_symbols[field.name.text] = field.id;
+        structure.field_symbols[field.name.text] = symbol_for(field.id);
       }
     }
     for (auto &[name, function] : functions_)
@@ -536,7 +540,7 @@ private:
         evaluate_constant(it->second);
         record_expression(expression,
                           ExprInfo{it->second.type, false, false, false,
-                                   it->second.ast->id, name});
+                                   symbol_for(it->second.ast->id), name});
         return {it->second.type, it->second.value};
       }
       if (auto it = associated_constants_.find(name);
@@ -544,7 +548,7 @@ private:
         evaluate_constant(it->second);
         record_expression(expression,
                           ExprInfo{it->second.type, false, false, false,
-                                   it->second.ast->id, name});
+                                   symbol_for(it->second.ast->id), name});
         return {it->second.type, it->second.value};
       }
       report(expression->span, "constant path does not resolve to a constant");
@@ -672,8 +676,9 @@ private:
       self->name = function.owner;
       if (ast::by_reference(*function.ast->signature.receiver))
         self = compound(Ty::Kind::Ref, self, ast::is_mutable(*function.ast->signature.receiver));
+      record_symbol(function.ast->signature.receiver->id, "receiver", "self", function.ast->id);
       scopes_.back()["self"] = {self, ast::is_mutable(*function.ast->signature.receiver),
-                                function.ast->id};
+                                symbol_for(function.ast->signature.receiver->id)};
     }
     for (std::size_t i = 0; i < function.ast->signature.parameters.size(); ++i) {
       const auto &parameter = function.ast->signature.parameters[i];
@@ -682,7 +687,7 @@ private:
       record_symbol(parameter.id, "parameter", parameter.binding.name.text,
                     function.ast->id);
       scopes_.back()[parameter.binding.name.text] = {function.parameters[i],
-                                        parameter.binding.mutability == ast::Mutability::Mutable, parameter.id};
+                                        parameter.binding.mutability == ast::Mutability::Mutable, symbol_for(parameter.id)};
     }
     auto body = check_block(*function.ast->body, function.result);
     if (!coercible(body.type, function.result))
@@ -867,11 +872,11 @@ private:
         return {binding->type,   true, binding->is_mutable, false,
                 binding->symbol, name};
       if (auto it = constants_.find(name); it != constants_.end())
-        return {it->second.type, false, false, false, it->second.ast->id, name};
+        return {it->second.type, false, false, false, symbol_for(it->second.ast->id), name};
       if (auto it = functions_.find(name); it != functions_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, it->second.ast->id, name};
+        return {value, false, false, false, symbol_for(it->second.ast->id), name};
       }
       if (builtin_function(name)) {
         auto value = ty(Ty::Kind::Function);
@@ -881,17 +886,17 @@ private:
       if (auto it = structures_.find(name); it != structures_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, it->second.ast->id, name};
+        return {value, false, false, false, symbol_for(it->second.ast->id), name};
       }
     } else {
       if (auto it = associated_constants_.find(name);
           it != associated_constants_.end())
-        return {it->second.type, false, false, false, it->second.ast->id, name};
+        return {it->second.type, false, false, false, symbol_for(it->second.ast->id), name};
       if (auto it = associated_functions_.find(name);
           it != associated_functions_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, it->second.ast->id, name};
+        return {value, false, false, false, symbol_for(it->second.ast->id), name};
       }
       if (constructor_path(path)) {
         auto value = ty(Ty::Kind::Function);
@@ -899,7 +904,7 @@ private:
         std::optional<SymbolId> symbol;
         if (auto it = structures_.find(std::string(ast::name_text(path.segments.front().name)));
             it != structures_.end())
-          symbol = it->second.ast->id;
+          symbol = symbol_for(it->second.ast->id);
         return {value, false, false, false, symbol, "builtin::" + name};
       }
     }
@@ -991,7 +996,7 @@ private:
         report(expression->span, "missing field initializer '" + field + "'");
     auto result = ty(Ty::Kind::Struct);
     result->name = name;
-    return {result, false, false, false, it->second.ast->id, name};
+    return {result, false, false, false, symbol_for(it->second.ast->id), name};
   }
 
   ExprInfo check_block(const ast::Block &block, const TyPtr &expected = {}) {
@@ -1010,9 +1015,9 @@ private:
           if (annotation && annotation->kind == Ty::Kind::Ref && annotation->is_mutable && initializer.access_locked)
             report(p.initializer->span, "mutable reference initializer requires mutable container access");
           record_symbol(statement->id, "local", p.binding.name.text,
-              current_function_ ? std::optional<SymbolId>(current_function_->ast->id) : std::nullopt);
+              current_function_ ? std::optional<ast::NodeId>(current_function_->ast->id) : std::nullopt);
           if (protected_builtin_value(p.binding.name.text)) report(p.binding.name.span, "cannot shadow a protected builtin");
-          scopes_.back()[p.binding.name.text] = {binding_type, p.binding.mutability == ast::Mutability::Mutable, statement->id};
+          scopes_.back()[p.binding.name.text] = {binding_type, p.binding.mutability == ast::Mutability::Mutable, symbol_for(statement->id)};
         },
         [&](const ast::ExprStmt &p) {
           auto value = check_expr(p.expression);
@@ -1433,14 +1438,14 @@ private:
         if (!function.ast->signature.receiver.has_value()) {
           report(expression->span, "associated function without self cannot be "
                                    "called with dot syntax");
-          return finish({}, key, function.ast->id);
+          return finish({}, key, symbol_for(function.ast->id));
         }
         if (ast::by_reference(*function.ast->signature.receiver) && ast::is_mutable(*function.ast->signature.receiver) &&
             !writable(receiver))
           report(expression->span, "method requires a mutable receiver");
         return finish(check_method_signature(expression, function.parameters,
                                              function.result),
-                      key, function.ast->id,
+                      key, symbol_for(function.ast->id),
                       ast::by_reference(*function.ast->signature.receiver)
                           ? std::optional<Adjustment::Kind>(
                                 ast::is_mutable(*function.ast->signature.receiver)
@@ -1608,7 +1613,7 @@ std::string dump_semantic(const SemanticResult &result) {
       << " constants=" << result.summary.constants << '\n';
   out << "  Symbols\n";
   for (const auto &symbol : result.symbols) {
-    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name;
+    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name << " declaration=#" << symbol.declaration;
     if (symbol.owner)
       out << " owner=#" << *symbol.owner;
     out << '\n';

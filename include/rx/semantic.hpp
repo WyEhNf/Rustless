@@ -11,8 +11,9 @@
 
 namespace rx {
 
-// Declaration nodes provide stable symbol identity across frontend stages.
-using SymbolId = ast::NodeId;
+// Syntax and semantic identities are distinct, even when numerically related.
+struct SymbolTag;
+using SymbolId = ast::Id<SymbolTag>;
 
 struct SemanticType;
 using SemanticTypePtr = std::shared_ptr<SemanticType>;
@@ -58,6 +59,7 @@ struct SymbolRecord {
   std::string kind;
   std::string name;
   std::optional<SymbolId> owner;
+  ast::NodeId declaration;
 };
 
 struct ExpressionSemantics {

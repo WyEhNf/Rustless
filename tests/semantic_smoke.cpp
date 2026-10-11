@@ -4,6 +4,10 @@
 #undef NDEBUG
 #include <cassert>
 #include <string_view>
+#include <type_traits>
+
+static_assert(!std::is_same_v<rx::SymbolId, rx::ast::NodeId>);
+static_assert(!std::is_convertible_v<rx::ast::NodeId, rx::SymbolId>);
 
 int main() {
   constexpr std::string_view accepted = R"(
@@ -25,6 +29,8 @@ fn main() {
   assert(valid.summary.structures == 1);
   assert(valid.summary.constants == 1);
   assert(!valid.symbols.empty());
+  for (const auto &symbol : valid.symbols)
+    assert(symbol.declaration.value != 0);
   assert(!valid.expressions.empty());
   assert(!valid.resolved_types.empty());
   assert(valid.constants.size() == 1 && valid.constants[0].bits == 2);
