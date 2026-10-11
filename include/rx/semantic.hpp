@@ -15,6 +15,12 @@ namespace rx {
 struct SymbolTag;
 using SymbolId = ast::Id<SymbolTag>;
 
+enum class SymbolKind {
+  Struct, Function, Constant, AssociatedFunction, AssociatedConstant,
+  Field, Parameter, Receiver, Local
+};
+std::string_view symbol_kind_name(SymbolKind kind);
+
 struct SemanticType;
 using SemanticTypePtr = std::shared_ptr<SemanticType>;
 
@@ -56,7 +62,7 @@ struct Adjustment {
 
 struct SymbolRecord {
   SymbolId id{};
-  std::string kind;
+  SymbolKind kind;
   std::string name;
   std::optional<SymbolId> owner;
   ast::NodeId declaration;

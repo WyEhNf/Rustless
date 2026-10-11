@@ -206,7 +206,7 @@ private:
   }
 
   static SymbolId symbol_for(ast::NodeId node) { return SymbolId{node.value}; }
-  void record_symbol(ast::NodeId node, std::string kind, std::string name,
+  void record_symbol(ast::NodeId node, SymbolKind kind, std::string name,
                      std::optional<ast::NodeId> owner = {}) {
     auto id = symbol_for(node);
     std::optional<SymbolId> parent;
@@ -214,7 +214,7 @@ private:
       parent = symbol_for(*owner);
     if (recorded_symbols_.insert(id).second)
       result_.symbols.push_back(
-          {id, std::move(kind), std::move(name), parent, node});
+          {id, kind, std::move(name), parent, node});
   }
 
   void collect_items() {
@@ -224,7 +224,7 @@ private:
       ast::visit(item, [&](const ast::Node &, const auto &value) {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, ast::Struct>) {
-          record_symbol(value.id, "struct", value.name.text);
+          record_symbol(value.id, SymbolKind::Struct, value.name.text);
           if (builtin_type(value.name.text))
             report(value.span, "the builtin type name '" + value.name.text +
                                    "' is protected");
@@ -232,7 +232,7 @@ private:
             report(value.span, "duplicate type name '" + value.name.text + "'");
           structures_[value.name.text].ast = &value;
         } else if constexpr (std::is_same_v<T, ast::Function>) {
-          record_symbol(value.id, "function", value.name.text);
+          record_symbol(value.id, SymbolKind::Function, value.name.text);
           if (protected_builtin_value(value.name.text))
             report(value.span, "the builtin value name '" + value.name.text +
                                    "' is protected");
@@ -241,7 +241,7 @@ private:
                    "duplicate value name '" + value.name.text + "'");
           functions_[value.name.text].ast = &value;
         } else if constexpr (std::is_same_v<T, ast::Constant>) {
-          record_symbol(value.id, "constant", value.name.text);
+          record_symbol(value.id, SymbolKind::Constant, value.name.text);
           if (protected_builtin_value(value.name.text))
             report(value.span, "the builtin value name '" + value.name.text +
                                    "' is protected");
@@ -420,8 +420,8 @@ private:
           auto key = owner + "::" + name;
           record_symbol(declaration.id,
                         std::is_same_v<T, ast::Function>
-                            ? "associated-function"
-                            : "associated-constant",
+                            ? SymbolKind::AssociatedFunction
+                            : SymbolKind::AssociatedConstant,
                         key, owner_symbol);
           if (!associated_names.insert(name).second ||
               associated_functions_.contains(key) ||
@@ -464,7 +464,7 @@ private:
           !structure.derives.contains("PartialEq"))
         report(structure.ast->span, "Eq requires an explicit PartialEq derive");
       for (const auto &field : structure.ast->fields) {
-        record_symbol(field.id, "field", field.name.text, structure.ast->id);
+        record_symbol(field.id, SymbolKind::Field, field.name.text, structure.ast->id);
         if (!fields.insert(field.name.text).second)
           report(field.span, "duplicate field '" + field.name.text + "'");
         structure.fields[field.name.text] = resolve_type(field.type, name);
@@ -712,7 +712,7 @@ private:
       if (ast::by_reference(*function.ast->signature.receiver))
         self = compound(Ty::Kind::Ref, self,
                         ast::is_mutable(*function.ast->signature.receiver));
-      record_symbol(function.ast->signature.receiver->id, "receiver", "self",
+      record_symbol(function.ast->signature.receiver->id, SymbolKind::Receiver, "self",
                     function.ast->id);
       scopes_.back()["self"] = {
           self, ast::is_mutable(*function.ast->signature.receiver),
@@ -723,7 +723,7 @@ private:
       const auto &parameter = function.ast->signature.parameters[i];
       if (protected_builtin_value(parameter.binding.name.text))
         report(parameter.span, "cannot shadow a protected builtin");
-      record_symbol(parameter.id, "parameter", parameter.binding.name.text,
+      record_symbol(parameter.id, SymbolKind::Parameter, parameter.binding.name.text,
                     function.ast->id);
       scopes_.back()[parameter.binding.name.text] = {
           function.parameters[i],
@@ -1149,7 +1149,7 @@ private:
                          "mutable reference initializer requires mutable "
                          "container access");
                 record_symbol(
-                    node.id, "local", p.binding.name.text,
+                    node.id, SymbolKind::Local, p.binding.name.text,
                     current_function_
                         ? std::optional<ast::NodeId>(current_function_->ast->id)
                         : std::nullopt);
@@ -1763,6 +1763,11 @@ private:
 
 } // namespace
 
+std::string_view symbol_kind_name(SymbolKind kind) {
+  constexpr std::array names{"struct", "function", "constant", "associated-function",
+      "associated-constant", "field", "parameter", "receiver", "local"};
+  return names.at(static_cast<std::size_t>(kind));
+}
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics) {
   return Analyzer(crate, diagnostics).run();
 }
@@ -1775,7 +1780,7 @@ std::string dump_semantic(const SemanticResult &result) {
       << " constants=" << result.summary.constants << '\n';
   out << "  Symbols\n";
   for (const auto &symbol : result.symbols) {
-    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name
+    out << "    #" << symbol.id << ' ' << symbol_kind_name(symbol.kind) << ' ' << symbol.name
         << " declaration=#" << symbol.declaration;
     if (symbol.owner)
       out << " owner=#" << *symbol.owner;
