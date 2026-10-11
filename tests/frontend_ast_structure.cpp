@@ -1,8 +1,10 @@
 #include "rx/frontend.hpp"
+#include "rx/ast/visitor.hpp"
 
 #undef NDEBUG
 #include <cassert>
 #include <type_traits>
+#include <set>
 
 namespace ast = rx::ast;
 static_assert(!std::is_default_constructible_v<ast::Expr>);
@@ -100,4 +102,10 @@ fn ops() {
   assert(crate.source.slice(borrow.operator_span) == "&");
   assert(ast::get_if<ast::UnitExpr>(**std::get<ast::ReturnExpr>(expression(6).data).value));
   assert(ast::dump(crate) == ast::dump(crate));
+  std::set<ast::NodeId> identities;
+  ast::walk(crate, [&](const ast::Node &node) {
+    assert(node.id.value != 0 && identities.insert(node.id).second);
+    assert(node.span.begin <= node.span.end && node.span.end <= source.size());
+  });
+  assert(identities.size() > 60);
 }
