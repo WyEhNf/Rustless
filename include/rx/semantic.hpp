@@ -118,6 +118,8 @@ struct StructSemantics {
 };
 
 struct SemanticResult {
+  // Borrowed identity only; clients must keep this crate alive for AST queries.
+  const ast::Crate *source_crate{};
   SemanticSummary summary;
   std::vector<SymbolRecord> symbols;
   std::vector<ExpressionSemantics> expressions;

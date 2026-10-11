@@ -168,6 +168,7 @@ public:
       : crate_(crate), diagnostics_(diagnostics) {}
 
   SemanticResult run() {
+    result_.source_crate = &crate_;
     // Each pass consumes complete tables produced by the earlier passes.
     collect_items();
     resolve_declarations();
