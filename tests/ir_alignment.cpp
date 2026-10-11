@@ -30,7 +30,7 @@ ir::Module diamond() {
   builder.select(entry);
   rx::ast::Node source;
   source.id = rx::ast::NodeId{7};
-  source.span = {rx::ast::FileId{1}, 2, 9};
+  source.span = {rx::FileId{1}, 2, 9};
   builder.set_origin(source);
   auto address = builder.allocate(4);
   builder.store(ir::Operand::constant(ir::Type::I32, 8), address);
