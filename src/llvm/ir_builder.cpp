@@ -85,4 +85,26 @@ Operand Builder::cast(CastOp op, Type target, Operand operand) {
   append(Cast{result, op, std::move(operand)});
   return Operand::local(result.type, result.id);
 }
+std::optional<Operand> Builder::call(Type type, std::string callee, std::vector<Operand> arguments) {
+  std::optional<Result> result;
+  if (type != Type::Void) result = fresh(type);
+  append(Call{result, std::move(callee), std::move(arguments)});
+  if (!result) return {};
+  return Operand::local(result->type, result->id);
+}
+Operand Builder::phi(Type type, std::vector<PhiIncoming> incoming) {
+  auto result = fresh(type);
+  append(Phi{result, std::move(incoming)});
+  return Operand::local(type, result.id);
+}
+void Builder::branch(BlockId target) { append(Branch{target}); }
+void Builder::cond_branch(Operand condition, BlockId consequent, BlockId alternative) {
+  append(CondBranch{std::move(condition), consequent, alternative});
+}
+void Builder::ret(std::optional<Operand> value) {
+  if ((!value && function_.result != Type::Void) || (value && value->type != function_.result))
+    throw std::invalid_argument("return does not match the function result");
+  append(Return{std::move(value)});
+}
+void Builder::unreachable() { append(Unreachable{}); }
 } // namespace rx::ir

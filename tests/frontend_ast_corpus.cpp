@@ -1,6 +1,7 @@
 #include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
 #include "rx/semantic.hpp"
+#include "rx/semantic_index.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -46,7 +47,11 @@ int main(int argc, char **argv) {
           throw std::logic_error("missing AST dump root");
       }
       if (passed && semantic) {
-        rx::analyze(*parsed.crate, diagnostics);
+        auto checked = rx::analyze(*parsed.crate, diagnostics);
+        if (!diagnostics.has_errors()) {
+          rx::SemanticIndex index(*parsed.crate, checked);
+          (void)index;
+        }
         const auto name = entry.path().filename().string();
         if (name.starts_with("acc-"))
           passed = !diagnostics.has_errors();
