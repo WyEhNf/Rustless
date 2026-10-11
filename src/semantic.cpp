@@ -879,67 +879,67 @@ private:
     record_node(*expression, result);
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
-    auto result = ast::visit(
+    auto result = ast::dispatch(
         *expression,
         ast::Overloaded{
-            [&](const ast::IntegerExpr &p) -> ExprInfo {
+            [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
               return {
-                  literal_type(p.literal.spelling, expected, expression->span)};
+                  literal_type(p.literal.spelling, expected, node.span)};
             },
-            [&](const ast::BooleanExpr &) -> ExprInfo {
+            [&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
               return {ty(Ty::Kind::Bool)};
             },
-            [&](const ast::UnitExpr &) -> ExprInfo {
+            [&](const ast::Expr &, const ast::UnitExpr &) -> ExprInfo {
               return {ty(Ty::Kind::Unit)};
             },
-            [&](const ast::ParenExpr &p) {
+            [&](const ast::Expr &, const ast::ParenExpr &p) {
               auto inner = check_expr(p.inner, expected);
               inner.adjustments.clear();
               return inner;
             },
-            [&](const ast::PathExpr &) { return check_path(expression); },
-            [&](const ast::ArrayExpr &) {
+            [&](const ast::Expr &, const ast::PathExpr &) { return check_path(expression); },
+            [&](const ast::Expr &, const ast::ArrayExpr &) {
               return check_array(expression, expected);
             },
-            [&](const ast::RepeatArrayExpr &) {
+            [&](const ast::Expr &, const ast::RepeatArrayExpr &) {
               return check_repeat_array(expression, expected);
             },
-            [&](const ast::StructExpr &) { return check_struct(expression); },
-            [&](const ast::BlockExpr &p) {
+            [&](const ast::Expr &, const ast::StructExpr &) { return check_struct(expression); },
+            [&](const ast::Expr &, const ast::BlockExpr &p) {
               return check_block(*p.block, expected);
             },
-            [&](const ast::IfExpr &p) {
-              return check_if(*expression, p, expected);
+            [&](const ast::Expr &node, const ast::IfExpr &p) {
+              return check_if(node, p, expected);
             },
-            [&](const ast::LoopExpr &) {
+            [&](const ast::Expr &, const ast::LoopExpr &) {
               return check_loop(expression, expected);
             },
-            [&](const ast::WhileExpr &) { return check_while(expression); },
-            [&](const ast::UnaryExpr &) {
+            [&](const ast::Expr &, const ast::WhileExpr &) { return check_while(expression); },
+            [&](const ast::Expr &, const ast::UnaryExpr &) {
               return check_unary(expression, expected);
             },
-            [&](const ast::BorrowExpr &) { return check_borrow(expression); },
-            [&](const ast::BinaryExpr &) { return check_binary(expression); },
-            [&](const ast::AssignExpr &) {
+            [&](const ast::Expr &, const ast::BorrowExpr &) { return check_borrow(expression); },
+            [&](const ast::Expr &, const ast::BinaryExpr &) { return check_binary(expression); },
+            [&](const ast::Expr &, const ast::AssignExpr &) {
               return check_assignment(expression);
             },
-            [&](const ast::CompoundAssignExpr &) {
+            [&](const ast::Expr &, const ast::CompoundAssignExpr &) {
               return check_compound_assignment(expression);
             },
-            [&](const ast::CastExpr &) { return check_cast(expression); },
-            [&](const ast::CallExpr &) { return check_call(expression); },
-            [&](const ast::MethodCallExpr &) {
+            [&](const ast::Expr &, const ast::CastExpr &) { return check_cast(expression); },
+            [&](const ast::Expr &, const ast::CallExpr &) { return check_call(expression); },
+            [&](const ast::Expr &, const ast::MethodCallExpr &) {
               return check_method(expression);
             },
-            [&](const ast::FieldExpr &) { return check_field(expression); },
-            [&](const ast::IndexExpr &) { return check_index(expression); },
-            [&](const ast::BreakExpr &) {
+            [&](const ast::Expr &, const ast::FieldExpr &) { return check_field(expression); },
+            [&](const ast::Expr &, const ast::IndexExpr &) { return check_index(expression); },
+            [&](const ast::Expr &, const ast::BreakExpr &) {
               return check_break(expression, expected);
             },
-            [&](const ast::ContinueExpr &) {
+            [&](const ast::Expr &, const ast::ContinueExpr &) {
               return check_continue(expression);
             },
-            [&](const ast::ReturnExpr &) { return check_return(expression); }});
+            [&](const ast::Expr &, const ast::ReturnExpr &) { return check_return(expression); }});
     if (expected && !ast::get_if<ast::ParenExpr>(*expression) &&
         coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
@@ -1131,11 +1131,11 @@ private:
     TyPtr result = ty(Ty::Kind::Unit);
     for (std::size_t i = 0; i < block.statements.size(); ++i) {
       const auto &statement = block.statements[i];
-      ast::visit(
+      ast::dispatch(
           *statement,
           ast::Overloaded{
-              [&](const ast::EmptyStmt &) {},
-              [&](const ast::LetStmt &p) {
+              [&](const ast::Stmt &node, const ast::EmptyStmt &) {},
+              [&](const ast::Stmt &node, const ast::LetStmt &p) {
                 auto annotation =
                     p.annotation
                         ? resolve_type(
@@ -1152,7 +1152,7 @@ private:
                          "mutable reference initializer requires mutable "
                          "container access");
                 record_symbol(
-                    statement->id, "local", p.binding.name.text,
+                    node.id, "local", p.binding.name.text,
                     current_function_
                         ? std::optional<ast::NodeId>(current_function_->ast->id)
                         : std::nullopt);
@@ -1162,9 +1162,9 @@ private:
                 scopes_.back()[p.binding.name.text] = {
                     binding_type,
                     p.binding.mutability == ast::Mutability::Mutable,
-                    symbol_for(statement->id)};
+                    symbol_for(node.id)};
               },
-              [&](const ast::ExprStmt &p) {
+              [&](const ast::Stmt &node, const ast::ExprStmt &p) {
                 auto value = check_expr(p.expression);
                 if (!block.tail && i + 1 == block.statements.size() &&
                     value.type->kind == Ty::Kind::Never)
