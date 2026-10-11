@@ -1,4 +1,5 @@
 #include "rx/ir_verify.hpp"
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -85,10 +86,56 @@ struct Signature { Type result; std::vector<Type> parameters; };
 using Signatures = std::map<std::string, Signature>;
 using Blocks = std::map<BlockId, const Block *>;
 using Predecessors = std::map<BlockId, std::set<BlockId>>;
-void verify_ssa(const Function &, const Blocks &, const Predecessors &,
-                std::vector<VerificationError> &) {}
+using Dominators = std::map<BlockId, std::set<BlockId>>;
+Dominators dominators(const Function &, const Blocks &blocks, const Predecessors &) {
+  Dominators result;
+  for (const auto &[id, _] : blocks)
+    for (const auto &[other, _] : blocks) result[id].insert(other);
+  return result;
+}
+void verify_ssa(const Function &function, const Blocks &blocks, const Predecessors &predecessors,
+                std::vector<VerificationError> &errors) {
+  struct Definition { Type type; std::optional<BlockId> block; std::size_t position; };
+  std::map<ValueId, Definition> definitions;
+  auto error = [&](std::optional<BlockId> block, std::optional<Origin> origin, const char *message) {
+    errors.push_back({function.name, block, origin, message});
+  };
+  auto define = [&](ValueId id, Type type, std::optional<BlockId> block, std::size_t position) {
+    if (!id.value || !definitions.emplace(id, Definition{type, block, position}).second)
+      error(block, {}, "duplicate or zero SSA definition");
+  };
+  for (const auto &parameter : function.parameters) define(parameter.id, parameter.type, {}, 0);
+  for (const auto &block : function.blocks)
+    for (std::size_t i = 0; i < block.instructions.size(); ++i)
+      if (auto result = definition(block.instructions[i])) define(result->id, result->type, block.id, i);
+  const auto dom = dominators(function, blocks, predecessors);
+  auto use = [&](const Operand &operand, BlockId use_block, std::size_t position,
+                 BlockId report_block, const Instruction &node) {
+    if (const auto *local = std::get_if<LocalOperand>(&operand.data)) {
+      auto definition = definitions.find(local->id);
+      if (definition == definitions.end()) { error(report_block, node.origin, "undefined SSA operand"); return; }
+      const auto &value = definition->second;
+      if (value.type != operand.type) error(report_block, node.origin, "SSA operand type differs from its definition");
+      if (value.block) {
+        if (*value.block == use_block && value.position >= position)
+          error(report_block, node.origin, "SSA value is used before its definition");
+        else if (!dom.at(use_block).contains(*value.block))
+          error(report_block, node.origin, "SSA definition does not dominate its use");
+      }
+    }
+  };
+  for (const auto &block : function.blocks)
+    for (std::size_t i = 0; i < block.instructions.size(); ++i) {
+      const auto &node = block.instructions[i];
+      if (const auto *phi = std::get_if<Phi>(&node.data)) {
+        for (const auto &incoming : phi->incoming)
+          use(incoming.value, incoming.predecessor, blocks.at(incoming.predecessor)->instructions.size(), block.id, node);
+      } else for_each_operand(node, [&](const Operand &operand) { use(operand, block.id, i, block.id, node); });
+    }
+}
 void verify_function(const Function &function, const Signatures &signatures,
                      std::vector<VerificationError> &errors) {
+  const auto initial_errors = errors.size();
   auto error = [&](std::optional<BlockId> block, std::optional<Origin> origin,
                    std::string message) {
     errors.push_back({function.name, block, origin, std::move(message)});
@@ -146,7 +193,7 @@ void verify_function(const Function &function, const Signatures &signatures,
         for (const auto &value : phi->incoming) incoming.insert(value.predecessor);
         if (incoming != predecessors[block.id]) error(block.id, node.origin, "phi predecessors do not match control flow");
       }
-  verify_ssa(function, blocks, predecessors, errors);
+  if (errors.size() == initial_errors) verify_ssa(function, blocks, predecessors, errors);
 }
 } // namespace
 
