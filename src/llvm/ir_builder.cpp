@@ -50,4 +50,39 @@ void Builder::append(Instruction::Data data) {
     throw std::logic_error("phi must precede ordinary instructions");
   block.instructions.push_back(std::move(node));
 }
+Operand Builder::allocate(std::uint32_t bytes, std::uint32_t alignment) {
+  if (current().id != function_.blocks.front().id)
+    throw std::logic_error("fixed allocation requires the entry block");
+  auto result = fresh(Type::Ptr);
+  append(Alloca{result.id, bytes, alignment});
+  return Operand::local(result.type, result.id);
+}
+Operand Builder::load(Type type, Operand address, std::uint32_t alignment) {
+  auto result = fresh(type);
+  append(Load{result, std::move(address), alignment});
+  return Operand::local(type, result.id);
+}
+void Builder::store(Operand value, Operand address, std::uint32_t alignment) {
+  append(Store{std::move(value), std::move(address), alignment});
+}
+Operand Builder::gep(Operand base, Operand offset) {
+  auto result = fresh(Type::Ptr);
+  append(Gep{result.id, std::move(base), std::move(offset)});
+  return Operand::local(result.type, result.id);
+}
+Operand Builder::binary(BinaryOp op, Operand left, Operand right) {
+  auto result = fresh(left.type);
+  append(Binary{result, op, std::move(left), std::move(right)});
+  return Operand::local(result.type, result.id);
+}
+Operand Builder::compare(Predicate predicate, Operand left, Operand right) {
+  auto result = fresh(Type::I1);
+  append(Compare{result.id, predicate, std::move(left), std::move(right)});
+  return Operand::local(result.type, result.id);
+}
+Operand Builder::cast(CastOp op, Type target, Operand operand) {
+  auto result = fresh(target);
+  append(Cast{result, op, std::move(operand)});
+  return Operand::local(result.type, result.id);
+}
 } // namespace rx::ir
