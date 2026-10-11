@@ -1,5 +1,7 @@
 #pragma once
 
+#include "rx/ir_ids.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -7,8 +9,6 @@
 namespace rx::ir {
 
 enum class Type { Void, I1, I8, I32, Ptr };
-using ValueId = std::uint32_t;
-using BlockId = std::uint32_t;
 
 struct Operand {
   Type type{Type::Void};

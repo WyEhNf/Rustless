@@ -22,7 +22,7 @@ std::string typed(const Operand &operand) {
   return type_name(operand.type) + " " + value(operand);
 }
 
-std::string label(BlockId id) { return "%b" + std::to_string(id); }
+std::string label(BlockId id) { return "%b" + std::to_string(id.value); }
 
 std::string_view predicate_name(Predicate predicate) {
   static constexpr std::array<std::string_view, 10> names = {
@@ -65,7 +65,7 @@ std::string_view binary_opcode(Op op) {
 
 void print_instruction(std::ostringstream &out, const Instruction &instruction) {
   out << "  ";
-  if (instruction.result)
+  if (instruction.result.value)
     out << "%v" << instruction.result << " = ";
   switch (instruction.op) {
   case Op::Alloca:

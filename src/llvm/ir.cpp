@@ -9,7 +9,7 @@ Operand Operand::constant(Type type, std::uint32_t bits) {
 }
 
 Operand Operand::local(Type type, ValueId id) {
-  return {type, Kind::Local, id, {}};
+  return {type, Kind::Local, id.value, {}};
 }
 
 Operand Operand::global(std::string name) {
