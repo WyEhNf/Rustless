@@ -33,6 +33,49 @@ public:
   void operator()(const Parameter &p) { recurse_(*p.type); }
   void operator()(const StructField &p) { recurse_(*p.type); }
   void operator()(const FieldInit &p) { recurse_(*p.value); }
+  void operator()(const Function &p) {
+    generics(p.generics);
+    if (p.signature.receiver)
+      recurse_(*p.signature.receiver);
+    for (const auto &parameter : p.signature.parameters)
+      recurse_(parameter);
+    if (p.signature.return_annotation)
+      recurse_(**p.signature.return_annotation);
+    where_clause(p.where_clause);
+    recurse_(*p.body);
+  }
+  void operator()(const Struct &p) {
+    generics(p.generics);
+    where_clause(p.where_clause);
+    for (const auto &field : p.fields)
+      recurse_(field);
+  }
+  void operator()(const Constant &p) {
+    recurse_(*p.type);
+    recurse_(*p.value);
+  }
+  void operator()(const Impl &p) {
+    generics(p.generics);
+    recurse_(*p.target);
+    where_clause(p.where_clause);
+    for (const auto &member : p.members)
+      dispatch(member, [&](const auto &owner, const auto &) { recurse_(owner); });
+  }
+  void operator()(const UnitType &) {}
+  void operator()(const PathType &p) { path(p.path); }
+  void operator()(const ReferenceType &p) { recurse_(*p.referent); }
+  void operator()(const ArrayType &p) {
+    recurse_(*p.element);
+    recurse_(*p.length);
+  }
+  void operator()(const ParenType &p) { recurse_(*p.inner); }
+  void operator()(const EmptyStmt &) {}
+  void operator()(const LetStmt &p) {
+    if (p.annotation)
+      recurse_(**p.annotation);
+    recurse_(*p.initializer);
+  }
+  void operator()(const ExprStmt &p) { recurse_(*p.expression); }
 
 private:
   void arguments(const std::optional<GenericArguments> &value) {
