@@ -1,4 +1,5 @@
 #include "rx/semantic.hpp"
+#include "rx/semantic_literal.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -555,7 +556,7 @@ private:
     }
     if (ast::get_if<ast::IntegerExpr>(*expression)) {
       auto type = literal_type(
-          std::get<ast::IntegerExpr>(expression->data).literal.spelling,
+          std::get<ast::IntegerExpr>(expression->data).literal,
           expected, expression->span);
       std::string digits =
           std::get<ast::IntegerExpr>(expression->data).literal.spelling;
@@ -799,28 +800,22 @@ private:
                      type_name(expected));
   }
 
-  TyPtr literal_type(const std::string &text, const TyPtr &expected,
+  TyPtr literal_type(const ast::IntegerLiteral &literal, const TyPtr &expected,
                      Span span) {
     TyPtr result;
-    if (text.ends_with("usize"))
-      result = ty(Ty::Kind::Usize);
-    else if (text.ends_with("isize"))
-      result = ty(Ty::Kind::Isize);
-    else if (text.ends_with("u32"))
-      result = ty(Ty::Kind::U32);
-    else if (text.ends_with("i32"))
-      result = ty(Ty::Kind::I32);
-    else if (integer(expected))
+    if (literal.suffix) {
+      switch (*literal.suffix) {
+      case ast::IntegerSuffix::I32: result = ty(Ty::Kind::I32); break;
+      case ast::IntegerSuffix::U32: result = ty(Ty::Kind::U32); break;
+      case ast::IntegerSuffix::Isize: result = ty(Ty::Kind::Isize); break;
+      case ast::IntegerSuffix::Usize: result = ty(Ty::Kind::Usize); break;
+      }
+    } else if (integer(expected))
       result = expected;
     else
       result = ty(Ty::Kind::I32);
-    std::string digits = text;
-    for (auto suffix : {"usize", "isize", "u32", "i32"})
-      if (digits.ends_with(suffix))
-        digits.resize(digits.size() - std::string_view(suffix).size());
-    std::uint64_t value{};
-    if (!parse_unsigned(digits, value) ||
-        value > std::numeric_limits<std::uint32_t>::max())
+    auto value = integer_magnitude(literal);
+    if (!value || *value > std::numeric_limits<std::uint32_t>::max())
       report(span, "integer literal is outside the 32-bit target range");
     return result;
   }
@@ -882,7 +877,7 @@ private:
         *expression,
         ast::Overloaded{
             [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
-              return {literal_type(p.literal.spelling, expected, node.span)};
+              return {literal_type(p.literal, expected, node.span)};
             },
             [&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
               return {ty(Ty::Kind::Bool)};
