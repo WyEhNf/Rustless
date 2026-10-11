@@ -913,11 +913,11 @@ private:
             [&](const ast::Expr &node, const ast::IfExpr &p) {
               return check_if(node, p, expected);
             },
-            [&](const ast::Expr &, const ast::LoopExpr &) {
-              return check_loop(expression, expected);
+            [&](const ast::Expr &node, const ast::LoopExpr &loop_expr) {
+              return check_loop(node, loop_expr, expected);
             },
-            [&](const ast::Expr &, const ast::WhileExpr &) {
-              return check_while(expression);
+            [&](const ast::Expr &node, const ast::WhileExpr &while_expr) {
+              return check_while(node, while_expr);
             },
             [&](const ast::Expr &, const ast::UnaryExpr &) {
               return check_unary(expression, expected);
@@ -1243,8 +1243,7 @@ private:
     return {};
   }
 
-  ExprInfo check_loop(const ast::ExprPtr &expression, const TyPtr &expected) {
-    const auto &loop_expr = std::get<ast::LoopExpr>(expression->data);
+  ExprInfo check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr, const TyPtr &expected) {
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
@@ -1256,13 +1255,12 @@ private:
     auto result = loop.expected ? loop.expected : loop.break_types.front();
     for (const auto &value : loop.break_types)
       if (!coercible(value, result))
-        mismatch(expression->span, value, result);
+        mismatch(node.span, value, result);
     return {result};
   }
 
-  ExprInfo check_while(const ast::ExprPtr &expression) {
+  ExprInfo check_while(const ast::Expr &node, const ast::WhileExpr &while_expr) {
     // A condition may only break or continue loops nested inside itself.
-    const auto &while_expr = std::get<ast::WhileExpr>(expression->data);
     auto surrounding_loops = std::move(loops_);
     loops_.clear();
     auto condition = check_expr(while_expr.condition, ty(Ty::Kind::Bool));
@@ -1275,7 +1273,7 @@ private:
       report(while_expr.body->span, "while body must have unit type");
     for (const auto &value : loops_.back().break_types)
       if (value->kind != Ty::Kind::Unit)
-        report(expression->span, "break with a value is not allowed in while");
+        report(node.span, "break with a value is not allowed in while");
     loops_.pop_back();
     return {ty(Ty::Kind::Unit)};
   }
