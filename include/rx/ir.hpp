@@ -58,6 +58,31 @@ enum class Op {
 
 enum class Predicate { Eq, Ne, SLt, SLe, SGt, SGe, ULt, ULe, UGt, UGe };
 
+struct Result {
+  ValueId id;
+  Type type;
+};
+struct Alloca {
+  ValueId result;
+  std::uint32_t bytes;
+  std::uint32_t alignment{4};
+};
+struct Load {
+  Result result;
+  Operand address;
+  std::uint32_t alignment{4};
+};
+struct Store {
+  Operand value;
+  Operand address;
+  std::uint32_t alignment{4};
+};
+struct Gep {
+  ValueId result;
+  Operand base;
+  Operand offset;
+};
+
 struct Instruction {
   Op op{Op::Unreachable};
   ValueId result{}; // Zero means no result; SSA IDs start at one.
