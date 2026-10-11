@@ -854,14 +854,15 @@ private:
   }
 
   ExprInfo check_path(const ast::ExprPtr &expression) {
-    auto name = join_path(expression->path);
-    if (expression->path.size() > 1 && expression->path.front() == "Self" &&
+    const auto &path = std::get<ast::PathExpr>(expression->data).path;
+    auto name = ast::path_name(path);
+    if (path.segments.size() > 1 && std::string(ast::name_text(path.segments.front().name)) == "Self" &&
         current_function_ && !current_function_->owner.empty()) {
       name = current_function_->owner;
-      for (std::size_t i = 1; i < expression->path.size(); ++i)
-        name += "::" + expression->path[i];
+      for (std::size_t i = 1; i < path.segments.size(); ++i)
+        name += "::" + std::string(ast::name_text(path.segments[i].name));
     }
-    if (expression->path.size() == 1) {
+    if (path.segments.size() == 1) {
       if (auto *binding = lookup(name))
         return {binding->type,   true, binding->is_mutable, false,
                 binding->symbol, name};
@@ -892,11 +893,11 @@ private:
         value->name = name;
         return {value, false, false, false, it->second.ast->id, name};
       }
-      if (constructor_path(expression)) {
+      if (constructor_path(path)) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
         std::optional<SymbolId> symbol;
-        if (auto it = structures_.find(expression->path.front());
+        if (auto it = structures_.find(std::string(ast::name_text(path.segments.front().name)));
             it != structures_.end())
           symbol = it->second.ast->id;
         return {value, false, false, false, symbol, "builtin::" + name};
@@ -911,18 +912,14 @@ private:
            name == "print_i32" || name == "println_i32";
   }
 
-  bool constructor_path(const ast::ExprPtr &expression) {
-    if (expression->path.size() != 2)
-      return false;
-    const bool builtin_container =
-        expression->path[0] == "Box" || expression->path[0] == "Vec";
-    const bool builtin_member =
-        expression->path[1] == "new" || expression->path[1] == "clone" ||
-        expression->path[1] == "len" || expression->path[1] == "is_empty" ||
-        expression->path[1] == "push" || expression->path[1] == "remove";
-    return (builtin_container && builtin_member) ||
-           (structures_.contains(expression->path[0]) &&
-            expression->path[1] == "clone");
+  bool constructor_path(const ast::Path &path) {
+    if (path.segments.size() != 2) return false;
+    const std::string first{ast::name_text(path.segments[0].name)};
+    auto second = ast::name_text(path.segments[1].name);
+    const bool container = first == "Box" || first == "Vec";
+    const bool member = second == "new" || second == "clone" || second == "len" ||
+                        second == "is_empty" || second == "push" || second == "remove";
+    return (container && member) || (structures_.contains(first) && second == "clone");
   }
 
   ExprInfo check_array(const ast::ExprPtr &expression, const TyPtr &expected) {
@@ -1245,11 +1242,13 @@ private:
   }
 
   ExprInfo check_call(const ast::ExprPtr &expression) {
-    auto callee = check_expr(expression->operands.front());
+    const auto &call = std::get<ast::CallExpr>(expression->data);
+    auto callee = check_expr(call.callee);
+    auto *path = ast::get_if<ast::PathExpr>(*ast::unparen(call.callee));
+    auto arguments = path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
     if (callee.type->kind != Ty::Kind::Function) {
       report(expression->span, "called expression is not a function");
-      for (std::size_t i = 1; i < expression->operands.size(); ++i)
-        check_expr(expression->operands[i]);
+      for (const auto &argument : call.arguments) check_expr(argument);
       return {};
     }
     const auto &name = callee.type->name;
@@ -1258,10 +1257,9 @@ private:
       result.target = callee.target.empty() ? name : callee.target;
       return result;
     };
-    const auto &callee_ast = expression->operands.front();
-    if (!callee_ast->type_arguments.empty() && !name.starts_with("Box::") &&
+    if (!arguments.empty() && !name.starts_with("Box::") &&
         !name.starts_with("Vec::"))
-      report(callee_ast->span, "functions have no type parameters");
+      report(call.callee->span, "functions have no type parameters");
     if (name == "get_i32" || name == "getInt")
       return finish(check_signature(expression, {}, ty(Ty::Kind::I32)));
     if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
@@ -1284,13 +1282,12 @@ private:
       return finish(check_signature(expression, parameters, it->second.result));
     }
     if (name == "Box::new" || name == "Vec::new") {
-      const auto &path = expression->operands.front();
-      if (path->type_arguments.size() != 1) {
+      if (arguments.size() != 1) {
         report(expression->span,
                name.substr(0, 3) + " constructor requires one type argument");
         return finish({});
       }
-      auto element = resolve_type(path->type_arguments.front());
+      auto element = resolve_type(*arguments.front());
       if (name == "Box::new")
         return finish(check_signature(expression, {element},
                                       compound(Ty::Kind::Box, element)));
@@ -1300,13 +1297,12 @@ private:
     if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
         name == "Vec::is_empty" || name == "Vec::push" ||
         name == "Vec::remove") {
-      const auto &path = expression->operands.front();
-      if (path->type_arguments.size() != 1) {
+      if (arguments.size() != 1) {
         report(expression->span,
                "container associated function requires one type argument");
         return finish({});
       }
-      auto element = resolve_type(path->type_arguments.front());
+      auto element = resolve_type(*arguments.front());
       auto container = compound(
           name.starts_with("Box") ? Ty::Kind::Box : Ty::Kind::Vec, element);
       if (name.ends_with("clone")) {
@@ -1342,26 +1338,28 @@ private:
 
   ExprInfo check_signature(const ast::ExprPtr &expression,
                            const std::vector<TyPtr> &parameters, TyPtr result) {
-    const auto count = expression->operands.size() - 1;
+    const auto &arguments = std::get<ast::CallExpr>(expression->data).arguments;
+    const auto count = arguments.size();
     if (count != parameters.size())
       report(expression->span, "wrong number of function arguments");
     for (std::size_t i = 0; i < count; ++i) {
       auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
-      auto argument = check_expr(expression->operands[i + 1], expected);
+      auto argument = check_expr(arguments[i], expected);
       if (expected && !coercible(argument.type, expected))
-        mismatch(expression->operands[i + 1]->span, argument.type, expected);
+        mismatch(arguments[i]->span, argument.type, expected);
       if (expected && expected->kind == Ty::Kind::Ref && expected->is_mutable &&
           argument.access_locked)
-        report(expression->operands[i + 1]->span,
+        report(arguments[i]->span,
                "mutable reference argument requires mutable container access");
     }
     return {std::move(result)};
   }
 
   ExprInfo check_method(const ast::ExprPtr &expression) {
-    if (!expression->type_arguments.empty())
+    const auto &method = std::get<ast::MethodCallExpr>(expression->data);
+    if (!type_arguments(method.generic_args).empty())
       report(expression->span, "method segments have no type parameters");
-    auto receiver = check_expr(expression->operands.front());
+    auto receiver = check_expr(method.receiver);
     TyPtr base = receiver.type;
     std::vector<Adjustment> receiver_adjustments;
     while (base->kind == Ty::Kind::Ref || base->kind == Ty::Kind::Box) {
@@ -1381,7 +1379,7 @@ private:
       }
       return result;
     };
-    const auto &name = expression->text;
+    const auto &name = method.method.text;
     if (name == "len" || name == "is_empty") {
       if (receiver.type->kind != Ty::Kind::Vec &&
           receiver.type->kind != Ty::Kind::Array &&
@@ -1458,20 +1456,22 @@ private:
   ExprInfo check_method_signature(const ast::ExprPtr &expression,
                                   const std::vector<TyPtr> &parameters,
                                   TyPtr result) {
-    const auto count = expression->operands.size() - 1;
+    const auto &arguments = std::get<ast::MethodCallExpr>(expression->data).arguments;
+    const auto count = arguments.size();
     if (count != parameters.size())
       report(expression->span, "wrong number of method arguments");
     for (std::size_t i = 0; i < count; ++i) {
       auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
-      auto value = check_expr(expression->operands[i + 1], expected);
+      auto value = check_expr(arguments[i], expected);
       if (expected && !coercible(value.type, expected))
-        mismatch(expression->operands[i + 1]->span, value.type, expected);
+        mismatch(arguments[i]->span, value.type, expected);
     }
     return {std::move(result)};
   }
 
   ExprInfo check_field(const ast::ExprPtr &expression) {
-    auto receiver = check_expr(expression->operands.front());
+    const auto &projection = std::get<ast::FieldExpr>(expression->data);
+    auto receiver = check_expr(projection.base);
     auto base = receiver.type;
     bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
     bool locked = receiver.access_locked;
@@ -1493,25 +1493,26 @@ private:
       report(expression->span, "field access requires a struct");
       return {};
     }
-    auto field = structures_.at(base->name).fields.find(expression->text);
+    auto field = structures_.at(base->name).fields.find(projection.field.text);
     if (field == structures_.at(base->name).fields.end()) {
-      report(expression->span, "unknown field '" + expression->text + "'");
+      report(expression->span, "unknown field '" + projection.field.text + "'");
       return {};
     }
     return {field->second,
             true,
             mutable_access,
             locked,
-            structures_.at(base->name).field_symbols.at(expression->text),
-            base->name + "::" + expression->text,
+            structures_.at(base->name).field_symbols.at(projection.field.text),
+            base->name + "::" + projection.field.text,
             std::move(adjustments)};
   }
 
   ExprInfo check_index(const ast::ExprPtr &expression) {
-    auto base = check_expr(expression->operands[0]);
-    auto index = check_expr(expression->operands[1], ty(Ty::Kind::Usize));
+    const auto &projection = std::get<ast::IndexExpr>(expression->data);
+    auto base = check_expr(projection.base);
+    auto index = check_expr(projection.index, ty(Ty::Kind::Usize));
     if (!same(index.type, ty(Ty::Kind::Usize)))
-      mismatch(expression->operands[1]->span, index.type, ty(Ty::Kind::Usize));
+      mismatch(projection.index->span, index.type, ty(Ty::Kind::Usize));
     auto container = base.type;
     bool mutable_access = base.is_place ? base.is_mutable : true;
     bool locked = base.access_locked;
@@ -1569,16 +1570,6 @@ private:
     if (!coercible(value.type, expected))
       mismatch(expression->span, value.type, expected);
     return {ty(Ty::Kind::Never)};
-  }
-
-  static std::string join_path(const std::vector<std::string> &path) {
-    std::string result;
-    for (const auto &segment : path) {
-      if (!result.empty())
-        result += "::";
-      result += segment;
-    }
-    return result;
   }
 
   struct LoopInfo {
