@@ -7,7 +7,7 @@
 
 namespace ast = rx::ast;
 struct IdentityVisitor {
-  template <class T> ast::NodeId operator()(const ast::Node &node, const T &) {
+  template <class T> ast::NodeId operator()(const ast::Node &node, const T &) const {
     return node.id;
   }
 };
