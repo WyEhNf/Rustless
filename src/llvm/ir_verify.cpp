@@ -83,7 +83,71 @@ std::vector<std::string> verify_instruction(const Instruction &node) {
 namespace {
 struct Signature { Type result; std::vector<Type> parameters; };
 using Signatures = std::map<std::string, Signature>;
-void verify_function(const Function &, const Signatures &, std::vector<VerificationError> &) {}
+using Blocks = std::map<BlockId, const Block *>;
+using Predecessors = std::map<BlockId, std::set<BlockId>>;
+void verify_ssa(const Function &, const Blocks &, const Predecessors &,
+                std::vector<VerificationError> &) {}
+void verify_function(const Function &function, const Signatures &signatures,
+                     std::vector<VerificationError> &errors) {
+  auto error = [&](std::optional<BlockId> block, std::optional<Origin> origin,
+                   std::string message) {
+    errors.push_back({function.name, block, origin, std::move(message)});
+  };
+  if (function.blocks.empty()) { error({}, {}, "function has no entry block"); return; }
+  Blocks blocks;
+  Predecessors predecessors;
+  for (const auto &block : function.blocks) {
+    if (!blocks.emplace(block.id, &block).second) error(block.id, {}, "duplicate block identity");
+    predecessors[block.id];
+  }
+  for (const auto &block : function.blocks) {
+    bool terminated = false, non_phi = false;
+    for (const auto &node : block.instructions) {
+      for (auto message : verify_instruction(node)) error(block.id, node.origin, std::move(message));
+      if (terminated) error(block.id, node.origin, "instruction follows a terminator");
+      const bool phi = std::holds_alternative<Phi>(node.data);
+      if (phi && non_phi) error(block.id, node.origin, "phi must precede ordinary instructions");
+      non_phi |= !phi;
+      terminated = std::holds_alternative<Branch>(node.data) ||
+          std::holds_alternative<CondBranch>(node.data) ||
+          std::holds_alternative<Return>(node.data) || std::holds_alternative<Unreachable>(node.data);
+      if (std::holds_alternative<Alloca>(node.data) && block.id != function.blocks[0].id)
+        error(block.id, node.origin, "fixed alloca must be in the entry block");
+      for_each_successor(node, [&](BlockId target) {
+        if (!blocks.contains(target)) error(block.id, node.origin, "branch targets a missing block");
+        else predecessors[target].insert(block.id);
+      });
+      if (const auto *ret = std::get_if<Return>(&node.data)) {
+        if ((!ret->value && function.result != Type::Void) ||
+            (ret->value && ret->value->type != function.result))
+          error(block.id, node.origin, "return does not match the function result");
+      }
+      if (const auto *call = std::get_if<Call>(&node.data)) {
+        auto target = signatures.find(call->callee);
+        if (target == signatures.end()) error(block.id, node.origin, "call target is undeclared");
+        else {
+          const auto &signature = target->second;
+          if ((call->result ? call->result->type : Type::Void) != signature.result ||
+              call->arguments.size() != signature.parameters.size())
+            error(block.id, node.origin, "call signature mismatch");
+          for (std::size_t i = 0; i < std::min(call->arguments.size(), signature.parameters.size()); ++i)
+            if (call->arguments[i].type != signature.parameters[i])
+              error(block.id, node.origin, "call argument type mismatch");
+        }
+      }
+    }
+    if (!terminated) error(block.id, {}, "block has no terminator");
+  }
+  if (!predecessors[function.blocks[0].id].empty()) error(function.blocks[0].id, {}, "entry block has predecessors");
+  for (const auto &block : function.blocks)
+    for (const auto &node : block.instructions)
+      if (const auto *phi = std::get_if<Phi>(&node.data)) {
+        std::set<BlockId> incoming;
+        for (const auto &value : phi->incoming) incoming.insert(value.predecessor);
+        if (incoming != predecessors[block.id]) error(block.id, node.origin, "phi predecessors do not match control flow");
+      }
+  verify_ssa(function, blocks, predecessors, errors);
+}
 } // namespace
 
 std::vector<VerificationError> verify(const Module &module) {
