@@ -895,8 +895,8 @@ private:
               inner.adjustments.clear();
               return inner;
             },
-            [&](const ast::Expr &, const ast::PathExpr &) {
-              return check_path(expression);
+            [&](const ast::Expr &node, const ast::PathExpr &path) {
+              return check_path(node, path);
             },
             [&](const ast::Expr &node, const ast::ArrayExpr &array) {
               return check_array(node, array, expected);
@@ -968,8 +968,8 @@ private:
     return result;
   }
 
-  ExprInfo check_path(const ast::ExprPtr &expression) {
-    const auto &path = std::get<ast::PathExpr>(expression->data).path;
+  ExprInfo check_path(const ast::Expr &node, const ast::PathExpr &value) {
+    const auto &path = value.path;
     auto name = ast::path_name(path);
     if (path.segments.size() > 1 &&
         std::string(ast::name_text(path.segments.front().name)) == "Self" &&
@@ -1033,7 +1033,7 @@ private:
         return {value, false, false, false, symbol, "builtin::" + name};
       }
     }
-    report(expression->span, "unresolved value name '" + name + "'");
+    report(node.span, "unresolved value name '" + name + "'");
     return {};
   }
 
