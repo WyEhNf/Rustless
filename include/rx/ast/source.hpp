@@ -18,12 +18,17 @@ struct SourceFile {
     characters.push_back(this->text.size());
   }
   std::string_view slice(Span span) const {
+    if (span.begin > span.end || span.end > text.size())
+      throw std::out_of_range("invalid source span");
     return std::string_view(text).substr(span.begin, span.end - span.begin);
   }
   std::pair<std::size_t, std::size_t> position(std::size_t offset) const {
+    if (offset > text.size()) throw std::out_of_range("invalid source offset");
     auto line = std::upper_bound(lines.begin(), lines.end(), offset);
     auto index = static_cast<std::size_t>(line - lines.begin() - 1);
-    return {index + 1, offset - lines[index]};
+    auto begin = std::lower_bound(characters.begin(), characters.end(), lines[index]);
+    auto end = std::lower_bound(characters.begin(), characters.end(), offset);
+    return {index + 1, static_cast<std::size_t>(end - begin)};
   }
   Span from_character_span(Span span) const {
     // ANTLR indexes UTF-32 characters; syntax spans index owned UTF-8 bytes.

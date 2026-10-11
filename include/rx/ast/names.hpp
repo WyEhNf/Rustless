@@ -2,6 +2,7 @@
 
 #include "rx/ast/node.hpp"
 #include <string>
+#include <string_view>
 
 namespace rx::ast {
 struct Identifier { std::string text; Span span; };

@@ -101,7 +101,9 @@ fn ops() {
   assert(std::get<ast::BorrowExpr>(borrow.operand->data).mutability == ast::Mutability::Mutable);
   assert(crate.source.slice(borrow.operator_span) == "&");
   assert(ast::get_if<ast::UnitExpr>(**std::get<ast::ReturnExpr>(expression(6).data).value));
-  assert(ast::dump(crate) == ast::dump(crate));
+  rx::DiagnosticEngine repeat_diagnostics;
+  auto reparsed = rx::parse_source(source, repeat_diagnostics);
+  assert(reparsed.syntax_ok && ast::dump(crate) == ast::dump(*reparsed.crate));
   std::set<ast::NodeId> identities;
   ast::walk(crate, [&](const ast::Node &node) {
     assert(node.id.value != 0 && identities.insert(node.id).second);
@@ -109,11 +111,13 @@ fn ops() {
   });
   assert(identities.size() > 60);
   rx::DiagnosticEngine utf8_diagnostics;
-  auto utf8 = rx::parse_source("// 中文\nfn main() { 1 + 2; }", utf8_diagnostics);
+  auto utf8 = rx::parse_source("// 中文\nfn main() { /* 中文 */ 1 + 2; }", utf8_diagnostics);
   assert(utf8.syntax_ok && utf8.crate);
   const auto &utf8_function = std::get<ast::Function>(utf8.crate->items[0]);
   assert(utf8.crate->source.slice(utf8_function.name.span) == "main");
   const auto &utf8_sum = std::get<ast::BinaryExpr>(std::get<ast::ExprStmt>(utf8_function.body->statements[0]->data).expression->data);
   assert(utf8.crate->source.slice(utf8_sum.operator_span) == "+");
   assert(utf8_sum.operator_span.file == utf8.crate->source.id);
+  assert(utf8.crate->source.position(utf8_sum.operator_span.begin) ==
+         std::make_pair(utf8_sum.operator_span.line, utf8_sum.operator_span.column));
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rx/ast/item.hpp"
+#include <type_traits>
 
 namespace rx::ast {
 // Preorder traversal. Each syntax identity is reported once, before its children.

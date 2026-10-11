@@ -827,7 +827,11 @@ private:
       [&](const ast::IntegerExpr &p) -> ExprInfo { return {literal_type(p.literal.spelling, expected, expression->span)}; },
       [&](const ast::BooleanExpr &) -> ExprInfo { return {ty(Ty::Kind::Bool)}; },
       [&](const ast::UnitExpr &) -> ExprInfo { return {ty(Ty::Kind::Unit)}; },
-      [&](const ast::ParenExpr &p) { return check_expr(p.inner, expected); },
+      [&](const ast::ParenExpr &p) {
+        auto inner = check_expr(p.inner, expected);
+        inner.adjustments.clear();
+        return inner;
+      },
       [&](const ast::PathExpr &) { return check_path(expression); },
       [&](const ast::ArrayExpr &) { return check_array(expression, expected); },
       [&](const ast::RepeatArrayExpr &) { return check_repeat_array(expression, expected); },
@@ -850,7 +854,7 @@ private:
       [&](const ast::ContinueExpr &) { return check_continue(expression); },
       [&](const ast::ReturnExpr &) { return check_return(expression); }
     });
-    if (expected && coercible(result.type, expected)) {
+    if (expected && !ast::get_if<ast::ParenExpr>(*expression) && coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
       result.adjustments.insert(result.adjustments.end(), adjustments.begin(), adjustments.end());
     }

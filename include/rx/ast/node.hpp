@@ -29,7 +29,8 @@ struct Node {
 // Required children have exclusive ownership and cannot be constructed empty.
 template <class T> class Box {
 public:
-  explicit Box(std::unique_ptr<T> value) : value_(std::move(value)) {
+  explicit Box(std::unique_ptr<T> value)
+      : value_(value.release(), [](T *pointer) { delete pointer; }) {
     if (!value_)
       throw std::invalid_argument("a required AST child cannot be null");
   }
@@ -44,7 +45,9 @@ public:
   T *get() { return value_.get(); }
   const T *get() const { return value_.get(); }
 private:
-  std::unique_ptr<T> value_;
+  // The deleter is created where T is complete; public recursive headers
+  // can destroy a Box without including every other node family.
+  std::unique_ptr<T, void (*)(T *)> value_;
 };
 
 template <class T, class... Args> Box<T> box(Args &&...args) {
