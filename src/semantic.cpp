@@ -480,6 +480,7 @@ private:
         if (!fields.insert(field.name.text).second)
           report(field.span, "duplicate field '" + field.name.text + "'");
         structure.fields[field.name.text] = resolve_type(field.type, name);
+        record_symbol_type(field.id, structure.fields[field.name.text]);
         structure.field_symbols[field.name.text] = symbol_for(field.id);
       }
     }
@@ -712,6 +713,7 @@ private:
   }
 
   void check_function(const FunctionInfo &function) {
+    FunctionSemantics signature{symbol_for(function.ast->id), {}, {}, function.result};
     // Every function starts with isolated scopes and loop context.
     scopes_.clear();
     scopes_.emplace_back();
@@ -726,6 +728,9 @@ private:
                         ast::is_mutable(*function.ast->signature.receiver));
       record_symbol(function.ast->signature.receiver->id, SymbolKind::Receiver, "self",
                     function.ast->id);
+      record_symbol_type(function.ast->signature.receiver->id, self);
+      signature.receiver = ParameterSemantics{
+          symbol_for(function.ast->signature.receiver->id), self};
       scopes_.back()["self"] = {
           self, ast::is_mutable(*function.ast->signature.receiver),
           symbol_for(function.ast->signature.receiver->id)};
@@ -737,6 +742,8 @@ private:
         report(parameter.span, "cannot shadow a protected builtin");
       record_symbol(parameter.id, SymbolKind::Parameter, parameter.binding.name.text,
                     function.ast->id);
+      record_symbol_type(parameter.id, function.parameters[i]);
+      signature.parameters.push_back({symbol_for(parameter.id), function.parameters[i]});
       scopes_.back()[parameter.binding.name.text] = {
           function.parameters[i],
           parameter.binding.mutability == ast::Mutability::Mutable,
@@ -746,6 +753,7 @@ private:
     if (!coercible(body.type, function.result))
       mismatch(function.ast->body->span, body.type, function.result);
     current_function_ = nullptr;
+    result_.functions.push_back(std::move(signature));
   }
 
   Binding *lookup(const std::string &name) {
@@ -1165,6 +1173,7 @@ private:
                     current_function_
                         ? std::optional<ast::NodeId>(current_function_->ast->id)
                         : std::nullopt);
+                record_symbol_type(node.id, binding_type);
                 if (protected_builtin_value(p.binding.name.text))
                   report(p.binding.name.span,
                          "cannot shadow a protected builtin");
