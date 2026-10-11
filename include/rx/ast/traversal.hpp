@@ -73,4 +73,34 @@ WalkResult walk_typed(const T &root, V &&visitor) {
   TypedWalker<std::remove_reference_t<V>> walker(visitor);
   return walker.walk(root);
 }
+
+namespace detail {
+template <class V> struct PreorderAdapter : DefaultVisitor {
+  V &callback;
+  explicit PreorderAdapter(V &value) : callback(value) {}
+  // Hide DefaultVisitor::enter: missing callback handlers remain errors.
+  template <class O, class P>
+    requires std::invocable<V &, const O &, const P &> &&
+      (std::same_as<std::invoke_result_t<V &, const O &, const P &>, void> ||
+       std::same_as<std::invoke_result_t<V &, const O &, const P &>, WalkControl>)
+  WalkControl enter(const O &owner, const P &p) {
+    if constexpr (std::same_as<std::invoke_result_t<V &, const O &, const P &>, void>) {
+      std::invoke(callback, owner, p);
+      return WalkControl::Continue;
+    } else {
+      return std::invoke(callback, owner, p);
+    }
+  }
+};
+} // namespace detail
+
+template <class V>
+concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
+
+template <class T, class V>
+  requires TraversalCallback<std::remove_reference_t<V>>
+WalkResult walk_preorder(const T &root, V &&callback) {
+  detail::PreorderAdapter<std::remove_reference_t<V>> visitor(callback);
+  return walk_typed(root, visitor);
+}
 } // namespace rx::ast

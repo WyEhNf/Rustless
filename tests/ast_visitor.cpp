@@ -72,6 +72,8 @@ static_assert(ast::TraversalVisitor<BinaryObserver>);
 static_assert(ast::TraversalVisitor<TraceVisitor>);
 static_assert(!ast::TraversalVisitor<MissingLeave>);
 static_assert(!ast::TraversalVisitor<WrongControl>);
+static_assert(!ast::TraversalCallback<OnlyBinary>);
+static_assert(!ast::TraversalCallback<IdentityVisitor>);
 
 void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   const auto &binary = *ast::get_if<ast::BinaryExpr>(expr);
@@ -98,6 +100,17 @@ void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   root_stop.action = ast::WalkControl::Stop;
   assert(ast::walk_typed(crate, root_stop) == ast::WalkResult::Stopped);
   assert(root_stop.entered.size() == 1 && root_stop.left.size() == 1);
+  std::vector<ast::NodeId> callback_ids;
+  assert(ast::walk_preorder(crate, [&](const ast::Node &node, const auto &) {
+    callback_ids.push_back(node.id);
+  }) == ast::WalkResult::Completed);
+  assert(callback_ids == full.entered);
+  callback_ids.clear();
+  assert(ast::walk_preorder(crate, [&](const ast::Node &node, const auto &) {
+    callback_ids.push_back(node.id);
+    return node.id == expr.id ? ast::WalkControl::Stop : ast::WalkControl::Continue;
+  }) == ast::WalkResult::Stopped);
+  assert(callback_ids.size() == 5);
 }
 
 int main() {
