@@ -810,69 +810,44 @@ private:
                             std::make_move_iterator(adjustments.end()));
   }
 
-  void record_expression(const ast::ExprPtr &expression,
-                         const ExprInfo &result) {
-    expression_facts_[expression->id] = {
-        expression->id,    result.type,          result.is_place,
-        result.is_mutable, result.access_locked, result.symbol,
-        result.target,     result.adjustments};
+  void record_node(const ast::Node &node, const ExprInfo &result) {
+    expression_facts_[node.id] = {node.id, result.type, result.is_place,
+        result.is_mutable, result.access_locked, result.symbol, result.target, result.adjustments};
   }
-
+  void record_expression(const ast::ExprPtr &expression, const ExprInfo &result) {
+    record_node(*expression, result);
+  }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
-    // Central dispatch lets contextual types flow into child expressions.
-    if (!expression)
-      return {};
-    auto result = [&]() -> ExprInfo {
-      switch (expression->kind) {
-      case ast::Expr::Kind::Integer:
-        return {literal_type(expression->text, expected, expression->span)};
-      case ast::Expr::Kind::Boolean:
-        return {ty(Ty::Kind::Bool)};
-      case ast::Expr::Kind::Unit:
-        return {ty(Ty::Kind::Unit)};
-      case ast::Expr::Kind::Path:
-        return check_path(expression);
-      case ast::Expr::Kind::Array:
-        return check_array(expression, expected);
-      case ast::Expr::Kind::Struct:
-        return check_struct(expression);
-      case ast::Expr::Kind::Block:
-        return check_block(expression, expected);
-      case ast::Expr::Kind::If:
-        return check_if(expression, expected);
-      case ast::Expr::Kind::Loop:
-        return check_loop(expression, expected);
-      case ast::Expr::Kind::While:
-        return check_while(expression);
-      case ast::Expr::Kind::Unary:
-        return check_unary(expression, expected);
-      case ast::Expr::Kind::Binary:
-        return check_binary(expression);
-      case ast::Expr::Kind::Assign:
-        return check_assignment(expression);
-      case ast::Expr::Kind::Cast:
-        return check_cast(expression);
-      case ast::Expr::Kind::Call:
-        return check_call(expression);
-      case ast::Expr::Kind::MethodCall:
-        return check_method(expression);
-      case ast::Expr::Kind::Field:
-        return check_field(expression);
-      case ast::Expr::Kind::Index:
-        return check_index(expression);
-      case ast::Expr::Kind::Break:
-        return check_break(expression, expected);
-      case ast::Expr::Kind::Continue:
-        return check_continue(expression);
-      case ast::Expr::Kind::Return:
-        return check_return(expression);
-      }
-      return {};
-    }();
+    auto result = ast::visit(*expression, ast::Overloaded{
+      [&](const ast::IntegerExpr &p) -> ExprInfo { return {literal_type(p.literal.spelling, expected, expression->span)}; },
+      [&](const ast::BooleanExpr &) -> ExprInfo { return {ty(Ty::Kind::Bool)}; },
+      [&](const ast::UnitExpr &) -> ExprInfo { return {ty(Ty::Kind::Unit)}; },
+      [&](const ast::ParenExpr &p) { return check_expr(p.inner, expected); },
+      [&](const ast::PathExpr &) { return check_path(expression); },
+      [&](const ast::ArrayExpr &) { return check_array(expression, expected); },
+      [&](const ast::RepeatArrayExpr &) { return check_repeat_array(expression, expected); },
+      [&](const ast::StructExpr &) { return check_struct(expression); },
+      [&](const ast::BlockExpr &p) { return check_block(*p.block, expected); },
+      [&](const ast::IfExpr &p) { return check_if(*expression, p, expected); },
+      [&](const ast::LoopExpr &) { return check_loop(expression, expected); },
+      [&](const ast::WhileExpr &) { return check_while(expression); },
+      [&](const ast::UnaryExpr &) { return check_unary(expression, expected); },
+      [&](const ast::BorrowExpr &) { return check_borrow(expression); },
+      [&](const ast::BinaryExpr &) { return check_binary(expression); },
+      [&](const ast::AssignExpr &) { return check_assignment(expression); },
+      [&](const ast::CompoundAssignExpr &) { return check_compound_assignment(expression); },
+      [&](const ast::CastExpr &) { return check_cast(expression); },
+      [&](const ast::CallExpr &) { return check_call(expression); },
+      [&](const ast::MethodCallExpr &) { return check_method(expression); },
+      [&](const ast::FieldExpr &) { return check_field(expression); },
+      [&](const ast::IndexExpr &) { return check_index(expression); },
+      [&](const ast::BreakExpr &) { return check_break(expression, expected); },
+      [&](const ast::ContinueExpr &) { return check_continue(expression); },
+      [&](const ast::ReturnExpr &) { return check_return(expression); }
+    });
     if (expected && coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
-      result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
-                                adjustments.end());
+      result.adjustments.insert(result.adjustments.end(), adjustments.begin(), adjustments.end());
     }
     record_expression(expression, result);
     return result;
@@ -951,82 +926,46 @@ private:
   }
 
   ExprInfo check_array(const ast::ExprPtr &expression, const TyPtr &expected) {
-    TyPtr expected_element;
-    std::uint64_t expected_length = 0;
-    if (expected && expected->kind == Ty::Kind::Array) {
-      expected_element = expected->element;
-      expected_length = expected->length;
+    const auto &array = std::get<ast::ArrayExpr>(expression->data);
+    auto expected_element = expected && expected->kind == Ty::Kind::Array ? expected->element : TyPtr{};
+    if (array.elements.empty()) {
+      if (!expected_element) { report(expression->span, "an empty array requires an expected array type"); return {}; }
+      return {compound(Ty::Kind::Array, expected_element)};
     }
-    if (expression->operands.empty()) {
-      if (!expected_element) {
-        report(expression->span,
-               "an empty array requires an expected array type");
-        return {};
-      }
-      auto result = compound(Ty::Kind::Array, expected_element);
-      result->length = 0;
-      return {result};
-    }
-    auto first = check_expr(expression->operands.front(), expected_element);
+    auto first = check_expr(array.elements.front(), expected_element);
     auto result = compound(Ty::Kind::Array, first.type);
-    if (expression->flag) {
-      auto count_name = join_path(expression->operands[1]->path);
-      if (count_name.starts_with("Self::") && current_function_)
-        count_name = current_function_->owner + count_name.substr(4);
-      if (expression->operands[1]->kind != ast::Expr::Kind::Integer &&
-          expression->operands[1]->kind != ast::Expr::Kind::Path)
-        report(expression->operands[1]->span,
-               "array repeat count must be a constant");
-      if (expression->operands[1]->kind == ast::Expr::Kind::Path &&
-          !constants_.contains(count_name) &&
-          !associated_constants_.contains(count_name))
-        report(expression->operands[1]->span,
-               "array repeat count must name a constant");
-      auto count = check_expr(expression->operands[1], ty(Ty::Kind::Usize));
-      if (!coercible(count.type, ty(Ty::Kind::Usize)))
-        mismatch(expression->operands[1]->span, count.type,
-                 ty(Ty::Kind::Usize));
-      std::uint64_t length = 0;
-      if (expression->operands[1]->kind == ast::Expr::Kind::Integer) {
-        std::string text = expression->operands[1]->text;
-        if (text.ends_with("usize"))
-          text.resize(text.size() - 5);
-        parse_unsigned(text, length);
-      } else if (expression->operands[1]->kind == ast::Expr::Kind::Path) {
-        const auto &name = count_name;
-        if (auto it = constants_.find(name); it != constants_.end())
-          length = static_cast<std::uint64_t>(it->second.value);
-        else if (auto it = associated_constants_.find(name);
-                 it != associated_constants_.end())
-          length = static_cast<std::uint64_t>(it->second.value);
+    result->length = array.elements.size();
+    for (std::size_t i = 1; i < array.elements.size(); ++i) {
+      auto element = check_expr(array.elements[i], expected_element);
+      auto merged = common_type(first.type, element.type);
+      if (merged->kind == Ty::Kind::Error) mismatch(array.elements[i]->span, element.type, first.type);
+      else {
+        if (!same(element.type, merged)) append_adjustments(array.elements[i]->id, coercion_adjustments(element.type, merged));
+        first.type = merged;
       }
-      result->length = length;
-      if (length > 1 && !supports(first.type, "Copy", "", {}))
-        report(expression->span, "array repetition requires Copy");
-    } else {
-      result->length = expression->operands.size();
-      for (std::size_t i = 1; i < expression->operands.size(); ++i) {
-        auto element = check_expr(expression->operands[i], expected_element);
-        auto merged = common_type(first.type, element.type);
-        if (merged->kind == Ty::Kind::Error)
-          mismatch(expression->operands[i]->span, element.type, first.type);
-        else {
-          if (!same(element.type, merged))
-            append_adjustments(expression->operands[i]->id,
-                               coercion_adjustments(element.type, merged));
-          first.type = merged;
-        }
-      }
-      result->element = first.type;
     }
-    if (expected_element &&
-        (result->length != expected_length || !coercible(result, expected)))
+    result->element = first.type;
+    if (expected_element && (result->length != expected->length || !coercible(result, expected)))
+      mismatch(expression->span, result, expected);
+    return {result};
+  }
+  ExprInfo check_repeat_array(const ast::ExprPtr &expression, const TyPtr &expected) {
+    const auto &array = std::get<ast::RepeatArrayExpr>(expression->data);
+    auto expected_element = expected && expected->kind == Ty::Kind::Array ? expected->element : TyPtr{};
+    auto first = check_expr(array.element, expected_element);
+    auto result = compound(Ty::Kind::Array, first.type);
+    check_expr(array.count, ty(Ty::Kind::Usize));
+    auto length = evaluate_length(array.count, current_function_ ? current_function_->owner : "");
+    result->length = length.value_or(0);
+    if (result->length > 1 && !supports(first.type, "Copy", "", {})) report(expression->span, "array repetition requires Copy");
+    if (expected_element && (result->length != expected->length || !coercible(result, expected)))
       mismatch(expression->span, result, expected);
     return {result};
   }
 
   ExprInfo check_struct(const ast::ExprPtr &expression) {
-    auto name = join_path(expression->path);
+    const auto &structure = std::get<ast::StructExpr>(expression->data);
+    auto name = ast::path_name(structure.path);
     if (name == "Self" && current_function_ &&
         !current_function_->owner.empty())
       name = current_function_->owner;
@@ -1037,7 +976,7 @@ private:
       return {};
     }
     std::unordered_set<std::string> initialized;
-    for (const auto &field : expression->fields) {
+    for (const auto &field : structure.fields) {
       if (!initialized.insert(field.name.text).second)
         report(field.span, "duplicate field initializer '" + field.name.text + "'");
       auto expected = it->second.fields.find(field.name.text);
@@ -1058,54 +997,37 @@ private:
     return {result, false, false, false, it->second.ast->id, name};
   }
 
-  ExprInfo check_block(const ast::ExprPtr &expression, const TyPtr &expected) {
+  ExprInfo check_block(const ast::Block &block, const TyPtr &expected = {}) {
     scopes_.emplace_back();
     TyPtr result = ty(Ty::Kind::Unit);
-    for (std::size_t i = 0; i < expression->statements.size(); ++i) {
-      const auto &statement = expression->statements[i];
-      const bool last = i + 1 == expression->statements.size();
-      if (statement->kind == ast::Stmt::Kind::Empty)
-        continue;
-      if (statement->kind == ast::Stmt::Kind::Let) {
-        auto annotation =
-            statement->annotation
-                ? resolve_type(statement->annotation,
-                               current_function_ ? current_function_->owner
-                                                 : "")
-                : TyPtr{};
-        auto initializer = check_expr(statement->expression, annotation);
-        auto binding_type = annotation ? annotation : initializer.type;
-        if (annotation && !coercible(initializer.type, annotation))
-          mismatch(statement->expression->span, initializer.type, annotation);
-        if (annotation && annotation->kind == Ty::Kind::Ref &&
-            annotation->is_mutable && initializer.access_locked)
-          report(statement->expression->span,
-                 "mutable reference initializer requires mutable container "
-                 "access");
-        record_symbol(statement->id, "local", statement->name,
-                      current_function_
-                          ? std::optional<SymbolId>(current_function_->ast->id)
-                          : std::nullopt);
-        if (protected_builtin_value(statement->name))
-          report(statement->span, "cannot shadow a protected builtin");
-        scopes_.back()[statement->name] = {binding_type, statement->is_mutable,
-                                           statement->id};
-        continue;
-      }
-      auto value =
-          check_expr(statement->expression,
-                     last && !statement->has_semicolon ? expected : TyPtr{});
-      if (last &&
-          (!statement->has_semicolon || value.type->kind == Ty::Kind::Never))
-        result = value.type;
-      else if (!statement->has_semicolon &&
-               value.type->kind != Ty::Kind::Unit &&
-               value.type->kind != Ty::Kind::Never)
-        report(
-            statement->span,
-            "a non-final expression without a semicolon must have unit type");
+    for (std::size_t i = 0; i < block.statements.size(); ++i) {
+      const auto &statement = block.statements[i];
+      ast::visit(*statement, ast::Overloaded{
+        [&](const ast::EmptyStmt &) {},
+        [&](const ast::LetStmt &p) {
+          auto annotation = p.annotation ? resolve_type(*p.annotation,
+              current_function_ ? current_function_->owner : "") : TyPtr{};
+          auto initializer = check_expr(p.initializer, annotation);
+          auto binding_type = annotation ? annotation : initializer.type;
+          if (annotation && !coercible(initializer.type, annotation)) mismatch(p.initializer->span, initializer.type, annotation);
+          if (annotation && annotation->kind == Ty::Kind::Ref && annotation->is_mutable && initializer.access_locked)
+            report(p.initializer->span, "mutable reference initializer requires mutable container access");
+          record_symbol(statement->id, "local", p.binding.name.text,
+              current_function_ ? std::optional<SymbolId>(current_function_->ast->id) : std::nullopt);
+          if (protected_builtin_value(p.binding.name.text)) report(p.binding.name.span, "cannot shadow a protected builtin");
+          scopes_.back()[p.binding.name.text] = {binding_type, p.binding.mutability == ast::Mutability::Mutable, statement->id};
+        },
+        [&](const ast::ExprStmt &p) {
+          auto value = check_expr(p.expression);
+          if (!block.tail && i + 1 == block.statements.size() && value.type->kind == Ty::Kind::Never) result = value.type;
+          else if (p.termination == ast::Termination::Omitted && value.type->kind != Ty::Kind::Unit && value.type->kind != Ty::Kind::Never)
+            report(p.expression->span, "a non-final expression without a semicolon must have unit type");
+        }
+      });
     }
+    if (block.tail) result = check_expr(*block.tail, expected).type;
     scopes_.pop_back();
+    record_node(block, ExprInfo{result});
     return {result};
   }
 
