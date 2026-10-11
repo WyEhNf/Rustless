@@ -904,8 +904,8 @@ private:
             [&](const ast::Expr &node, const ast::RepeatArrayExpr &array) {
               return check_repeat_array(node, array, expected);
             },
-            [&](const ast::Expr &, const ast::StructExpr &) {
-              return check_struct(expression);
+            [&](const ast::Expr &node, const ast::StructExpr &structure) {
+              return check_struct(node, structure);
             },
             [&](const ast::Expr &, const ast::BlockExpr &p) {
               return check_block(*p.block, expected);
@@ -943,8 +943,8 @@ private:
             [&](const ast::Expr &, const ast::MethodCallExpr &) {
               return check_method(expression);
             },
-            [&](const ast::Expr &, const ast::FieldExpr &) {
-              return check_field(expression);
+            [&](const ast::Expr &node, const ast::FieldExpr &projection) {
+              return check_field(node, projection);
             },
             [&](const ast::Expr &, const ast::IndexExpr &) {
               return check_index(expression);
@@ -1107,15 +1107,14 @@ private:
     return {result};
   }
 
-  ExprInfo check_struct(const ast::ExprPtr &expression) {
-    const auto &structure = std::get<ast::StructExpr>(expression->data);
+  ExprInfo check_struct(const ast::Expr &node, const ast::StructExpr &structure) {
     auto name = ast::path_name(structure.path);
     if (name == "Self" && current_function_ &&
         !current_function_->owner.empty())
       name = current_function_->owner;
     auto it = structures_.find(name);
     if (it == structures_.end()) {
-      report(expression->span,
+      report(node.span,
              "struct literal names an unknown struct '" + name + "'");
       return {};
     }
@@ -1136,7 +1135,7 @@ private:
     }
     for (const auto &[field, _] : it->second.fields)
       if (!initialized.contains(field))
-        report(expression->span, "missing field initializer '" + field + "'");
+        report(node.span, "missing field initializer '" + field + "'");
     auto result = ty(Ty::Kind::Struct);
     result->name = name;
     return {result, false, false, false, symbol_for(it->second.ast->id), name};
@@ -1669,8 +1668,7 @@ private:
     return {std::move(result)};
   }
 
-  ExprInfo check_field(const ast::ExprPtr &expression) {
-    const auto &projection = std::get<ast::FieldExpr>(expression->data);
+  ExprInfo check_field(const ast::Expr &node, const ast::FieldExpr &projection) {
     auto receiver = check_expr(projection.base);
     auto base = receiver.type;
     bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
@@ -1690,12 +1688,12 @@ private:
       adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
     if (base->kind != Ty::Kind::Struct || !structures_.contains(base->name)) {
-      report(expression->span, "field access requires a struct");
+      report(node.span, "field access requires a struct");
       return {};
     }
     auto field = structures_.at(base->name).fields.find(projection.field.text);
     if (field == structures_.at(base->name).fields.end()) {
-      report(expression->span, "unknown field '" + projection.field.text + "'");
+      report(node.span, "unknown field '" + projection.field.text + "'");
       return {};
     }
     return {field->second,
