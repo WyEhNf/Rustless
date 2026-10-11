@@ -88,7 +88,7 @@ public:
 
 private:
   template <typename Node> void stamp(Node &node, ParseContext *context) {
-    node.id = next_id_++;
+    node.id = ast::NodeId{next_id_++};
     node.span = source_span(context);
   }
 
@@ -133,29 +133,66 @@ private:
             name.starts_with("multiplicative"));
   }
 
-  ast::ExprPtr make_expr(ast::Expr::Kind kind, ParseContext *context,
-                         std::string text = {}) {
-    auto expression = std::make_shared<ast::Expr>();
+  template <class Payload>
+  ast::ExprPtr make_expr(ParseContext *context, Payload payload) {
+    auto expression = ast::box<ast::Expr>(ast::Expr::Data{std::move(payload)});
     stamp(*expression, context);
-    expression->kind = kind;
-    expression->text = std::move(text);
     return expression;
   }
 
-  ast::TypePtr unit_type(ParseContext *context) {
-    auto type = std::make_shared<ast::Type>();
+  template <class Payload>
+  ast::TypePtr make_type(ParseContext *context, Payload payload) {
+    auto type = ast::box<ast::TypeSyntax>(ast::TypeSyntax::Data{std::move(payload)});
     stamp(*type, context);
-    type->kind = ast::Type::Kind::Unit;
     return type;
   }
 
-  std::vector<std::string>
-  lifetime_parameters(rxgrammar::RxParser::GenericParamsContext *context) {
-    std::vector<std::string> result;
-    if (!context)
-      return result;
-    for (auto *parameter : context->lifetimeParam())
-      result.push_back(parameter->lifetime()->getText());
+  ast::Identifier identifier(ParseContext *context) {
+    return {context->getText(), source_span(context)};
+  }
+  ast::LifetimeName lifetime(rxgrammar::RxParser::LifetimeContext *context) {
+    return {context->getText(), source_span(context)};
+  }
+  ast::Binding binding(rxgrammar::RxParser::IdentifierBindingContext *context) {
+    return {identifier(context->identifier()), context->MUT()
+      ? ast::Mutability::Mutable : ast::Mutability::Immutable};
+  }
+  ast::Mutability mutability(bool mutable_value) {
+    return mutable_value ? ast::Mutability::Mutable : ast::Mutability::Immutable;
+  }
+  std::optional<ast::GenericParameters>
+  build_generics(rxgrammar::RxParser::GenericParamsContext *context) {
+    if (!context) return {};
+    ast::GenericParameters result{source_span(context), {}};
+    for (auto *parameter : context->lifetimeParam()) {
+      ast::LifetimeParameter value{{}, lifetime(parameter->lifetime()), {}};
+      stamp(value, parameter);
+      if (auto *bounds = parameter->lifetimeBounds())
+        for (auto *name : bounds->lifetime()) value.bounds.push_back(lifetime(name));
+      result.lifetimes.push_back(std::move(value));
+    }
+    return result;
+  }
+  std::optional<ast::WhereClause>
+  build_where(rxgrammar::RxParser::WhereClauseContext *context) {
+    if (!context) return {};
+    ast::WhereClause result{source_span(context), {}};
+    for (auto *predicate : context->whereClauseItem()) {
+      std::vector<ast::LifetimeName> bounds;
+      if (auto *list = predicate->lifetimeBounds())
+        for (auto *name : list->lifetime()) bounds.push_back(lifetime(name));
+      if (auto *list = predicate->typeParamBounds())
+        for (auto *name : list->lifetime()) bounds.push_back(lifetime(name));
+      if (predicate->lifetime()) {
+        ast::LifetimePredicate value{{}, lifetime(predicate->lifetime()), std::move(bounds)};
+        stamp(value, predicate);
+        result.predicates.emplace_back(std::move(value));
+      } else {
+        ast::TypePredicate value{{}, build_type(predicate->typeRef()), std::move(bounds)};
+        stamp(value, predicate);
+        result.predicates.emplace_back(std::move(value));
+      }
+    }
     return result;
   }
 
@@ -778,7 +815,7 @@ private:
   }
 
   const std::vector<std::string> &rule_names_;
-  ast::NodeId next_id_{1};
+  std::uint32_t next_id_{1};
 };
 
 } // namespace
