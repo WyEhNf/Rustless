@@ -64,4 +64,46 @@ fn main() {
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
   assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") != std::string::npos);
+  std::vector<decltype(ir::BinaryLowering::operation)> operations;
+  std::vector<ir::BinaryOp> assignments;
+  const ast::Expr *first_binary = nullptr;
+  ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
+    using P = std::remove_cvref_t<decltype(payload)>;
+    if constexpr (std::same_as<P, ast::BinaryExpr>) {
+      auto lowered = bridge.binary(owner, payload);
+      operations.push_back(lowered.operation);
+      if (!first_binary) first_binary = &owner;
+      if (payload.op == ast::BinaryOp::Lt || payload.op == ast::BinaryOp::LogicalAnd ||
+          payload.op == ast::BinaryOp::LogicalOr)
+        assert(lowered.result_type == ir::Type::I1);
+      else assert(lowered.result_type == ir::Type::I32);
+    }
+    if constexpr (std::same_as<P, ast::CompoundAssignExpr>)
+      assignments.push_back(bridge.compound(owner, payload));
+  });
+  using Operation = decltype(ir::BinaryLowering::operation);
+  const std::vector<Operation> expected{
+    ir::BinaryOp::SDiv, ir::BinaryOp::UDiv, ir::BinaryOp::AShr, ir::BinaryOp::LShr,
+    ir::Predicate::SLt, ir::Predicate::ULt, ir::ShortCircuit::And, ir::ShortCircuit::Or};
+  assert(operations == expected);
+  assert(assignments == (std::vector{ir::BinaryOp::AShr, ir::BinaryOp::UDiv}));
+  auto alien = rx::parse_source("fn main() { let x = 1 + 2; }", diagnostics);
+  bool rejected = false;
+  ast::walk(*alien.crate, [&](const auto &, const auto &payload) {
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>, ast::BinaryExpr>) {
+      try { (void)bridge.binary(*first_binary, payload); }
+      catch (const std::invalid_argument &) { rejected = true; }
+    }
+  });
+  assert(rejected);
+  auto integer = std::make_shared<rx::SemanticType>();
+  integer->kind = rx::SemanticType::Kind::I32;
+  auto array = std::make_shared<rx::SemanticType>();
+  array->kind = rx::SemanticType::Kind::Array;
+  array->element = integer;
+  array->length = std::uint64_t{1} << 32;
+  rejected = false;
+  try { (void)bridge.layout(array); }
+  catch (const std::overflow_error &) { rejected = true; }
+  assert(rejected);
 }
