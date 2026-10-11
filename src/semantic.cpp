@@ -205,7 +205,12 @@ private:
     diagnostics_.error(span, std::move(message));
   }
 
-  static SymbolId symbol_for(ast::NodeId node) { return SymbolId{node.value}; }
+  SymbolId symbol_for(ast::NodeId node) {
+    auto [entry, inserted] = declaration_symbols_.try_emplace(node, next_symbol_);
+    if (inserted)
+      ++next_symbol_.value;
+    return entry->second;
+  }
   void record_symbol(ast::NodeId node, SymbolKind kind, std::string name,
                      std::optional<ast::NodeId> owner = {}) {
     auto id = symbol_for(node);
@@ -1756,6 +1761,8 @@ private:
   std::vector<LoopInfo> loops_;
   const FunctionInfo *current_function_{};
   SemanticResult result_;
+  SymbolId next_symbol_{1};
+  std::map<ast::NodeId, SymbolId> declaration_symbols_;
   std::unordered_set<SymbolId> recorded_symbols_;
   std::map<ast::NodeId, ExpressionSemantics> expression_facts_;
   std::map<ast::NodeId, TyPtr> resolved_types_;
