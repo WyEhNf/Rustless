@@ -16,6 +16,31 @@ The tree remains closed and read-only. Adding a node requires adding its
 child enumeration and handlers in exhaustive visitors. There is no virtual
 base visitor or numeric kind switch.
 
+## Structural traversal
+
+`for_each_child` enumerates immediate identity-bearing children in source
+order. It does not recursively visit grandchildren. Each payload has an
+explicit enumeration; there is no fallback that could hide a new node kind.
+Tokens such as identifiers and lifetime names remain syntax fields, rather
+than independent identity-bearing nodes.
+
+Traversal visitors implement `enter(owner, payload) -> WalkControl` and
+`leave(owner, payload) -> void`. `TraversalVisitor` checks coverage of the
+whole tree. Inherit `DefaultVisitor` and use `using DefaultVisitor::enter`
+and/or `using DefaultVisitor::leave` to explicitly choose selective handling.
+
+- Continue traverses children, then calls leave.
+- SkipChildren calls leave without visiting descendants.
+- Stop prevents further enter calls, but balances leave for the current
+  node and every entered ancestor, then returns WalkResult::Stopped.
+
+Balancing applies to normal returns and controlled stops, not exceptions.
+Each free traversal starts fresh; a stopped walker instance stays stopped.
+
+The visitor regression passed with exact child order, one BinaryExpr callback,
+balanced enter/leave stacks, subtree pruning, stopping before a sibling,
+stopping at the root, and compile-time rejection of invalid traversal hooks.
+
 ## Initial verification
 
 The `ast_visitor` CTest passed after adding compile-time coverage checks for
