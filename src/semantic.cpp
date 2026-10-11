@@ -185,6 +185,8 @@ public:
       result_.expressions.push_back(std::move(fact));
     for (auto &[node, type] : resolved_types_)
       result_.resolved_types.push_back({node, std::move(type)});
+    for (auto &[symbol, type] : symbol_types_)
+      result_.symbol_types.push_back({symbol, std::move(type)});
     for (const auto &[_, constant] : constants_)
       if (constant.state == ConstantInfo::State::Done)
         result_.constants.push_back(
@@ -197,6 +199,7 @@ public:
              static_cast<std::uint32_t>(constant.value)});
     std::sort(result_.constants.begin(), result_.constants.end(),
               [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+    result_.success = !diagnostics_.has_errors();
     return std::move(result_);
   }
 
@@ -220,6 +223,9 @@ private:
     if (recorded_symbols_.insert(id).second)
       result_.symbols.push_back(
           {id, kind, std::move(name), parent, node});
+  }
+  void record_symbol_type(ast::NodeId declaration, const TyPtr &type) {
+    symbol_types_[symbol_for(declaration)] = type;
   }
 
   void collect_items() {
@@ -401,6 +407,7 @@ private:
     }
     constant.type_state = ConstantInfo::TypeState::Resolving;
     constant.type = resolve_type(constant.ast->type, constant.owner);
+    record_symbol_type(constant.ast->id, constant.type);
     if (constant.type_state != ConstantInfo::TypeState::Failed)
       constant.type_state = ConstantInfo::TypeState::Done;
   }
@@ -1766,6 +1773,7 @@ private:
   std::unordered_set<SymbolId> recorded_symbols_;
   std::map<ast::NodeId, ExpressionSemantics> expression_facts_;
   std::map<ast::NodeId, TyPtr> resolved_types_;
+  std::map<SymbolId, TyPtr> symbol_types_;
 };
 
 } // namespace

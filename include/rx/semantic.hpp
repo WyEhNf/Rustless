@@ -97,6 +97,26 @@ struct ConstantValue {
   std::uint32_t bits{};
 };
 
+struct SymbolType {
+  SymbolId symbol;
+  SemanticTypePtr type;
+};
+struct ParameterSemantics {
+  SymbolId symbol;
+  SemanticTypePtr type;
+};
+struct FunctionSemantics {
+  SymbolId symbol;
+  std::optional<ParameterSemantics> receiver;
+  std::vector<ParameterSemantics> parameters;
+  SemanticTypePtr result;
+};
+struct StructSemantics {
+  SymbolId symbol;
+  // Preserve declaration order for aggregate layout, not hash-table order.
+  std::vector<SymbolId> fields;
+};
+
 struct SemanticResult {
   SemanticSummary summary;
   std::vector<SymbolRecord> symbols;
@@ -104,6 +124,10 @@ struct SemanticResult {
   // Lowering consumes checked declarations instead of resolving them again.
   std::vector<TypeResolution> resolved_types;
   std::vector<ConstantValue> constants;
+  std::vector<SymbolType> symbol_types;
+  std::vector<FunctionSemantics> functions;
+  std::vector<StructSemantics> structures;
+  bool success{};
 };
 
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics);
