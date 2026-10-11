@@ -2,6 +2,7 @@
 
 #include "rx/ast.hpp"
 #include "rx/diagnostic.hpp"
+#include "rx/symbol.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -12,9 +13,6 @@
 namespace rx {
 
 // Syntax and semantic identities are distinct, even when numerically related.
-struct SymbolTag;
-using SymbolId = ast::Id<SymbolTag>;
-
 enum class SymbolKind {
   Struct, Function, Constant, AssociatedFunction, AssociatedConstant,
   Field, Parameter, Receiver, Local

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rx/ir_ids.hpp"
+#include "rx/symbol.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -147,6 +148,7 @@ struct Parameter {
   ValueId id{};
   Type type{Type::I32};
   std::string name;
+  std::optional<SymbolId> symbol;
 };
 
 struct Function {
@@ -155,12 +157,16 @@ struct Function {
   std::vector<Parameter> parameters;
   std::vector<Block> blocks;
   ValueId next_value{1};
+  std::optional<SymbolId> symbol;
+  std::optional<Origin> origin;
 };
 
 struct Declaration {
   std::string name;
   Type result{Type::Void};
   std::vector<Type> parameters;
+  std::optional<SymbolId> symbol;
+  std::optional<Origin> origin;
 };
 
 struct Module {
