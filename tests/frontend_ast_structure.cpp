@@ -108,4 +108,12 @@ fn ops() {
     assert(node.span.begin <= node.span.end && node.span.end <= source.size());
   });
   assert(identities.size() > 60);
+  rx::DiagnosticEngine utf8_diagnostics;
+  auto utf8 = rx::parse_source("// 中文\nfn main() { 1 + 2; }", utf8_diagnostics);
+  assert(utf8.syntax_ok && utf8.crate);
+  const auto &utf8_function = std::get<ast::Function>(utf8.crate->items[0]);
+  assert(utf8.crate->source.slice(utf8_function.name.span) == "main");
+  const auto &utf8_sum = std::get<ast::BinaryExpr>(std::get<ast::ExprStmt>(utf8_function.body->statements[0]->data).expression->data);
+  assert(utf8.crate->source.slice(utf8_sum.operator_span) == "+");
+  assert(utf8_sum.operator_span.file == utf8.crate->source.id);
 }

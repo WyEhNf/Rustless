@@ -38,12 +38,12 @@ private:
   DiagnosticEngine &diagnostics_;
 };
 
-Span token_span(const antlr4::Token *token) {
+Span raw_token_span(const antlr4::Token *token) {
   return {token->getStartIndex(), token->getStopIndex() + 1,
           token->getLine(), token->getCharPositionInLine()};
 }
 
-Span source_span(ParseContext *context) {
+Span raw_source_span(ParseContext *context) {
   const auto *start = context->getStart();
   const auto *stop = context->getStop();
   if (!start)
@@ -64,11 +64,11 @@ Span merge(Span first, Span second) {
 class AstBuilder {
 public:
   AstBuilder(const std::vector<std::string> &rule_names, std::string_view source)
-      : rule_names_(rule_names), source_(source) {}
+      : rule_names_(rule_names), source_(std::string(source)) {}
 
   std::unique_ptr<ast::Crate>
   build(rxgrammar::RxParser::CrateContext *context) {
-    auto crate = std::make_unique<ast::Crate>(std::string(source_));
+    auto crate = std::make_unique<ast::Crate>(source_.text);
     stamp(*crate, context);
     for (auto *item : context->item()) {
       if (item->useDeclaration())
@@ -92,6 +92,12 @@ public:
   }
 
 private:
+  Span source_span(ParseContext *context) const {
+    return source_.from_character_span(raw_source_span(context));
+  }
+  Span token_span(const antlr4::Token *token) const {
+    return source_.from_character_span(raw_token_span(token));
+  }
   template <typename Node> void stamp(Node &node, ParseContext *context) {
     node.id = ast::NodeId{next_id_++};
     node.span = source_span(context);
@@ -733,7 +739,7 @@ private:
   }
 
   const std::vector<std::string> &rule_names_;
-  std::string_view source_;
+  ast::SourceFile source_;
   std::uint32_t next_id_{1};
 };
 

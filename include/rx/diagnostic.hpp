@@ -1,17 +1,25 @@
 #pragma once
 
 #include <cstddef>
+#include <compare>
+#include <cstdint>
 #include <iosfwd>
 #include <string>
 #include <vector>
 
 namespace rx {
 
+struct FileId {
+  std::uint32_t value{};
+  auto operator<=>(const FileId &) const = default;
+};
+
 struct Span {
   std::size_t begin{};
   std::size_t end{};
   std::size_t line{1};
   std::size_t column{};
+  FileId file{};
 };
 
 enum class Severity { Error, Warning };
