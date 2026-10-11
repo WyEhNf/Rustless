@@ -334,38 +334,38 @@ void Printer::conditional(const IfExpr &value, int level) {
                *value.else_branch);
 }
 void Printer::expression(const ExprPtr &value, int level) {
-  auto label = [&](std::string text) { heading(text, *value, level); };
+  auto label = [&](const Expr &node, std::string text) { heading(text, node, level); };
   auto child = [&](const ExprPtr &p) { expression(p, level + 1); };
-  visit(*value,
-        Overloaded{[&](const IntegerExpr &p) {
-                     label("Integer " + p.literal.spelling);
+  dispatch(*value,
+        Overloaded{[&](const Expr &node, const IntegerExpr &p) {
+                     label(node, "Integer " + p.literal.spelling);
                    },
-                   [&](const BooleanExpr &p) {
-                     label(p.value ? "Boolean true" : "Boolean false");
+                   [&](const Expr &node, const BooleanExpr &p) {
+                     label(node, p.value ? "Boolean true" : "Boolean false");
                    },
-                   [&](const UnitExpr &) { label("Unit"); },
-                   [&](const PathExpr &p) {
-                     label("Path");
+                   [&](const Expr &node, const UnitExpr &) { label(node, "Unit"); },
+                   [&](const Expr &node, const PathExpr &p) {
+                     label(node, "Path");
                      indent(level + 1);
                      path(p.path);
                      out_ << '\n';
                    },
-                   [&](const ParenExpr &p) {
-                     label("Paren");
+                   [&](const Expr &node, const ParenExpr &p) {
+                     label(node, "Paren");
                      child(p.inner);
                    },
-                   [&](const ArrayExpr &p) {
-                     label("Array");
+                   [&](const Expr &node, const ArrayExpr &p) {
+                     label(node, "Array");
                      for (const auto &element : p.elements)
                        child(element);
                    },
-                   [&](const RepeatArrayExpr &p) {
-                     label("RepeatArray");
+                   [&](const Expr &node, const RepeatArrayExpr &p) {
+                     label(node, "RepeatArray");
                      child(p.element);
                      child(p.count);
                    },
-                   [&](const StructExpr &p) {
-                     label("StructExpr");
+                   [&](const Expr &node, const StructExpr &p) {
+                     label(node, "StructExpr");
                      indent(level + 1);
                      path(p.path);
                      out_ << '\n';
@@ -375,62 +375,62 @@ void Printer::expression(const ExprPtr &value, int level) {
                        expression(field.value, level + 2);
                      }
                    },
-                   [&](const BlockExpr &p) {
-                     label("BlockExpr");
+                   [&](const Expr &node, const BlockExpr &p) {
+                     label(node, "BlockExpr");
                      block(*p.block, level + 1);
                    },
-                   [&](const IfExpr &p) {
-                     label("If");
+                   [&](const Expr &node, const IfExpr &p) {
+                     label(node, "If");
                      conditional(p, level + 1);
                    },
-                   [&](const LoopExpr &p) {
-                     label("Loop");
+                   [&](const Expr &node, const LoopExpr &p) {
+                     label(node, "Loop");
                      block(*p.body, level + 1);
                    },
-                   [&](const WhileExpr &p) {
-                     label("While");
+                   [&](const Expr &node, const WhileExpr &p) {
+                     label(node, "While");
                      child(p.condition);
                      block(*p.body, level + 1);
                    },
-                   [&](const UnaryExpr &p) {
-                     label("Unary " + std::string(spelling(p.op)));
+                   [&](const Expr &node, const UnaryExpr &p) {
+                     label(node, "Unary " + std::string(spelling(p.op)));
                      child(p.operand);
                    },
-                   [&](const BorrowExpr &p) {
-                     label(p.mutability == Mutability::Mutable ? "Borrow &mut"
+                   [&](const Expr &node, const BorrowExpr &p) {
+                     label(node, p.mutability == Mutability::Mutable ? "Borrow &mut"
                                                                : "Borrow &");
                      child(p.operand);
                    },
-                   [&](const BinaryExpr &p) {
-                     label("Binary " + std::string(spelling(p.op)));
+                   [&](const Expr &node, const BinaryExpr &p) {
+                     label(node, "Binary " + std::string(spelling(p.op)));
                      child(p.left);
                      child(p.right);
                    },
-                   [&](const AssignExpr &p) {
-                     label("Assign =");
+                   [&](const Expr &node, const AssignExpr &p) {
+                     label(node, "Assign =");
                      child(p.target);
                      child(p.value);
                    },
-                   [&](const CompoundAssignExpr &p) {
-                     label("CompoundAssign " + std::string(spelling(p.op)));
+                   [&](const Expr &node, const CompoundAssignExpr &p) {
+                     label(node, "CompoundAssign " + std::string(spelling(p.op)));
                      child(p.target);
                      child(p.value);
                    },
-                   [&](const CastExpr &p) {
-                     label("Cast");
+                   [&](const Expr &node, const CastExpr &p) {
+                     label(node, "Cast");
                      child(p.value);
                      indent(level + 1);
                      type(p.target_type);
                      out_ << '\n';
                    },
-                   [&](const CallExpr &p) {
-                     label("Call");
+                   [&](const Expr &node, const CallExpr &p) {
+                     label(node, "Call");
                      child(p.callee);
                      for (const auto &arg : p.arguments)
                        child(arg);
                    },
-                   [&](const MethodCallExpr &p) {
-                     label("MethodCall " + p.method.text);
+                   [&](const Expr &node, const MethodCallExpr &p) {
+                     label(node, "MethodCall " + p.method.text);
                      child(p.receiver);
                      if (p.generic_args) {
                        indent(level + 1);
@@ -440,23 +440,23 @@ void Printer::expression(const ExprPtr &value, int level) {
                      for (const auto &arg : p.arguments)
                        child(arg);
                    },
-                   [&](const FieldExpr &p) {
-                     label("Field " + p.field.text);
+                   [&](const Expr &node, const FieldExpr &p) {
+                     label(node, "Field " + p.field.text);
                      child(p.base);
                    },
-                   [&](const IndexExpr &p) {
-                     label("Index");
+                   [&](const Expr &node, const IndexExpr &p) {
+                     label(node, "Index");
                      child(p.base);
                      child(p.index);
                    },
-                   [&](const BreakExpr &p) {
-                     label("Break");
+                   [&](const Expr &node, const BreakExpr &p) {
+                     label(node, "Break");
                      if (p.value)
                        child(*p.value);
                    },
-                   [&](const ContinueExpr &) { label("Continue"); },
-                   [&](const ReturnExpr &p) {
-                     label("Return");
+                   [&](const Expr &node, const ContinueExpr &) { label(node, "Continue"); },
+                   [&](const Expr &node, const ReturnExpr &p) {
+                     label(node, "Return");
                      if (p.value)
                        child(*p.value);
                    }});
