@@ -49,8 +49,10 @@ Use trees preserve prefixes, aliases, wildcard imports and nested groups.
 
 ## Consumers
 
-Printing and semantic dispatch use exhaustive variant visitors.
-A separate structural walker visits children in source order.
+Printing and semantic dispatch use contextual, exhaustive variant visitors.
+The same visit interface covers expression payloads and declaration unions.
+A separate structural walker reports concrete payloads in source order,
+with enter/leave hooks, subtree pruning and balanced controlled stops.
 Parentheses are preserved in syntax and transparent to type checking.
 Lowering consumes checked semantic facts without mutating syntax.
 The current IR infrastructure has no AST lowering implementation to migrate.
@@ -78,8 +80,12 @@ and uses a deleter created where its recursive child type is complete.
 Moved-from Boxes may only be destroyed or assigned another value.
 
 For a binary expression, use get_if<BinaryExpr>(*expression), then read
-op, left, right and operator_span. Use visit with exhaustive overloads for
-dispatch, and walk(crate, callback) for preorder structural traversal.
+op, left, right and operator_span. Use visit(node, visitor) with overloads
+receiving (const Owner&, const Payload&) for dispatch. walk(root, visitor)
+accepts enter/leave visitors or callbacks with the same contextual signature.
+Callbacks return void or WalkControl; walk returns WalkResult.
+DefaultVisitor is an explicit opt-in for selective traversal handlers.
+See ast-visitors.md for coverage constraints and complete examples.
 Neither traversal relies on numeric node-kind tags.
 
 SourceFile owns UTF-8 bytes. Spans index those bytes and retain FileId.

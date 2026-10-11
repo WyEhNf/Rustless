@@ -5,6 +5,8 @@ its concrete payload. For expressions this is `(const Expr&, const BinaryExpr&)`
 for declarations it is `(const Function&, const Function&)`. A `const Node&`
 first argument accepts any owner when only its identity or span is needed.
 The owner and payload always refer to the same syntax node.
+Include `rx/ast.hpp` for `visit`, or `rx/ast/visitor.hpp` for `walk`.
+`visit` dispatches one node; it does not recurse automatically.
 
 `ExhaustiveVisitor<V, T>` checks every alternative and requires identical
 return types. Missing handlers, mutable-only handlers and inconsistent return
@@ -36,6 +38,45 @@ and/or `using DefaultVisitor::leave` to explicitly choose selective handling.
 
 Balancing applies to normal returns and controlled stops, not exceptions.
 Each free traversal starts fresh; a stopped walker instance stays stopped.
+
+## Selective traversal example
+
+```cpp
+#include "rx/ast/visitor.hpp"
+
+struct CountBinaries : rx::ast::DefaultVisitor {
+  using DefaultVisitor::enter;
+  int count{};
+  rx::ast::WalkControl enter(const rx::ast::Expr &node,
+                            const rx::ast::BinaryExpr &binary) {
+    ++count;
+    // node.id/span identify this expression; binary.op/left/right describe it.
+    return rx::ast::WalkControl::Continue;
+  }
+};
+// CountBinaries counter;
+// auto result = rx::ast::walk(crate, counter);
+```
+
+No nested visit or downcast is needed inside a traversal callback. For a
+strict visitor, implement every enter and leave signature without inheriting
+DefaultVisitor. `static_assert(TraversalVisitor<MyVisitor>)` checks coverage.
+
+For simple preorder work, use `walk(crate, [](const Node& node, const auto& p)
+{ /* inspect metadata and concrete payload */ });`. Each callback branch may
+return void or WalkControl. Other return types are rejected. When an object
+provides both a full hook interface and an operator(), its hooks take priority.
+
+`for_each_child(root, callback)` passes child owners only; callers control
+recursion and may call visit on a child when they need its payload. Item,
+ImplMember and WherePredicate are also accepted as traversal roots.
+
+## Migration
+
+The old one-argument payload visit and one-argument Node walk callbacks have
+been removed. Existing consumers must add the owner or payload parameter.
+Semantic analysis still controls its own recursion because scopes and
+expected types require context. Printing uses the same contextual dispatch.
 
 The visitor regression passed with exact child order, one BinaryExpr callback,
 balanced enter/leave stacks, subtree pruning, stopping before a sibling,
