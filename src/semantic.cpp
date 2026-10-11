@@ -898,11 +898,11 @@ private:
             [&](const ast::Expr &, const ast::PathExpr &) {
               return check_path(expression);
             },
-            [&](const ast::Expr &, const ast::ArrayExpr &) {
-              return check_array(expression, expected);
+            [&](const ast::Expr &node, const ast::ArrayExpr &array) {
+              return check_array(node, array, expected);
             },
-            [&](const ast::Expr &, const ast::RepeatArrayExpr &) {
-              return check_repeat_array(expression, expected);
+            [&](const ast::Expr &node, const ast::RepeatArrayExpr &array) {
+              return check_repeat_array(node, array, expected);
             },
             [&](const ast::Expr &, const ast::StructExpr &) {
               return check_struct(expression);
@@ -1055,14 +1055,13 @@ private:
            (structures_.contains(first) && second == "clone");
   }
 
-  ExprInfo check_array(const ast::ExprPtr &expression, const TyPtr &expected) {
-    const auto &array = std::get<ast::ArrayExpr>(expression->data);
+  ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array, const TyPtr &expected) {
     auto expected_element = expected && expected->kind == Ty::Kind::Array
                                 ? expected->element
                                 : TyPtr{};
     if (array.elements.empty()) {
       if (!expected_element) {
-        report(expression->span,
+        report(node.span,
                "an empty array requires an expected array type");
         return {};
       }
@@ -1086,12 +1085,11 @@ private:
     result->element = first.type;
     if (expected_element &&
         (result->length != expected->length || !coercible(result, expected)))
-      mismatch(expression->span, result, expected);
+      mismatch(node.span, result, expected);
     return {result};
   }
-  ExprInfo check_repeat_array(const ast::ExprPtr &expression,
+  ExprInfo check_repeat_array(const ast::Expr &node, const ast::RepeatArrayExpr &array,
                               const TyPtr &expected) {
-    const auto &array = std::get<ast::RepeatArrayExpr>(expression->data);
     auto expected_element = expected && expected->kind == Ty::Kind::Array
                                 ? expected->element
                                 : TyPtr{};
@@ -1102,10 +1100,10 @@ private:
         array.count, current_function_ ? current_function_->owner : "");
     result->length = length.value_or(0);
     if (result->length > 1 && !supports(first.type, "Copy", "", {}))
-      report(expression->span, "array repetition requires Copy");
+      report(node.span, "array repetition requires Copy");
     if (expected_element &&
         (result->length != expected->length || !coercible(result, expected)))
-      mismatch(expression->span, result, expected);
+      mismatch(node.span, result, expected);
     return {result};
   }
 
