@@ -220,8 +220,8 @@ private:
     std::unordered_set<std::string> type_names;
     std::unordered_set<std::string> value_names;
     for (const auto &item : crate_.items) {
-      std::visit(
-          [&](const auto &value) {
+      ast::dispatch(item,
+          [&](const ast::Node &, const auto &value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, ast::Struct>) {
               record_symbol(value.id, "struct", value.name.text);
@@ -255,8 +255,7 @@ private:
             } else if constexpr (std::is_same_v<T, ast::Use>) {
               (void)value;
             }
-          },
-          item);
+          });
     }
   }
 
@@ -431,8 +430,8 @@ private:
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
-        std::visit(
-            [&](const auto &declaration) {
+        ast::dispatch(member,
+            [&](const ast::Node &, const auto &declaration) {
               using T = std::decay_t<decltype(declaration)>;
               const auto &name = declaration.name.text;
               auto key = owner + "::" + name;
@@ -454,8 +453,7 @@ private:
                 associated_constants_[key].ast = &declaration;
                 associated_constants_[key].owner = owner;
               }
-            },
-            member);
+            });
       }
     }
 
