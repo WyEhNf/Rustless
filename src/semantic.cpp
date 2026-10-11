@@ -183,6 +183,10 @@ public:
               });
     for (auto &[_, fact] : expression_facts_)
       result_.expressions.push_back(std::move(fact));
+    std::sort(result_.functions.begin(), result_.functions.end(),
+              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+    std::sort(result_.structures.begin(), result_.structures.end(),
+              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
     for (auto &[node, type] : resolved_types_)
       result_.resolved_types.push_back({node, std::move(type)});
     for (auto &[symbol, type] : symbol_types_)
@@ -483,6 +487,10 @@ private:
         record_symbol_type(field.id, structure.fields[field.name.text]);
         structure.field_symbols[field.name.text] = symbol_for(field.id);
       }
+      StructSemantics declaration{symbol_for(structure.ast->id), {}};
+      for (const auto &field : structure.ast->fields)
+        declaration.fields.push_back(symbol_for(field.id));
+      result_.structures.push_back(std::move(declaration));
     }
     for (auto &[name, function] : functions_)
       resolve_function(function, name, {});

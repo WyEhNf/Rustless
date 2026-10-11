@@ -29,6 +29,18 @@ fn main() {
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   assert(!diagnostics.has_errors());
+  assert(checked.success && checked.structures.size() == 1 && checked.functions.size() == 2);
+  assert(checked.structures[0].fields.size() == 1);
+  assert(!checked.symbol_types.empty());
+  bool saw_receiver = false;
+  for (const auto &function : checked.functions) {
+    assert(function.result);
+    if (function.receiver) {
+      saw_receiver = true;
+      assert(function.receiver->type->kind == rx::SemanticType::Kind::Ref);
+    }
+  }
+  assert(saw_receiver);
   std::set<rx::SymbolId> symbols;
   std::set<ast::NodeId> declarations;
   bool independent_id = false;
