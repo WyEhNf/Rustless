@@ -1,6 +1,7 @@
 #include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
 #include "rx/semantic.hpp"
+#include "rx/semantic_index.hpp"
 #include "rx/semantic_literal.hpp"
 
 #undef NDEBUG
@@ -41,6 +42,18 @@ fn main() {
     }
   }
   assert(saw_receiver);
+  rx::SemanticIndex index(*parsed.crate, checked);
+  const auto &pair = std::get<ast::Struct>(parsed.crate->items[1]);
+  assert(index.declaration(pair.id).kind == rx::SymbolKind::Struct);
+  assert(index.structure(index.declaration(pair.id).id).fields[0] ==
+         index.declaration(pair.fields[0].id).id);
+  assert(index.type(*pair.fields[0].type)->kind == rx::SemanticType::Kind::I32);
+  auto missing = checked;
+  missing.expressions.pop_back();
+  bool rejected = false;
+  try { rx::SemanticIndex invalid(*parsed.crate, missing); }
+  catch (const std::exception &) { rejected = true; }
+  assert(rejected);
   std::set<rx::SymbolId> symbols;
   std::set<ast::NodeId> declarations;
   bool independent_id = false;

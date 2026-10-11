@@ -91,5 +91,34 @@ void SemanticIndex::validate_links() const {
       throw std::invalid_argument("constant fact links to a non-constant symbol");
   }
 }
-void SemanticIndex::validate_tree() const {}
+void SemanticIndex::validate_tree() const {
+  std::unordered_set<ast::NodeId> identities;
+  // The first traversal also includes preserved, not-yet-interpreted constraints.
+  ast::walk(*crate_, [&](const ast::Node &node, const auto &) {
+    if (!node.id.value || !identities.insert(node.id).second ||
+        node.span.file != crate_->source.id || node.span.begin > node.span.end ||
+        node.span.end > crate_->source.text.size())
+      throw std::invalid_argument("invalid AST identity or source span");
+  });
+  auto check_ids = [&](const auto &facts) {
+    for (const auto &[id, _] : facts)
+      if (!identities.contains(id))
+        throw std::invalid_argument("semantic fact refers outside its AST");
+  };
+  check_ids(declarations_);
+  check_ids(expressions_);
+  check_ids(types_);
+  ast::walk(*crate_, [&](const auto &owner, const auto &) {
+    using T = std::remove_cvref_t<decltype(owner)>;
+    // Lifetime constraints are preserved syntax; current analysis skips them.
+    if constexpr (std::same_as<T, ast::TypePredicate>)
+      return ast::WalkControl::SkipChildren;
+    if constexpr (std::same_as<T, ast::Expr> || std::same_as<T, ast::Block> ||
+                  std::same_as<T, ast::IfBranch>)
+      (void)expression(owner.id);
+    if constexpr (std::same_as<T, ast::TypeSyntax>)
+      (void)type(owner.id);
+    return ast::WalkControl::Continue;
+  });
+}
 } // namespace rx
