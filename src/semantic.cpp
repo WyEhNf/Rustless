@@ -216,29 +216,29 @@ private:
           [&](const auto &value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, ast::Struct>) {
-              record_symbol(value.id, "struct", value.name);
-              if (builtin_type(value.name))
-                report(value.span, "the builtin type name '" + value.name +
+              record_symbol(value.id, "struct", value.name.text);
+              if (builtin_type(value.name.text))
+                report(value.span, "the builtin type name '" + value.name.text +
                                        "' is protected");
-              if (!type_names.insert(value.name).second)
-                report(value.span, "duplicate type name '" + value.name + "'");
-              structures_[value.name].ast = &value;
+              if (!type_names.insert(value.name.text).second)
+                report(value.span, "duplicate type name '" + value.name.text + "'");
+              structures_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Function>) {
-              record_symbol(value.id, "function", value.name);
-              if (protected_builtin_value(value.name))
-                report(value.span, "the builtin value name '" + value.name +
+              record_symbol(value.id, "function", value.name.text);
+              if (protected_builtin_value(value.name.text))
+                report(value.span, "the builtin value name '" + value.name.text +
                                        "' is protected");
-              if (!value_names.insert(value.name).second)
-                report(value.span, "duplicate value name '" + value.name + "'");
-              functions_[value.name].ast = &value;
+              if (!value_names.insert(value.name.text).second)
+                report(value.span, "duplicate value name '" + value.name.text + "'");
+              functions_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Constant>) {
-              record_symbol(value.id, "constant", value.name);
-              if (protected_builtin_value(value.name))
-                report(value.span, "the builtin value name '" + value.name +
+              record_symbol(value.id, "constant", value.name.text);
+              if (protected_builtin_value(value.name.text))
+                report(value.span, "the builtin value name '" + value.name.text +
                                        "' is protected");
-              if (!value_names.insert(value.name).second)
-                report(value.span, "duplicate value name '" + value.name + "'");
-              constants_[value.name].ast = &value;
+              if (!value_names.insert(value.name.text).second)
+                report(value.span, "duplicate value name '" + value.name.text + "'");
+              constants_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Impl>) {
               impls_.push_back(&value);
             } else if constexpr (std::is_same_v<T, ast::Use>) {
@@ -263,113 +263,86 @@ private:
   TyPtr resolve_type(const ast::TypePtr &syntax,
                      std::string_view self_name = {}) {
     auto result = resolve_type_impl(syntax, self_name);
-    if (syntax)
-      resolved_types_[syntax->id] = result;
+    resolved_types_[syntax->id] = result;
     return result;
   }
 
-  TyPtr resolve_type_impl(const ast::TypePtr &syntax,
-                          std::string_view self_name) {
-    // Resolve names and validate generic arity at the declaration boundary.
-    if (!syntax)
-      return ty(Ty::Kind::Unit);
-    if (syntax->kind == ast::Type::Kind::Unit)
-      return ty(Ty::Kind::Unit);
-    if (syntax->kind == ast::Type::Kind::Reference) {
-      return compound(Ty::Kind::Ref, resolve_type(syntax->element, self_name),
-                      syntax->is_mutable);
+  static std::vector<const ast::TypePtr *>
+  type_arguments(const std::optional<ast::GenericArguments> &arguments) {
+    std::vector<const ast::TypePtr *> result;
+    if (arguments)
+      for (const auto &argument : arguments->values)
+        if (auto *type = std::get_if<ast::TypePtr>(&argument)) result.push_back(type);
+    return result;
+  }
+  static std::vector<const ast::TypePtr *> type_arguments(const ast::Path &path) {
+    std::vector<const ast::TypePtr *> result;
+    for (const auto &segment : path.segments) {
+      auto arguments = type_arguments(segment.arguments);
+      result.insert(result.end(), arguments.begin(), arguments.end());
     }
-    if (syntax->kind == ast::Type::Kind::Array) {
-      auto value =
-          compound(Ty::Kind::Array, resolve_type(syntax->element, self_name));
-      auto length =
-          evaluate_length(syntax->array_length, syntax->span, self_name);
-      if (length)
-        value->length = *length;
-      return value;
-    }
-    const std::string name = syntax->path.empty() ? "" : syntax->path.back();
+    return result;
+  }
+  TyPtr resolve_type(const std::optional<ast::TypePtr> &syntax,
+                     std::string_view self_name = {}) {
+    return syntax ? resolve_type(*syntax, self_name) : ty(Ty::Kind::Unit);
+  }
+  TyPtr resolve_type_impl(const ast::TypePtr &syntax, std::string_view self_name) {
+    return ast::visit(*syntax, ast::Overloaded{
+      [&](const ast::UnitType &) { return ty(Ty::Kind::Unit); },
+      [&](const ast::ParenType &p) { return resolve_type(p.inner, self_name); },
+      [&](const ast::ReferenceType &p) {
+        return compound(Ty::Kind::Ref, resolve_type(p.referent, self_name),
+                        p.mutability == ast::Mutability::Mutable);
+      },
+      [&](const ast::ArrayType &p) {
+        auto value = compound(Ty::Kind::Array, resolve_type(p.element, self_name));
+        if (auto length = evaluate_length(p.length, self_name)) value->length = *length;
+        return value;
+      },
+      [&](const ast::PathType &p) { return resolve_path_type(p.path, syntax->span, self_name); }
+    });
+  }
+  TyPtr resolve_path_type(const ast::Path &path, Span span, std::string_view self_name) {
+    const std::string name{ast::name_text(path.segments.back().name)};
+    auto arguments = type_arguments(path);
     if (name == "Self") {
       if (self_name.empty()) {
-        report(syntax->span, "Self is only available inside a struct or impl");
+        report(span, "Self is only available inside a struct or impl");
         return ty(Ty::Kind::Error);
       }
-      auto value = ty(Ty::Kind::Struct);
-      value->name = std::string(self_name);
-      return value;
+      auto value = ty(Ty::Kind::Struct); value->name = self_name; return value;
     }
     static const std::unordered_map<std::string, Ty::Kind> primitives = {
-        {"bool", Ty::Kind::Bool},
-        {"i32", Ty::Kind::I32},
-        {"u32", Ty::Kind::U32},
-        {"isize", Ty::Kind::Isize},
-        {"usize", Ty::Kind::Usize}};
+      {"bool", Ty::Kind::Bool}, {"i32", Ty::Kind::I32}, {"u32", Ty::Kind::U32},
+      {"isize", Ty::Kind::Isize}, {"usize", Ty::Kind::Usize}
+    };
     if (auto it = primitives.find(name); it != primitives.end()) {
-      if (!syntax->arguments.empty())
-        report(syntax->span,
-               "primitive type '" + name + "' takes no type arguments");
+      if (!arguments.empty()) report(span, "primitive type '" + name + "' takes no type arguments");
       return ty(it->second);
     }
     if (name == "Box" || name == "Vec") {
-      if (syntax->arguments.size() != 1) {
-        report(syntax->span,
-               name + " requires exactly one concrete type argument");
+      if (arguments.size() != 1) {
+        report(span, name + " requires exactly one concrete type argument");
         return ty(Ty::Kind::Error);
       }
       return compound(name == "Box" ? Ty::Kind::Box : Ty::Kind::Vec,
-                      resolve_type(syntax->arguments.front(), self_name));
+                      resolve_type(*arguments.front(), self_name));
     }
     if (structures_.contains(name)) {
-      if (!syntax->arguments.empty())
-        report(syntax->span, "struct '" + name + "' has no type parameters");
-      auto value = ty(Ty::Kind::Struct);
-      value->name = name;
-      return value;
+      if (!arguments.empty()) report(span, "struct '" + name + "' has no type parameters");
+      auto value = ty(Ty::Kind::Struct); value->name = name; return value;
     }
-    report(syntax->span, "unknown type '" + name + "'");
-    return ty(Ty::Kind::Error);
+    report(span, "unknown type '" + name + "'"); return ty(Ty::Kind::Error);
   }
-
   std::optional<std::uint64_t>
-  evaluate_length(std::string text, Span span,
-                  std::string_view self_name = {}) {
-    while (text.size() >= 2 && text.front() == '(' && text.back() == ')')
-      text = text.substr(1, text.size() - 2);
-    if (!self_name.empty() && text.starts_with("Self::"))
-      text = std::string(self_name) + text.substr(4);
-    if (auto it = constants_.find(text); it != constants_.end()) {
-      resolve_constant_type(it->second);
-      evaluate_constant(it->second);
-      if (!it->second.type || it->second.type->kind != Ty::Kind::Usize)
-        report(span, "array length must have type usize");
-      if (it->second.state == ConstantInfo::State::Done &&
-          it->second.value >= 0)
-        return static_cast<std::uint64_t>(it->second.value);
-      return std::nullopt;
-    }
-    if (auto it = associated_constants_.find(text);
-        it != associated_constants_.end()) {
-      resolve_constant_type(it->second);
-      evaluate_constant(it->second);
-      if (!it->second.type || it->second.type->kind != Ty::Kind::Usize)
-        report(span, "array length must have type usize");
-      if (it->second.state == ConstantInfo::State::Done &&
-          it->second.value >= 0)
-        return static_cast<std::uint64_t>(it->second.value);
-      return std::nullopt;
-    }
-    std::string digits = text;
-    if (digits.ends_with("usize"))
-      digits.resize(digits.size() - 5);
-    else if (digits.ends_with("i32") || digits.ends_with("u32") ||
-             digits.ends_with("isize")) {
-      report(span, "array length must have type usize");
-      return std::nullopt;
-    }
-    std::uint64_t value{};
-    if (!parse_unsigned(digits, value))
-      report(span, "invalid array length");
-    return value;
+  evaluate_length(const ast::ExprPtr &expression, std::string_view self_name = {}) {
+    auto errors = diagnostics_.error_count();
+    auto [type, value] = constant_value(expression, ty(Ty::Kind::Usize), self_name);
+    if (type->kind != Ty::Kind::Usize) report(expression->span, "array length must have type usize");
+    if (value < 0) report(expression->span, "array length cannot be negative");
+    if (diagnostics_.error_count() != errors) return {};
+    return static_cast<std::uint64_t>(value);
   }
 
   void resolve_constant_type(ConstantInfo &constant) {
@@ -420,35 +393,28 @@ private:
       const std::string owner = target->name;
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
-      for (const auto &function_ast : implementation->functions) {
-        record_symbol(function_ast.id, "associated-function",
-                      owner + "::" + function_ast.name, owner_symbol);
-        if (!associated_names.insert(function_ast.name).second)
-          report(function_ast.span,
-                 "duplicate associated item '" + function_ast.name + "'");
-        auto key = owner + "::" + function_ast.name;
-        if (associated_functions_.contains(key) ||
-            associated_constants_.contains(key))
-          report(function_ast.span,
-                 "duplicate associated item '" + function_ast.name + "'");
-        associated_functions_[key].ast = &function_ast;
-        associated_functions_[key].owner = owner;
-      }
-      for (const auto &constant_ast : implementation->constants) {
-        record_symbol(constant_ast.id, "associated-constant",
-                      owner + "::" + constant_ast.name, owner_symbol);
-        if (!associated_names.insert(constant_ast.name).second)
-          report(constant_ast.span,
-                 "duplicate associated item '" + constant_ast.name + "'");
-        auto key = owner + "::" + constant_ast.name;
-        if (associated_functions_.contains(key) ||
-            associated_constants_.contains(key))
-          report(constant_ast.span,
-                 "duplicate associated item '" + constant_ast.name + "'");
-        associated_constants_[key].ast = &constant_ast;
-        associated_constants_[key].owner = owner;
+      for (const auto &member : implementation->members) {
+        std::visit([&](const auto &declaration) {
+          using T = std::decay_t<decltype(declaration)>;
+          const auto &name = declaration.name.text;
+          auto key = owner + "::" + name;
+          record_symbol(declaration.id,
+              std::is_same_v<T, ast::Function> ? "associated-function" : "associated-constant",
+              key, owner_symbol);
+          if (!associated_names.insert(name).second || associated_functions_.contains(key) || associated_constants_.contains(key))
+            report(declaration.span, "duplicate associated item '" + name + "'");
+          if constexpr (std::is_same_v<T, ast::Function>) {
+            associated_functions_[key].ast = &declaration;
+            associated_functions_[key].owner = owner;
+          } else {
+            static_assert(std::is_same_v<T, ast::Constant>);
+            associated_constants_[key].ast = &declaration;
+            associated_constants_[key].owner = owner;
+          }
+        }, member);
       }
     }
+
     // Constant types resolve lazily so their order cannot affect array lengths.
     for (auto &[_, constant] : constants_)
       resolve_constant_type(constant);
@@ -459,7 +425,9 @@ private:
     for (auto &[name, structure] : structures_) {
       std::unordered_set<std::string> fields;
       std::unordered_set<std::string> derives;
-      for (const auto &derive : structure.ast->derives) {
+      for (const auto &attribute : structure.ast->attributes)
+      for (const auto &name : attribute.names) {
+        const std::string derive{ast::spelling(name.kind)};
         if (!derives.insert(derive).second)
           report(structure.ast->span, "duplicate derive '" + derive + "'");
         structure.derives.insert(derive);
@@ -471,11 +439,11 @@ private:
           !structure.derives.contains("PartialEq"))
         report(structure.ast->span, "Eq requires an explicit PartialEq derive");
       for (const auto &field : structure.ast->fields) {
-        record_symbol(field.id, "field", field.name, structure.ast->id);
-        if (!fields.insert(field.name).second)
-          report(field.span, "duplicate field '" + field.name + "'");
-        structure.fields[field.name] = resolve_type(field.type, name);
-        structure.field_symbols[field.name] = field.id;
+        record_symbol(field.id, "field", field.name.text, structure.ast->id);
+        if (!fields.insert(field.name.text).second)
+          report(field.span, "duplicate field '" + field.name.text + "'");
+        structure.fields[field.name.text] = resolve_type(field.type, name);
+        structure.field_symbols[field.name.text] = field.id;
       }
     }
     for (auto &[name, function] : functions_)
@@ -486,13 +454,13 @@ private:
                         std::string owner) {
     function.owner = std::move(owner);
     std::unordered_set<std::string> parameters;
-    for (const auto &parameter : function.ast->parameters) {
-      if (!parameters.insert(parameter.name).second)
-        report(parameter.span, "duplicate parameter '" + parameter.name + "'");
+    for (const auto &parameter : function.ast->signature.parameters) {
+      if (!parameters.insert(parameter.binding.name.text).second)
+        report(parameter.span, "duplicate parameter '" + parameter.binding.name.text + "'");
       function.parameters.push_back(
           resolve_type(parameter.type, function.owner));
     }
-    function.result = resolve_type(function.ast->result, function.owner);
+    function.result = resolve_type(function.ast->signature.return_annotation, function.owner);
   }
 
   void validate_constants() {
@@ -530,16 +498,19 @@ private:
   std::pair<TyPtr, std::int64_t>
   constant_value(const ast::ExprPtr &expression, TyPtr expected = {},
                  std::string_view self_name = {}) {
-    if (!expression)
-      return {ty(Ty::Kind::Error), 0};
-    if (expression->kind == ast::Expr::Kind::Boolean) {
+    if (auto *paren = ast::get_if<ast::ParenExpr>(*expression)) {
+      auto result = constant_value(paren->inner, expected, self_name);
+      record_expression(expression, ExprInfo{result.first});
+      return result;
+    }
+    if (ast::get_if<ast::BooleanExpr>(*expression)) {
       auto type = ty(Ty::Kind::Bool);
       record_expression(expression, ExprInfo{type});
-      return {type, expression->text == "true"};
+      return {type, std::get<ast::BooleanExpr>(expression->data).value};
     }
-    if (expression->kind == ast::Expr::Kind::Integer) {
-      auto type = literal_type(expression->text, expected, expression->span);
-      std::string digits = expression->text;
+    if (ast::get_if<ast::IntegerExpr>(*expression)) {
+      auto type = literal_type(std::get<ast::IntegerExpr>(expression->data).literal.spelling, expected, expression->span);
+      std::string digits = std::get<ast::IntegerExpr>(expression->data).literal.spelling;
       for (auto suffix : {"usize", "isize", "u32", "i32"})
         if (digits.ends_with(suffix))
           digits.resize(digits.size() - std::string_view(suffix).size());
@@ -548,17 +519,17 @@ private:
       record_expression(expression, ExprInfo{type});
       return {type, static_cast<std::int64_t>(value)};
     }
-    if (expression->kind == ast::Expr::Kind::Unary && expression->text == "-" &&
-        !expression->operands.empty()) {
+    if (ast::get_if<ast::UnaryExpr>(*expression) &&
+        std::get<ast::UnaryExpr>(expression->data).op == ast::UnaryOp::Negate) {
       auto [type, value] =
-          constant_value(expression->operands.front(), expected, self_name);
+          constant_value(std::get<ast::UnaryExpr>(expression->data).operand, expected, self_name);
       if (!signed_integer(type))
         report(expression->span, "only signed constants may be negated");
       record_expression(expression, ExprInfo{type});
       return {type, -value};
     }
-    if (expression->kind == ast::Expr::Kind::Path) {
-      auto name = join_path(expression->path);
+    if (ast::get_if<ast::PathExpr>(*expression)) {
+      auto name = ast::path_name(std::get<ast::PathExpr>(expression->data).path);
       if (!self_name.empty() && name.starts_with("Self::"))
         name = std::string(self_name) + name.substr(4);
       if (auto it = constants_.find(name); it != constants_.end()) {
@@ -676,7 +647,7 @@ private:
     const auto &main = it->second;
     if (!main.parameters.empty())
       report(main.ast->span, "main cannot have value parameters");
-    if (!main.ast->lifetime_parameters.empty())
+    if (main.ast->generics && !main.ast->generics->lifetimes.empty())
       report(main.ast->span, "main cannot have generic parameters");
     if (main.result->kind != Ty::Kind::Unit)
       report(main.ast->span, "main must return unit");
@@ -694,26 +665,26 @@ private:
     scopes_.clear();
     scopes_.emplace_back();
     current_function_ = &function;
-    if (function.ast->has_self) {
+    if (function.ast->signature.receiver.has_value()) {
       if (function.owner.empty())
         report(function.ast->span, "self is only available in a method");
       auto self = ty(Ty::Kind::Struct);
       self->name = function.owner;
-      if (function.ast->self_by_ref)
-        self = compound(Ty::Kind::Ref, self, function.ast->self_mutable);
-      scopes_.back()["self"] = {self, function.ast->self_mutable,
+      if (ast::by_reference(*function.ast->signature.receiver))
+        self = compound(Ty::Kind::Ref, self, ast::is_mutable(*function.ast->signature.receiver));
+      scopes_.back()["self"] = {self, ast::is_mutable(*function.ast->signature.receiver),
                                 function.ast->id};
     }
-    for (std::size_t i = 0; i < function.ast->parameters.size(); ++i) {
-      const auto &parameter = function.ast->parameters[i];
-      if (protected_builtin_value(parameter.name))
+    for (std::size_t i = 0; i < function.ast->signature.parameters.size(); ++i) {
+      const auto &parameter = function.ast->signature.parameters[i];
+      if (protected_builtin_value(parameter.binding.name.text))
         report(parameter.span, "cannot shadow a protected builtin");
-      record_symbol(parameter.id, "parameter", parameter.name,
+      record_symbol(parameter.id, "parameter", parameter.binding.name.text,
                     function.ast->id);
-      scopes_.back()[parameter.name] = {function.parameters[i],
-                                        parameter.is_mutable, parameter.id};
+      scopes_.back()[parameter.binding.name.text] = {function.parameters[i],
+                                        parameter.binding.mutability == ast::Mutability::Mutable, parameter.id};
     }
-    auto body = check_expr(function.ast->body, function.result);
+    auto body = check_block(*function.ast->body, function.result);
     if (!coercible(body.type, function.result))
       mismatch(function.ast->body->span, body.type, function.result);
     current_function_ = nullptr;
@@ -1067,11 +1038,11 @@ private:
     }
     std::unordered_set<std::string> initialized;
     for (const auto &field : expression->fields) {
-      if (!initialized.insert(field.name).second)
-        report(field.span, "duplicate field initializer '" + field.name + "'");
-      auto expected = it->second.fields.find(field.name);
+      if (!initialized.insert(field.name.text).second)
+        report(field.span, "duplicate field initializer '" + field.name.text + "'");
+      auto expected = it->second.fields.find(field.name.text);
       if (expected == it->second.fields.end()) {
-        report(field.span, "unknown field '" + field.name + "'");
+        report(field.span, "unknown field '" + field.name.text + "'");
         check_expr(field.value);
       } else {
         auto value = check_expr(field.value, expected->second);
@@ -1385,11 +1356,11 @@ private:
     if (auto it = associated_functions_.find(name);
         it != associated_functions_.end()) {
       auto parameters = it->second.parameters;
-      if (it->second.ast->has_self) {
+      if (it->second.ast->signature.receiver.has_value()) {
         auto self = ty(Ty::Kind::Struct);
         self->name = it->second.owner;
-        if (it->second.ast->self_by_ref)
-          self = compound(Ty::Kind::Ref, self, it->second.ast->self_mutable);
+        if (ast::by_reference(*it->second.ast->signature.receiver))
+          self = compound(Ty::Kind::Ref, self, ast::is_mutable(*it->second.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
       return finish(check_signature(expression, parameters, it->second.result));
@@ -1543,20 +1514,20 @@ private:
       if (auto it = associated_functions_.find(key);
           it != associated_functions_.end()) {
         const auto &function = it->second;
-        if (!function.ast->has_self) {
+        if (!function.ast->signature.receiver.has_value()) {
           report(expression->span, "associated function without self cannot be "
                                    "called with dot syntax");
           return finish({}, key, function.ast->id);
         }
-        if (function.ast->self_by_ref && function.ast->self_mutable &&
+        if (ast::by_reference(*function.ast->signature.receiver) && ast::is_mutable(*function.ast->signature.receiver) &&
             !writable(receiver))
           report(expression->span, "method requires a mutable receiver");
         return finish(check_method_signature(expression, function.parameters,
                                              function.result),
                       key, function.ast->id,
-                      function.ast->self_by_ref
+                      ast::by_reference(*function.ast->signature.receiver)
                           ? std::optional<Adjustment::Kind>(
-                                function.ast->self_mutable
+                                ast::is_mutable(*function.ast->signature.receiver)
                                     ? Adjustment::Kind::BorrowMutable
                                     : Adjustment::Kind::BorrowShared)
                           : std::nullopt);
