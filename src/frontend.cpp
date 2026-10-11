@@ -332,53 +332,51 @@ private:
     return make_expr(context, ast::BlockExpr{build_block(context->blockExpression())});
   }
 
-  std::shared_ptr<ast::Stmt>
-  build_let(rxgrammar::RxParser::LetStatementContext *context) {
-    auto statement = std::make_shared<ast::Stmt>();
+  ast::StmtPtr build_let(rxgrammar::RxParser::LetStatementContext *context) {
+    std::optional<ast::TypePtr> annotation;
+    if (context->typeRef()) annotation.emplace(build_type(context->typeRef()));
+    auto statement = ast::box<ast::Stmt>(ast::LetStmt{
+        binding(context->identifierBinding()), std::move(annotation),
+        build_expression(context->expression())});
     stamp(*statement, context);
-    statement->kind = ast::Stmt::Kind::Let;
-    statement->name = context->identifierBinding()->identifier()->getText();
-    statement->is_mutable = context->identifierBinding()->MUT() != nullptr;
-    if (context->typeRef())
-      statement->annotation = build_type(context->typeRef());
-    statement->expression = build_expression(context->expression());
-    statement->has_semicolon = true;
     return statement;
   }
-
-  std::shared_ptr<ast::Stmt>
-  build_statement(rxgrammar::RxParser::StatementContext *context) {
-    if (context->letStatement())
-      return build_let(context->letStatement());
-    auto statement = std::make_shared<ast::Stmt>();
-    stamp(*statement, context);
+  ast::StmtPtr build_statement(rxgrammar::RxParser::StatementContext *context) {
+    if (context->letStatement()) return build_let(context->letStatement());
     if (!context->expressionWithBlock() && !context->statementExpression()) {
-      statement->kind = ast::Stmt::Kind::Empty;
-      statement->has_semicolon = true;
+      auto statement = ast::box<ast::Stmt>(ast::EmptyStmt{});
+      stamp(*statement, context);
       return statement;
     }
-    statement->kind = ast::Stmt::Kind::Expr;
-    statement->expression =
-        context->expressionWithBlock()
-            ? build_expression_with_block(context->expressionWithBlock())
-            : build_expression(context->statementExpression());
-    statement->has_semicolon = context->SEMI() != nullptr;
+    auto expression = context->expressionWithBlock()
+        ? build_expression_with_block(context->expressionWithBlock())
+        : build_expression(context->statementExpression());
+    auto statement = ast::box<ast::Stmt>(ast::ExprStmt{std::move(expression),
+        context->SEMI() ? ast::Termination::Semicolon : ast::Termination::Omitted});
+    stamp(*statement, context);
     return statement;
   }
-
-  ast::ExprPtr
-  build_block(rxgrammar::RxParser::BlockExpressionContext *context) {
-    auto block = make_expr(ast::Expr::Kind::Block, context);
-    for (auto *child : context->statement())
-      block->statements.push_back(build_statement(child));
+  ast::Box<ast::Block> build_block(rxgrammar::RxParser::BlockExpressionContext *context) {
+    auto block = ast::box<ast::Block>();
+    stamp(*block, context);
+    for (auto *child : context->statement()) block->statements.push_back(build_statement(child));
     if (context->statementExpression()) {
-      auto tail = std::make_shared<ast::Stmt>();
-      stamp(*tail, context->statementExpression());
-      tail->kind = ast::Stmt::Kind::Expr;
-      tail->expression = build_expression(context->statementExpression());
-      block->statements.push_back(std::move(tail));
+      block->tail.emplace(build_expression(context->statementExpression()));
+    } else if (!block->statements.empty()) {
+      auto *last = std::get_if<ast::ExprStmt>(&block->statements.back()->data);
+      if (last && last->termination == ast::Termination::Omitted) {
+        block->tail.emplace(std::move(last->expression));
+        block->statements.pop_back();
+      }
     }
     return block;
+  }
+  template <class Context>
+  ast::ExprPtr build_jump(Context *context, ParseContext *value) {
+    std::optional<ast::ExprPtr> operand;
+    if (value) operand.emplace(build_expression(value));
+    if (context->BREAK()) return make_expr(context, ast::BreakExpr{std::move(operand)});
+    return make_expr(context, ast::ReturnExpr{std::move(operand)});
   }
 
   ast::ExprPtr build_primary(ParseContext *context) {
@@ -394,7 +392,7 @@ private:
                 context)) {
       if (primary->conditionPrimaryWithoutBareBlock())
         return build_primary(primary->conditionPrimaryWithoutBareBlock());
-      return build_block(primary->blockExpression());
+      return make_expr(primary, ast::BlockExpr{build_block(primary->blockExpression())});
     }
     if (auto *primary =
             dynamic_cast<rxgrammar::RxParser::NonBlockPrimaryContext *>(
@@ -402,33 +400,22 @@ private:
       if (primary->literalExpression())
         return build_literal(primary->literalExpression());
       if (primary->pathInExpression()) {
-        auto result = build_path(primary->pathInExpression());
-        if (!primary->LBRACE())
-          return result;
-        result->kind = ast::Expr::Kind::Struct;
-        result->span = source_span(primary);
+        if (!primary->LBRACE()) return build_path(primary->pathInExpression());
+        ast::StructExpr structure{expression_path(primary->pathInExpression()), {}};
         if (primary->structExprFields())
-          for (auto *field : primary->structExprFields()->structExprField())
-            result->fields.push_back({field->identifier()->getText(),
-                                      build_expression(field->expression()),
-                                      source_span(field)});
-        return result;
+          for (auto *field : primary->structExprFields()->structExprField()) {
+            ast::FieldInit value{{}, identifier(field->identifier()), build_expression(field->expression())};
+            stamp(value, field);
+            structure.fields.push_back(std::move(value));
+          }
+        return make_expr(primary, std::move(structure));
       }
       if (primary->arrayExpression())
         return build_array(primary->arrayExpression());
-      if (primary->BREAK() || primary->RETURN()) {
-        auto result = make_expr(primary->BREAK() ? ast::Expr::Kind::Break
-                                                 : ast::Expr::Kind::Return,
-                                primary);
-        if (primary->expression())
-          result->operands.push_back(build_expression(primary->expression()));
-        return result;
-      }
-      if (primary->CONTINUE())
-        return make_expr(ast::Expr::Kind::Continue, primary);
-      if (primary->expression())
-        return build_expression(primary->expression());
-      return make_expr(ast::Expr::Kind::Unit, primary);
+      if (primary->BREAK() || primary->RETURN()) return build_jump(primary, primary->expression());
+      if (primary->CONTINUE()) return make_expr(primary, ast::ContinueExpr{});
+      if (primary->expression()) return make_expr(primary, ast::ParenExpr{build_expression(primary->expression())});
+      return make_expr(primary, ast::UnitExpr{});
     }
     auto *primary = dynamic_cast<
         rxgrammar::RxParser::ConditionPrimaryWithoutBareBlockContext *>(
@@ -443,35 +430,14 @@ private:
       return build_array(primary->arrayExpression());
     if (primary->ifExpression())
       return build_if(primary->ifExpression());
-    if (primary->LOOP()) {
-      auto result = make_expr(ast::Expr::Kind::Loop, primary);
-      result->operands.push_back(build_block(primary->blockExpression()));
-      return result;
-    }
-    if (primary->WHILE()) {
-      auto result = make_expr(ast::Expr::Kind::While, primary);
-      result->operands.push_back(
-          build_expression(primary->conditionExpression()));
-      result->operands.push_back(build_block(primary->blockExpression()));
-      return result;
-    }
-    if (primary->BREAK() || primary->RETURN()) {
-      auto result = make_expr(primary->BREAK() ? ast::Expr::Kind::Break
-                                               : ast::Expr::Kind::Return,
-                              primary);
-      if (primary->conditionBreakExpression())
-        result->operands.push_back(
-            build_expression(primary->conditionBreakExpression()));
-      else if (primary->conditionExpression())
-        result->operands.push_back(
-            build_expression(primary->conditionExpression()));
-      return result;
-    }
-    if (primary->CONTINUE())
-      return make_expr(ast::Expr::Kind::Continue, primary);
-    if (primary->expression())
-      return build_expression(primary->expression());
-    return make_expr(ast::Expr::Kind::Unit, primary);
+    if (primary->LOOP()) return make_expr(primary, ast::LoopExpr{build_block(primary->blockExpression())});
+    if (primary->WHILE()) return make_expr(primary, ast::WhileExpr{
+        build_expression(primary->conditionExpression()), build_block(primary->blockExpression())});
+    if (primary->BREAK()) return build_jump(primary, primary->conditionBreakExpression());
+    if (primary->RETURN()) return build_jump(primary, primary->conditionExpression());
+    if (primary->CONTINUE()) return make_expr(primary, ast::ContinueExpr{});
+    if (primary->expression()) return make_expr(primary, ast::ParenExpr{build_expression(primary->expression())});
+    return make_expr(primary, ast::UnitExpr{});
   }
 
   ast::ExprPtr apply_call(ast::ExprPtr base,
@@ -642,8 +608,8 @@ private:
   ast::ExprPtr build_expression(ParseContext *context) {
     const auto name = rule(context);
     if (name == "blockExpression")
-      return build_block(
-          static_cast<rxgrammar::RxParser::BlockExpressionContext *>(context));
+      return make_expr(context, ast::BlockExpr{build_block(
+          static_cast<rxgrammar::RxParser::BlockExpressionContext *>(context))});
     if (name == "expressionWithBlock")
       return build_expression_with_block(
           static_cast<rxgrammar::RxParser::ExpressionWithBlockContext *>(
