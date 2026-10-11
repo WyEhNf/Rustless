@@ -38,6 +38,11 @@ private:
   DiagnosticEngine &diagnostics_;
 };
 
+Span token_span(const antlr4::Token *token) {
+  return {token->getStartIndex(), token->getStopIndex() + 1,
+          token->getLine(), token->getCharPositionInLine()};
+}
+
 Span source_span(ParseContext *context) {
   const auto *start = context->getStart();
   const auto *stop = context->getStop();
@@ -274,76 +279,57 @@ private:
     return make_expr(context, ast::PathExpr{expression_path(context)});
   }
 
+  ast::ExprPtr integer_expr(ParseContext *context) {
+    return make_expr(context, ast::IntegerExpr{ast::IntegerLiteral::parse(context->getText())});
+  }
   ast::ExprPtr build_magnitude(rxgrammar::RxParser::MagnitudeContext *context) {
-    if (context->INTEGER_LITERAL())
-      return make_expr(ast::Expr::Kind::Integer, context, context->getText());
-    if (context->pathInExpression())
-      return build_path(context->pathInExpression());
-    return build_magnitude(context->magnitude());
+    if (context->INTEGER_LITERAL()) return integer_expr(context);
+    if (context->pathInExpression()) return build_path(context->pathInExpression());
+    return make_expr(context, ast::ParenExpr{build_magnitude(context->magnitude())});
   }
-
   ast::ExprPtr build_constant(rxgrammar::RxParser::ConstValueContext *context) {
-    if (context->INTEGER_LITERAL())
-      return make_expr(ast::Expr::Kind::Integer, context, context->getText());
+    if (context->INTEGER_LITERAL()) return integer_expr(context);
     if (context->TRUE() || context->FALSE())
-      return make_expr(ast::Expr::Kind::Boolean, context, context->getText());
-    if (context->pathInExpression())
-      return build_path(context->pathInExpression());
-    if (context->MINUS()) {
-      auto result = make_expr(ast::Expr::Kind::Unary, context, "-");
-      result->operands.push_back(build_magnitude(context->magnitude()));
-      return result;
-    }
-    return build_constant(context->constValue());
+      return make_expr(context, ast::BooleanExpr{context->TRUE() != nullptr});
+    if (context->pathInExpression()) return build_path(context->pathInExpression());
+    if (context->MINUS())
+      return make_expr(context, ast::UnaryExpr{ast::UnaryOp::Negate,
+          token_span(context->MINUS()->getSymbol()), build_magnitude(context->magnitude())});
+    return make_expr(context, ast::ParenExpr{build_constant(context->constValue())});
   }
-
-  ast::ExprPtr
-  build_literal(rxgrammar::RxParser::LiteralExpressionContext *context) {
-    return make_expr(context->INTEGER_LITERAL() ? ast::Expr::Kind::Integer
-                                                : ast::Expr::Kind::Boolean,
-                     context, context->getText());
+  ast::ExprPtr build_literal(rxgrammar::RxParser::LiteralExpressionContext *context) {
+    if (context->INTEGER_LITERAL()) return integer_expr(context);
+    return make_expr(context, ast::BooleanExpr{context->TRUE() != nullptr});
   }
-
-  ast::ExprPtr
-  build_array(rxgrammar::RxParser::ArrayExpressionContext *context) {
-    auto result = make_expr(ast::Expr::Kind::Array, context);
-    for (auto *element : context->expression())
-      result->operands.push_back(build_expression(element));
-    if (context->SEMI()) {
-      result->flag = true;
-      result->operands.push_back(build_constant(context->constValue()));
+  ast::ExprPtr build_array(rxgrammar::RxParser::ArrayExpressionContext *context) {
+    if (context->SEMI())
+      return make_expr(context, ast::RepeatArrayExpr{
+          build_expression(context->expression(0)), build_constant(context->constValue())});
+    ast::ArrayExpr array;
+    for (auto *element : context->expression()) array.elements.push_back(build_expression(element));
+    return make_expr(context, std::move(array));
+  }
+  ast::IfExpr build_if_data(rxgrammar::RxParser::IfExpressionContext *context) {
+    ast::IfExpr result{build_expression(context->conditionExpression()),
+                      build_block(context->blockExpression(0)), {}};
+    if (context->ifExpression()) {
+      auto branch = ast::box<ast::IfBranch>(build_if_data(context->ifExpression()));
+      stamp(*branch, context->ifExpression());
+      result.else_branch.emplace(std::move(branch));
+    } else if (context->blockExpression().size() > 1) {
+      result.else_branch.emplace(build_block(context->blockExpression(1)));
     }
     return result;
   }
-
   ast::ExprPtr build_if(rxgrammar::RxParser::IfExpressionContext *context) {
-    auto result = make_expr(ast::Expr::Kind::If, context);
-    result->operands.push_back(
-        build_expression(context->conditionExpression()));
-    result->operands.push_back(build_block(context->blockExpression(0)));
-    if (context->ifExpression())
-      result->operands.push_back(build_if(context->ifExpression()));
-    else if (context->blockExpression().size() > 1)
-      result->operands.push_back(build_block(context->blockExpression(1)));
-    return result;
+    return make_expr(context, build_if_data(context));
   }
-
-  ast::ExprPtr build_expression_with_block(
-      rxgrammar::RxParser::ExpressionWithBlockContext *context) {
-    if (context->blockExpression() && !context->LOOP() && !context->WHILE())
-      return build_block(context->blockExpression());
-    if (context->ifExpression())
-      return build_if(context->ifExpression());
-    if (context->LOOP()) {
-      auto result = make_expr(ast::Expr::Kind::Loop, context);
-      result->operands.push_back(build_block(context->blockExpression()));
-      return result;
-    }
-    auto result = make_expr(ast::Expr::Kind::While, context);
-    result->operands.push_back(
-        build_expression(context->conditionExpression()));
-    result->operands.push_back(build_block(context->blockExpression()));
-    return result;
+  ast::ExprPtr build_expression_with_block(rxgrammar::RxParser::ExpressionWithBlockContext *context) {
+    if (context->ifExpression()) return build_if(context->ifExpression());
+    if (context->LOOP()) return make_expr(context, ast::LoopExpr{build_block(context->blockExpression())});
+    if (context->WHILE()) return make_expr(context, ast::WhileExpr{
+        build_expression(context->conditionExpression()), build_block(context->blockExpression())});
+    return make_expr(context, ast::BlockExpr{build_block(context->blockExpression())});
   }
 
   std::shared_ptr<ast::Stmt>
