@@ -110,4 +110,11 @@ int main() {
   assert(!ir::verify(calls).empty());
   calls.declarations.push_back({"external", ir::Type::Void, {}});
   assert(ir::verify(calls).empty());
+  calls.functions[0].symbol = rx::SymbolId{};
+  assert(!ir::verify(calls).empty());
+  calls.functions[0].symbol.reset();
+  calls.functions[0].blocks[0].instructions.insert(
+      calls.functions[0].blocks[0].instructions.begin(), ir::Instruction{ir::Load{
+          {ir::ValueId{99}, ir::Type::I32}, ir::Operand::global("missing")}});
+  assert(!ir::verify(calls).empty());
 }

@@ -178,6 +178,11 @@ void verify_function(const Function &function, const Signatures &signatures,
     bool terminated = false, non_phi = false;
     for (const auto &node : block.instructions) {
       for (auto message : verify_instruction(node)) error(block.id, node.origin, std::move(message));
+      for_each_operand(node, [&](const Operand &operand) {
+        if (const auto *global = std::get_if<GlobalOperand>(&operand.data))
+          if (!signatures.contains(global->symbol))
+            error(block.id, node.origin, "global operand refers to an undeclared symbol");
+      });
       if (terminated) error(block.id, node.origin, "instruction follows a terminator");
       const bool phi = std::holds_alternative<Phi>(node.data);
       if (phi && non_phi) error(block.id, node.origin, "phi must precede ordinary instructions");
@@ -227,6 +232,14 @@ void verify_function(const Function &function, const Signatures &signatures,
 std::vector<VerificationError> verify(const Module &module) {
   std::vector<VerificationError> errors;
   Signatures signatures;
+  auto metadata = [&](const std::string &name, std::optional<SymbolId> symbol,
+                      std::optional<Origin> origin) {
+    if (symbol && !symbol->value)
+      errors.push_back({name, {}, origin, "zero semantic symbol identity"});
+    if (origin && (!origin->node.value || !origin->span.file.value ||
+                   origin->span.begin > origin->span.end))
+      errors.push_back({name, {}, origin, "invalid declaration syntax provenance"});
+  };
   auto add = [&](const std::string &name, Type result, std::vector<Type> parameters) {
     auto error = [&](const char *message) { errors.push_back({name, {}, {}, message}); };
     if (name.empty()) error("function name is empty");
@@ -236,12 +249,18 @@ std::vector<VerificationError> verify(const Module &module) {
     if (!signatures.emplace(name, Signature{result, std::move(parameters)}).second)
       error("duplicate function name");
   };
-  for (const auto &declaration : module.declarations)
+  for (const auto &declaration : module.declarations) {
     add(declaration.name, declaration.result, declaration.parameters);
+    metadata(declaration.name, declaration.symbol, declaration.origin);
+  }
   for (const auto &function : module.functions) {
     std::vector<Type> parameters;
-    for (const auto &parameter : function.parameters) parameters.push_back(parameter.type);
+    for (const auto &parameter : function.parameters) {
+      parameters.push_back(parameter.type);
+      metadata(function.name, parameter.symbol, {});
+    }
     add(function.name, function.result, std::move(parameters));
+    metadata(function.name, function.symbol, function.origin);
   }
   for (const auto &function : module.functions) verify_function(function, signatures, errors);
   return errors;
