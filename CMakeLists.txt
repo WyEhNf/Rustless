@@ -61,6 +61,7 @@ add_library(rustless_frontend STATIC
   src/frontend.cpp
   src/llvm/ir.cpp
   src/llvm/ir_print.cpp
+  src/llvm/ir_verify.cpp
   src/semantic.cpp
   src/semantic_index.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
