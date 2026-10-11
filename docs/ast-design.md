@@ -69,3 +69,27 @@ Introduce the models, port construction, port printing and semantic
 consumers, then validate and remove all legacy representations.
 Commit each logical migration slice; never commit user edits as part
 of an unrelated migration slice.
+
+## Public API
+
+Include rx/ast.hpp for the complete tree and rx/ast/visitor.hpp for traversal.
+FrontendResult owns a const Crate. Box is move-only, checks null construction,
+and uses a deleter created where its recursive child type is complete.
+Moved-from Boxes may only be destroyed or assigned another value.
+
+For a binary expression, use get_if<BinaryExpr>(*expression), then read
+op, left, right and operator_span. Use visit with exhaustive overloads for
+dispatch, and walk(crate, callback) for preorder structural traversal.
+Neither traversal relies on numeric node-kind tags.
+
+SourceFile owns UTF-8 bytes. Spans index those bytes and retain FileId.
+position() returns one-based lines and zero-based Unicode character columns.
+NodeId is unique within its Crate; it is not a persistent cross-run key.
+
+The semantic model keeps an explicit declaration NodeId for each SymbolId.
+Use trees and lifetime constraints are preserved for future resolution;
+their semantic interpretation remains at the existing compiler's scope.
+
+AST dumps are available with build/rxc --stage parse --dump-ast source.rx.
+Run CTest for structural and CLI tests. frontend_ast_corpus validates
+identities, spans, traversal and printing for every source it checks.

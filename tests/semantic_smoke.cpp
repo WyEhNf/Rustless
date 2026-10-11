@@ -3,7 +3,6 @@
 
 #undef NDEBUG
 #include <cassert>
-#include <algorithm>
 #include <string_view>
 #include <type_traits>
 
@@ -60,14 +59,17 @@ fn main() {
 
   rx::DiagnosticEngine paren_diagnostics;
   auto paren_ast = rx::parse_source(
-      "fn main() { let mut x = 1; let shared: &i32 = ((&mut x)); }", paren_diagnostics);
+      "fn main() { let mut x = 1; let shared: &i32 = ((&mut x)); }",
+      paren_diagnostics);
   auto paren_semantics = rx::analyze(*paren_ast.crate, paren_diagnostics);
   assert(!paren_diagnostics.has_errors());
   const auto &main = std::get<rx::ast::Function>(paren_ast.crate->items[0]);
-  const auto &initializer = std::get<rx::ast::LetStmt>(main.body->statements[1]->data).initializer;
+  const auto &initializer =
+      std::get<rx::ast::LetStmt>(main.body->statements[1]->data).initializer;
   const auto &borrow = rx::ast::unparen(initializer);
   for (const auto &fact : paren_semantics.expressions) {
-    if (fact.node == initializer->id) assert(fact.adjustments.empty());
+    if (fact.node == initializer->id)
+      assert(fact.adjustments.empty());
     if (fact.node == borrow->id) {
       assert(fact.adjustments.size() == 1);
       assert(fact.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);

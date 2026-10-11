@@ -6,21 +6,28 @@
 #include "rx/ast/use.hpp"
 
 namespace rx::ast {
-struct ValueSelf { Mutability mutability; };
+struct ValueSelf {
+  Mutability mutability;
+};
 struct ReferenceSelf {
   Mutability mutability;
   std::optional<LifetimeName> lifetime;
 };
-struct SelfParam : Node { std::variant<ValueSelf, ReferenceSelf> data; };
+struct SelfParam : Node {
+  std::variant<ValueSelf, ReferenceSelf> data;
+};
 inline bool by_reference(const SelfParam &self) {
   return std::holds_alternative<ReferenceSelf>(self.data);
 }
 inline bool is_mutable(const SelfParam &self) {
-  return std::visit([](const auto &value) {
-    return value.mutability == Mutability::Mutable;
-  }, self.data);
+  return std::visit(
+      [](const auto &value) { return value.mutability == Mutability::Mutable; },
+      self.data);
 }
-struct Parameter : Node { Binding binding; TypePtr type; };
+struct Parameter : Node {
+  Binding binding;
+  TypePtr type;
+};
 struct FunctionSignature {
   std::optional<SelfParam> receiver;
   std::vector<Parameter> parameters;
@@ -33,9 +40,18 @@ struct Function : Node {
   std::optional<WhereClause> where_clause;
   Box<Block> body;
 };
-struct DeriveName { DeriveKind kind; Span span; };
-struct DeriveAttribute { Span span; std::vector<DeriveName> names; };
-struct StructField : Node { Identifier name; TypePtr type; };
+struct DeriveName {
+  DeriveKind kind;
+  Span span;
+};
+struct DeriveAttribute {
+  Span span;
+  std::vector<DeriveName> names;
+};
+struct StructField : Node {
+  Identifier name;
+  TypePtr type;
+};
 struct Struct : Node {
   Identifier name;
   std::vector<DeriveAttribute> attributes;
@@ -43,7 +59,11 @@ struct Struct : Node {
   std::optional<WhereClause> where_clause;
   std::vector<StructField> fields;
 };
-struct Constant : Node { Identifier name; TypePtr type; ExprPtr value; };
+struct Constant : Node {
+  Identifier name;
+  TypePtr type;
+  ExprPtr value;
+};
 using ImplMember = std::variant<Function, Constant>;
 struct Impl : Node {
   std::optional<GenericParameters> generics;

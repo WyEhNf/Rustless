@@ -20,5 +20,8 @@ struct TypePredicate : Node {
   std::vector<LifetimeName> bounds;
 };
 using WherePredicate = std::variant<LifetimePredicate, TypePredicate>;
-struct WhereClause { Span span; std::vector<WherePredicate> predicates; };
+struct WhereClause {
+  Span span;
+  std::vector<WherePredicate> predicates;
+};
 } // namespace rx::ast

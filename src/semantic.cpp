@@ -187,11 +187,13 @@ public:
     for (const auto &[_, constant] : constants_)
       if (constant.state == ConstantInfo::State::Done)
         result_.constants.push_back(
-            {symbol_for(constant.ast->id), static_cast<std::uint32_t>(constant.value)});
+            {symbol_for(constant.ast->id),
+             static_cast<std::uint32_t>(constant.value)});
     for (const auto &[_, constant] : associated_constants_)
       if (constant.state == ConstantInfo::State::Done)
         result_.constants.push_back(
-            {symbol_for(constant.ast->id), static_cast<std::uint32_t>(constant.value)});
+            {symbol_for(constant.ast->id),
+             static_cast<std::uint32_t>(constant.value)});
     std::sort(result_.constants.begin(), result_.constants.end(),
               [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
     return std::move(result_);
@@ -207,9 +209,11 @@ private:
                      std::optional<ast::NodeId> owner = {}) {
     auto id = symbol_for(node);
     std::optional<SymbolId> parent;
-    if (owner) parent = symbol_for(*owner);
+    if (owner)
+      parent = symbol_for(*owner);
     if (recorded_symbols_.insert(id).second)
-      result_.symbols.push_back({id, std::move(kind), std::move(name), parent, node});
+      result_.symbols.push_back(
+          {id, std::move(kind), std::move(name), parent, node});
   }
 
   void collect_items() {
@@ -225,23 +229,26 @@ private:
                 report(value.span, "the builtin type name '" + value.name.text +
                                        "' is protected");
               if (!type_names.insert(value.name.text).second)
-                report(value.span, "duplicate type name '" + value.name.text + "'");
+                report(value.span,
+                       "duplicate type name '" + value.name.text + "'");
               structures_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Function>) {
               record_symbol(value.id, "function", value.name.text);
               if (protected_builtin_value(value.name.text))
-                report(value.span, "the builtin value name '" + value.name.text +
-                                       "' is protected");
+                report(value.span, "the builtin value name '" +
+                                       value.name.text + "' is protected");
               if (!value_names.insert(value.name.text).second)
-                report(value.span, "duplicate value name '" + value.name.text + "'");
+                report(value.span,
+                       "duplicate value name '" + value.name.text + "'");
               functions_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Constant>) {
               record_symbol(value.id, "constant", value.name.text);
               if (protected_builtin_value(value.name.text))
-                report(value.span, "the builtin value name '" + value.name.text +
-                                       "' is protected");
+                report(value.span, "the builtin value name '" +
+                                       value.name.text + "' is protected");
               if (!value_names.insert(value.name.text).second)
-                report(value.span, "duplicate value name '" + value.name.text + "'");
+                report(value.span,
+                       "duplicate value name '" + value.name.text + "'");
               constants_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Impl>) {
               impls_.push_back(&value);
@@ -276,10 +283,12 @@ private:
     std::vector<const ast::TypePtr *> result;
     if (arguments)
       for (const auto &argument : arguments->values)
-        if (auto *type = std::get_if<ast::TypePtr>(&argument)) result.push_back(type);
+        if (auto *type = std::get_if<ast::TypePtr>(&argument))
+          result.push_back(type);
     return result;
   }
-  static std::vector<const ast::TypePtr *> type_arguments(const ast::Path &path) {
+  static std::vector<const ast::TypePtr *>
+  type_arguments(const ast::Path &path) {
     std::vector<const ast::TypePtr *> result;
     for (const auto &segment : path.segments) {
       auto arguments = type_arguments(segment.arguments);
@@ -291,23 +300,33 @@ private:
                      std::string_view self_name = {}) {
     return syntax ? resolve_type(*syntax, self_name) : ty(Ty::Kind::Unit);
   }
-  TyPtr resolve_type_impl(const ast::TypePtr &syntax, std::string_view self_name) {
-    return ast::visit(*syntax, ast::Overloaded{
-      [&](const ast::UnitType &) { return ty(Ty::Kind::Unit); },
-      [&](const ast::ParenType &p) { return resolve_type(p.inner, self_name); },
-      [&](const ast::ReferenceType &p) {
-        return compound(Ty::Kind::Ref, resolve_type(p.referent, self_name),
-                        p.mutability == ast::Mutability::Mutable);
-      },
-      [&](const ast::ArrayType &p) {
-        auto value = compound(Ty::Kind::Array, resolve_type(p.element, self_name));
-        if (auto length = evaluate_length(p.length, self_name)) value->length = *length;
-        return value;
-      },
-      [&](const ast::PathType &p) { return resolve_path_type(p.path, syntax->span, self_name); }
-    });
+  TyPtr resolve_type_impl(const ast::TypePtr &syntax,
+                          std::string_view self_name) {
+    return ast::visit(
+        *syntax,
+        ast::Overloaded{
+            [&](const ast::UnitType &) { return ty(Ty::Kind::Unit); },
+            [&](const ast::ParenType &p) {
+              return resolve_type(p.inner, self_name);
+            },
+            [&](const ast::ReferenceType &p) {
+              return compound(Ty::Kind::Ref,
+                              resolve_type(p.referent, self_name),
+                              p.mutability == ast::Mutability::Mutable);
+            },
+            [&](const ast::ArrayType &p) {
+              auto value =
+                  compound(Ty::Kind::Array, resolve_type(p.element, self_name));
+              if (auto length = evaluate_length(p.length, self_name))
+                value->length = *length;
+              return value;
+            },
+            [&](const ast::PathType &p) {
+              return resolve_path_type(p.path, syntax->span, self_name);
+            }});
   }
-  TyPtr resolve_path_type(const ast::Path &path, Span span, std::string_view self_name) {
+  TyPtr resolve_path_type(const ast::Path &path, Span span,
+                          std::string_view self_name) {
     const std::string name{ast::name_text(path.segments.back().name)};
     auto arguments = type_arguments(path);
     if (name == "Self") {
@@ -315,14 +334,19 @@ private:
         report(span, "Self is only available inside a struct or impl");
         return ty(Ty::Kind::Error);
       }
-      auto value = ty(Ty::Kind::Struct); value->name = self_name; return value;
+      auto value = ty(Ty::Kind::Struct);
+      value->name = self_name;
+      return value;
     }
     static const std::unordered_map<std::string, Ty::Kind> primitives = {
-      {"bool", Ty::Kind::Bool}, {"i32", Ty::Kind::I32}, {"u32", Ty::Kind::U32},
-      {"isize", Ty::Kind::Isize}, {"usize", Ty::Kind::Usize}
-    };
+        {"bool", Ty::Kind::Bool},
+        {"i32", Ty::Kind::I32},
+        {"u32", Ty::Kind::U32},
+        {"isize", Ty::Kind::Isize},
+        {"usize", Ty::Kind::Usize}};
     if (auto it = primitives.find(name); it != primitives.end()) {
-      if (!arguments.empty()) report(span, "primitive type '" + name + "' takes no type arguments");
+      if (!arguments.empty())
+        report(span, "primitive type '" + name + "' takes no type arguments");
       return ty(it->second);
     }
     if (name == "Box" || name == "Vec") {
@@ -334,18 +358,27 @@ private:
                       resolve_type(*arguments.front(), self_name));
     }
     if (structures_.contains(name)) {
-      if (!arguments.empty()) report(span, "struct '" + name + "' has no type parameters");
-      auto value = ty(Ty::Kind::Struct); value->name = name; return value;
+      if (!arguments.empty())
+        report(span, "struct '" + name + "' has no type parameters");
+      auto value = ty(Ty::Kind::Struct);
+      value->name = name;
+      return value;
     }
-    report(span, "unknown type '" + name + "'"); return ty(Ty::Kind::Error);
+    report(span, "unknown type '" + name + "'");
+    return ty(Ty::Kind::Error);
   }
   std::optional<std::uint64_t>
-  evaluate_length(const ast::ExprPtr &expression, std::string_view self_name = {}) {
+  evaluate_length(const ast::ExprPtr &expression,
+                  std::string_view self_name = {}) {
     auto errors = diagnostics_.error_count();
-    auto [type, value] = constant_value(expression, ty(Ty::Kind::Usize), self_name);
-    if (type->kind != Ty::Kind::Usize) report(expression->span, "array length must have type usize");
-    if (value < 0) report(expression->span, "array length cannot be negative");
-    if (diagnostics_.error_count() != errors) return {};
+    auto [type, value] =
+        constant_value(expression, ty(Ty::Kind::Usize), self_name);
+    if (type->kind != Ty::Kind::Usize)
+      report(expression->span, "array length must have type usize");
+    if (value < 0)
+      report(expression->span, "array length cannot be negative");
+    if (diagnostics_.error_count() != errors)
+      return {};
     return static_cast<std::uint64_t>(value);
   }
 
@@ -398,24 +431,31 @@ private:
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
-        std::visit([&](const auto &declaration) {
-          using T = std::decay_t<decltype(declaration)>;
-          const auto &name = declaration.name.text;
-          auto key = owner + "::" + name;
-          record_symbol(declaration.id,
-              std::is_same_v<T, ast::Function> ? "associated-function" : "associated-constant",
-              key, owner_symbol);
-          if (!associated_names.insert(name).second || associated_functions_.contains(key) || associated_constants_.contains(key))
-            report(declaration.span, "duplicate associated item '" + name + "'");
-          if constexpr (std::is_same_v<T, ast::Function>) {
-            associated_functions_[key].ast = &declaration;
-            associated_functions_[key].owner = owner;
-          } else {
-            static_assert(std::is_same_v<T, ast::Constant>);
-            associated_constants_[key].ast = &declaration;
-            associated_constants_[key].owner = owner;
-          }
-        }, member);
+        std::visit(
+            [&](const auto &declaration) {
+              using T = std::decay_t<decltype(declaration)>;
+              const auto &name = declaration.name.text;
+              auto key = owner + "::" + name;
+              record_symbol(declaration.id,
+                            std::is_same_v<T, ast::Function>
+                                ? "associated-function"
+                                : "associated-constant",
+                            key, owner_symbol);
+              if (!associated_names.insert(name).second ||
+                  associated_functions_.contains(key) ||
+                  associated_constants_.contains(key))
+                report(declaration.span,
+                       "duplicate associated item '" + name + "'");
+              if constexpr (std::is_same_v<T, ast::Function>) {
+                associated_functions_[key].ast = &declaration;
+                associated_functions_[key].owner = owner;
+              } else {
+                static_assert(std::is_same_v<T, ast::Constant>);
+                associated_constants_[key].ast = &declaration;
+                associated_constants_[key].owner = owner;
+              }
+            },
+            member);
       }
     }
 
@@ -430,12 +470,12 @@ private:
       std::unordered_set<std::string> fields;
       std::unordered_set<std::string> derives;
       for (const auto &attribute : structure.ast->attributes)
-      for (const auto &name : attribute.names) {
-        const std::string derive{ast::spelling(name.kind)};
-        if (!derives.insert(derive).second)
-          report(structure.ast->span, "duplicate derive '" + derive + "'");
-        structure.derives.insert(derive);
-      }
+        for (const auto &name : attribute.names) {
+          const std::string derive{ast::spelling(name.kind)};
+          if (!derives.insert(derive).second)
+            report(structure.ast->span, "duplicate derive '" + derive + "'");
+          structure.derives.insert(derive);
+        }
       if (structure.derives.contains("Copy") &&
           !structure.derives.contains("Clone"))
         report(structure.ast->span, "Copy requires an explicit Clone derive");
@@ -460,11 +500,13 @@ private:
     std::unordered_set<std::string> parameters;
     for (const auto &parameter : function.ast->signature.parameters) {
       if (!parameters.insert(parameter.binding.name.text).second)
-        report(parameter.span, "duplicate parameter '" + parameter.binding.name.text + "'");
+        report(parameter.span,
+               "duplicate parameter '" + parameter.binding.name.text + "'");
       function.parameters.push_back(
           resolve_type(parameter.type, function.owner));
     }
-    function.result = resolve_type(function.ast->signature.return_annotation, function.owner);
+    function.result =
+        resolve_type(function.ast->signature.return_annotation, function.owner);
   }
 
   void validate_constants() {
@@ -513,8 +555,11 @@ private:
       return {type, std::get<ast::BooleanExpr>(expression->data).value};
     }
     if (ast::get_if<ast::IntegerExpr>(*expression)) {
-      auto type = literal_type(std::get<ast::IntegerExpr>(expression->data).literal.spelling, expected, expression->span);
-      std::string digits = std::get<ast::IntegerExpr>(expression->data).literal.spelling;
+      auto type = literal_type(
+          std::get<ast::IntegerExpr>(expression->data).literal.spelling,
+          expected, expression->span);
+      std::string digits =
+          std::get<ast::IntegerExpr>(expression->data).literal.spelling;
       for (auto suffix : {"usize", "isize", "u32", "i32"})
         if (digits.ends_with(suffix))
           digits.resize(digits.size() - std::string_view(suffix).size());
@@ -526,14 +571,16 @@ private:
     if (ast::get_if<ast::UnaryExpr>(*expression) &&
         std::get<ast::UnaryExpr>(expression->data).op == ast::UnaryOp::Negate) {
       auto [type, value] =
-          constant_value(std::get<ast::UnaryExpr>(expression->data).operand, expected, self_name);
+          constant_value(std::get<ast::UnaryExpr>(expression->data).operand,
+                         expected, self_name);
       if (!signed_integer(type))
         report(expression->span, "only signed constants may be negated");
       record_expression(expression, ExprInfo{type});
       return {type, -value};
     }
     if (ast::get_if<ast::PathExpr>(*expression)) {
-      auto name = ast::path_name(std::get<ast::PathExpr>(expression->data).path);
+      auto name =
+          ast::path_name(std::get<ast::PathExpr>(expression->data).path);
       if (!self_name.empty() && name.starts_with("Self::"))
         name = std::string(self_name) + name.substr(4);
       if (auto it = constants_.find(name); it != constants_.end()) {
@@ -675,19 +722,25 @@ private:
       auto self = ty(Ty::Kind::Struct);
       self->name = function.owner;
       if (ast::by_reference(*function.ast->signature.receiver))
-        self = compound(Ty::Kind::Ref, self, ast::is_mutable(*function.ast->signature.receiver));
-      record_symbol(function.ast->signature.receiver->id, "receiver", "self", function.ast->id);
-      scopes_.back()["self"] = {self, ast::is_mutable(*function.ast->signature.receiver),
-                                symbol_for(function.ast->signature.receiver->id)};
+        self = compound(Ty::Kind::Ref, self,
+                        ast::is_mutable(*function.ast->signature.receiver));
+      record_symbol(function.ast->signature.receiver->id, "receiver", "self",
+                    function.ast->id);
+      scopes_.back()["self"] = {
+          self, ast::is_mutable(*function.ast->signature.receiver),
+          symbol_for(function.ast->signature.receiver->id)};
     }
-    for (std::size_t i = 0; i < function.ast->signature.parameters.size(); ++i) {
+    for (std::size_t i = 0; i < function.ast->signature.parameters.size();
+         ++i) {
       const auto &parameter = function.ast->signature.parameters[i];
       if (protected_builtin_value(parameter.binding.name.text))
         report(parameter.span, "cannot shadow a protected builtin");
       record_symbol(parameter.id, "parameter", parameter.binding.name.text,
                     function.ast->id);
-      scopes_.back()[parameter.binding.name.text] = {function.parameters[i],
-                                        parameter.binding.mutability == ast::Mutability::Mutable, symbol_for(parameter.id)};
+      scopes_.back()[parameter.binding.name.text] = {
+          function.parameters[i],
+          parameter.binding.mutability == ast::Mutability::Mutable,
+          symbol_for(parameter.id)};
     }
     auto body = check_block(*function.ast->body, function.result);
     if (!coercible(body.type, function.result))
@@ -816,47 +869,82 @@ private:
   }
 
   void record_node(const ast::Node &node, const ExprInfo &result) {
-    expression_facts_[node.id] = {node.id, result.type, result.is_place,
-        result.is_mutable, result.access_locked, result.symbol, result.target, result.adjustments};
+    expression_facts_[node.id] = {
+        node.id,           result.type,          result.is_place,
+        result.is_mutable, result.access_locked, result.symbol,
+        result.target,     result.adjustments};
   }
-  void record_expression(const ast::ExprPtr &expression, const ExprInfo &result) {
+  void record_expression(const ast::ExprPtr &expression,
+                         const ExprInfo &result) {
     record_node(*expression, result);
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
-    auto result = ast::visit(*expression, ast::Overloaded{
-      [&](const ast::IntegerExpr &p) -> ExprInfo { return {literal_type(p.literal.spelling, expected, expression->span)}; },
-      [&](const ast::BooleanExpr &) -> ExprInfo { return {ty(Ty::Kind::Bool)}; },
-      [&](const ast::UnitExpr &) -> ExprInfo { return {ty(Ty::Kind::Unit)}; },
-      [&](const ast::ParenExpr &p) {
-        auto inner = check_expr(p.inner, expected);
-        inner.adjustments.clear();
-        return inner;
-      },
-      [&](const ast::PathExpr &) { return check_path(expression); },
-      [&](const ast::ArrayExpr &) { return check_array(expression, expected); },
-      [&](const ast::RepeatArrayExpr &) { return check_repeat_array(expression, expected); },
-      [&](const ast::StructExpr &) { return check_struct(expression); },
-      [&](const ast::BlockExpr &p) { return check_block(*p.block, expected); },
-      [&](const ast::IfExpr &p) { return check_if(*expression, p, expected); },
-      [&](const ast::LoopExpr &) { return check_loop(expression, expected); },
-      [&](const ast::WhileExpr &) { return check_while(expression); },
-      [&](const ast::UnaryExpr &) { return check_unary(expression, expected); },
-      [&](const ast::BorrowExpr &) { return check_borrow(expression); },
-      [&](const ast::BinaryExpr &) { return check_binary(expression); },
-      [&](const ast::AssignExpr &) { return check_assignment(expression); },
-      [&](const ast::CompoundAssignExpr &) { return check_compound_assignment(expression); },
-      [&](const ast::CastExpr &) { return check_cast(expression); },
-      [&](const ast::CallExpr &) { return check_call(expression); },
-      [&](const ast::MethodCallExpr &) { return check_method(expression); },
-      [&](const ast::FieldExpr &) { return check_field(expression); },
-      [&](const ast::IndexExpr &) { return check_index(expression); },
-      [&](const ast::BreakExpr &) { return check_break(expression, expected); },
-      [&](const ast::ContinueExpr &) { return check_continue(expression); },
-      [&](const ast::ReturnExpr &) { return check_return(expression); }
-    });
-    if (expected && !ast::get_if<ast::ParenExpr>(*expression) && coercible(result.type, expected)) {
+    auto result = ast::visit(
+        *expression,
+        ast::Overloaded{
+            [&](const ast::IntegerExpr &p) -> ExprInfo {
+              return {
+                  literal_type(p.literal.spelling, expected, expression->span)};
+            },
+            [&](const ast::BooleanExpr &) -> ExprInfo {
+              return {ty(Ty::Kind::Bool)};
+            },
+            [&](const ast::UnitExpr &) -> ExprInfo {
+              return {ty(Ty::Kind::Unit)};
+            },
+            [&](const ast::ParenExpr &p) {
+              auto inner = check_expr(p.inner, expected);
+              inner.adjustments.clear();
+              return inner;
+            },
+            [&](const ast::PathExpr &) { return check_path(expression); },
+            [&](const ast::ArrayExpr &) {
+              return check_array(expression, expected);
+            },
+            [&](const ast::RepeatArrayExpr &) {
+              return check_repeat_array(expression, expected);
+            },
+            [&](const ast::StructExpr &) { return check_struct(expression); },
+            [&](const ast::BlockExpr &p) {
+              return check_block(*p.block, expected);
+            },
+            [&](const ast::IfExpr &p) {
+              return check_if(*expression, p, expected);
+            },
+            [&](const ast::LoopExpr &) {
+              return check_loop(expression, expected);
+            },
+            [&](const ast::WhileExpr &) { return check_while(expression); },
+            [&](const ast::UnaryExpr &) {
+              return check_unary(expression, expected);
+            },
+            [&](const ast::BorrowExpr &) { return check_borrow(expression); },
+            [&](const ast::BinaryExpr &) { return check_binary(expression); },
+            [&](const ast::AssignExpr &) {
+              return check_assignment(expression);
+            },
+            [&](const ast::CompoundAssignExpr &) {
+              return check_compound_assignment(expression);
+            },
+            [&](const ast::CastExpr &) { return check_cast(expression); },
+            [&](const ast::CallExpr &) { return check_call(expression); },
+            [&](const ast::MethodCallExpr &) {
+              return check_method(expression);
+            },
+            [&](const ast::FieldExpr &) { return check_field(expression); },
+            [&](const ast::IndexExpr &) { return check_index(expression); },
+            [&](const ast::BreakExpr &) {
+              return check_break(expression, expected);
+            },
+            [&](const ast::ContinueExpr &) {
+              return check_continue(expression);
+            },
+            [&](const ast::ReturnExpr &) { return check_return(expression); }});
+    if (expected && !ast::get_if<ast::ParenExpr>(*expression) &&
+        coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
-      result.adjustments.insert(result.adjustments.end(), adjustments.begin(), adjustments.end());
+      result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
+                                adjustments.end());
     }
     record_expression(expression, result);
     return result;
@@ -865,7 +953,8 @@ private:
   ExprInfo check_path(const ast::ExprPtr &expression) {
     const auto &path = std::get<ast::PathExpr>(expression->data).path;
     auto name = ast::path_name(path);
-    if (path.segments.size() > 1 && std::string(ast::name_text(path.segments.front().name)) == "Self" &&
+    if (path.segments.size() > 1 &&
+        std::string(ast::name_text(path.segments.front().name)) == "Self" &&
         current_function_ && !current_function_->owner.empty()) {
       name = current_function_->owner;
       for (std::size_t i = 1; i < path.segments.size(); ++i)
@@ -876,11 +965,17 @@ private:
         return {binding->type,   true, binding->is_mutable, false,
                 binding->symbol, name};
       if (auto it = constants_.find(name); it != constants_.end())
-        return {it->second.type, false, false, false, symbol_for(it->second.ast->id), name};
+        return {it->second.type,
+                false,
+                false,
+                false,
+                symbol_for(it->second.ast->id),
+                name};
       if (auto it = functions_.find(name); it != functions_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, symbol_for(it->second.ast->id), name};
+        return {value, false, false, false, symbol_for(it->second.ast->id),
+                name};
       }
       if (builtin_function(name)) {
         auto value = ty(Ty::Kind::Function);
@@ -890,23 +985,31 @@ private:
       if (auto it = structures_.find(name); it != structures_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, symbol_for(it->second.ast->id), name};
+        return {value, false, false, false, symbol_for(it->second.ast->id),
+                name};
       }
     } else {
       if (auto it = associated_constants_.find(name);
           it != associated_constants_.end())
-        return {it->second.type, false, false, false, symbol_for(it->second.ast->id), name};
+        return {it->second.type,
+                false,
+                false,
+                false,
+                symbol_for(it->second.ast->id),
+                name};
       if (auto it = associated_functions_.find(name);
           it != associated_functions_.end()) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
-        return {value, false, false, false, symbol_for(it->second.ast->id), name};
+        return {value, false, false, false, symbol_for(it->second.ast->id),
+                name};
       }
       if (constructor_path(path)) {
         auto value = ty(Ty::Kind::Function);
         value->name = name;
         std::optional<SymbolId> symbol;
-        if (auto it = structures_.find(std::string(ast::name_text(path.segments.front().name)));
+        if (auto it = structures_.find(
+                std::string(ast::name_text(path.segments.front().name)));
             it != structures_.end())
           symbol = symbol_for(it->second.ast->id);
         return {value, false, false, false, symbol, "builtin::" + name};
@@ -922,20 +1025,29 @@ private:
   }
 
   bool constructor_path(const ast::Path &path) {
-    if (path.segments.size() != 2) return false;
+    if (path.segments.size() != 2)
+      return false;
     const std::string first{ast::name_text(path.segments[0].name)};
     auto second = ast::name_text(path.segments[1].name);
     const bool container = first == "Box" || first == "Vec";
-    const bool member = second == "new" || second == "clone" || second == "len" ||
-                        second == "is_empty" || second == "push" || second == "remove";
-    return (container && member) || (structures_.contains(first) && second == "clone");
+    const bool member = second == "new" || second == "clone" ||
+                        second == "len" || second == "is_empty" ||
+                        second == "push" || second == "remove";
+    return (container && member) ||
+           (structures_.contains(first) && second == "clone");
   }
 
   ExprInfo check_array(const ast::ExprPtr &expression, const TyPtr &expected) {
     const auto &array = std::get<ast::ArrayExpr>(expression->data);
-    auto expected_element = expected && expected->kind == Ty::Kind::Array ? expected->element : TyPtr{};
+    auto expected_element = expected && expected->kind == Ty::Kind::Array
+                                ? expected->element
+                                : TyPtr{};
     if (array.elements.empty()) {
-      if (!expected_element) { report(expression->span, "an empty array requires an expected array type"); return {}; }
+      if (!expected_element) {
+        report(expression->span,
+               "an empty array requires an expected array type");
+        return {};
+      }
       return {compound(Ty::Kind::Array, expected_element)};
     }
     auto first = check_expr(array.elements.front(), expected_element);
@@ -944,27 +1056,37 @@ private:
     for (std::size_t i = 1; i < array.elements.size(); ++i) {
       auto element = check_expr(array.elements[i], expected_element);
       auto merged = common_type(first.type, element.type);
-      if (merged->kind == Ty::Kind::Error) mismatch(array.elements[i]->span, element.type, first.type);
+      if (merged->kind == Ty::Kind::Error)
+        mismatch(array.elements[i]->span, element.type, first.type);
       else {
-        if (!same(element.type, merged)) append_adjustments(array.elements[i]->id, coercion_adjustments(element.type, merged));
+        if (!same(element.type, merged))
+          append_adjustments(array.elements[i]->id,
+                             coercion_adjustments(element.type, merged));
         first.type = merged;
       }
     }
     result->element = first.type;
-    if (expected_element && (result->length != expected->length || !coercible(result, expected)))
+    if (expected_element &&
+        (result->length != expected->length || !coercible(result, expected)))
       mismatch(expression->span, result, expected);
     return {result};
   }
-  ExprInfo check_repeat_array(const ast::ExprPtr &expression, const TyPtr &expected) {
+  ExprInfo check_repeat_array(const ast::ExprPtr &expression,
+                              const TyPtr &expected) {
     const auto &array = std::get<ast::RepeatArrayExpr>(expression->data);
-    auto expected_element = expected && expected->kind == Ty::Kind::Array ? expected->element : TyPtr{};
+    auto expected_element = expected && expected->kind == Ty::Kind::Array
+                                ? expected->element
+                                : TyPtr{};
     auto first = check_expr(array.element, expected_element);
     auto result = compound(Ty::Kind::Array, first.type);
     check_expr(array.count, ty(Ty::Kind::Usize));
-    auto length = evaluate_length(array.count, current_function_ ? current_function_->owner : "");
+    auto length = evaluate_length(
+        array.count, current_function_ ? current_function_->owner : "");
     result->length = length.value_or(0);
-    if (result->length > 1 && !supports(first.type, "Copy", "", {})) report(expression->span, "array repetition requires Copy");
-    if (expected_element && (result->length != expected->length || !coercible(result, expected)))
+    if (result->length > 1 && !supports(first.type, "Copy", "", {}))
+      report(expression->span, "array repetition requires Copy");
+    if (expected_element &&
+        (result->length != expected->length || !coercible(result, expected)))
       mismatch(expression->span, result, expected);
     return {result};
   }
@@ -984,7 +1106,8 @@ private:
     std::unordered_set<std::string> initialized;
     for (const auto &field : structure.fields) {
       if (!initialized.insert(field.name.text).second)
-        report(field.span, "duplicate field initializer '" + field.name.text + "'");
+        report(field.span,
+               "duplicate field initializer '" + field.name.text + "'");
       auto expected = it->second.fields.find(field.name.text);
       if (expected == it->second.fields.end()) {
         report(field.span, "unknown field '" + field.name.text + "'");
@@ -1008,63 +1131,101 @@ private:
     TyPtr result = ty(Ty::Kind::Unit);
     for (std::size_t i = 0; i < block.statements.size(); ++i) {
       const auto &statement = block.statements[i];
-      ast::visit(*statement, ast::Overloaded{
-        [&](const ast::EmptyStmt &) {},
-        [&](const ast::LetStmt &p) {
-          auto annotation = p.annotation ? resolve_type(*p.annotation,
-              current_function_ ? current_function_->owner : "") : TyPtr{};
-          auto initializer = check_expr(p.initializer, annotation);
-          auto binding_type = annotation ? annotation : initializer.type;
-          if (annotation && !coercible(initializer.type, annotation)) mismatch(p.initializer->span, initializer.type, annotation);
-          if (annotation && annotation->kind == Ty::Kind::Ref && annotation->is_mutable && initializer.access_locked)
-            report(p.initializer->span, "mutable reference initializer requires mutable container access");
-          record_symbol(statement->id, "local", p.binding.name.text,
-              current_function_ ? std::optional<ast::NodeId>(current_function_->ast->id) : std::nullopt);
-          if (protected_builtin_value(p.binding.name.text)) report(p.binding.name.span, "cannot shadow a protected builtin");
-          scopes_.back()[p.binding.name.text] = {binding_type, p.binding.mutability == ast::Mutability::Mutable, symbol_for(statement->id)};
-        },
-        [&](const ast::ExprStmt &p) {
-          auto value = check_expr(p.expression);
-          if (!block.tail && i + 1 == block.statements.size() && value.type->kind == Ty::Kind::Never) result = value.type;
-          else if (p.termination == ast::Termination::Omitted && value.type->kind != Ty::Kind::Unit && value.type->kind != Ty::Kind::Never)
-            report(p.expression->span, "a non-final expression without a semicolon must have unit type");
-        }
-      });
+      ast::visit(
+          *statement,
+          ast::Overloaded{
+              [&](const ast::EmptyStmt &) {},
+              [&](const ast::LetStmt &p) {
+                auto annotation =
+                    p.annotation
+                        ? resolve_type(
+                              *p.annotation,
+                              current_function_ ? current_function_->owner : "")
+                        : TyPtr{};
+                auto initializer = check_expr(p.initializer, annotation);
+                auto binding_type = annotation ? annotation : initializer.type;
+                if (annotation && !coercible(initializer.type, annotation))
+                  mismatch(p.initializer->span, initializer.type, annotation);
+                if (annotation && annotation->kind == Ty::Kind::Ref &&
+                    annotation->is_mutable && initializer.access_locked)
+                  report(p.initializer->span,
+                         "mutable reference initializer requires mutable "
+                         "container access");
+                record_symbol(
+                    statement->id, "local", p.binding.name.text,
+                    current_function_
+                        ? std::optional<ast::NodeId>(current_function_->ast->id)
+                        : std::nullopt);
+                if (protected_builtin_value(p.binding.name.text))
+                  report(p.binding.name.span,
+                         "cannot shadow a protected builtin");
+                scopes_.back()[p.binding.name.text] = {
+                    binding_type,
+                    p.binding.mutability == ast::Mutability::Mutable,
+                    symbol_for(statement->id)};
+              },
+              [&](const ast::ExprStmt &p) {
+                auto value = check_expr(p.expression);
+                if (!block.tail && i + 1 == block.statements.size() &&
+                    value.type->kind == Ty::Kind::Never)
+                  result = value.type;
+                else if (p.termination == ast::Termination::Omitted &&
+                         value.type->kind != Ty::Kind::Unit &&
+                         value.type->kind != Ty::Kind::Never)
+                  report(p.expression->span, "a non-final expression without a "
+                                             "semicolon must have unit type");
+              }});
     }
-    if (block.tail) result = check_expr(*block.tail, expected).type;
+    if (block.tail)
+      result = check_expr(*block.tail, expected).type;
     scopes_.pop_back();
     record_node(block, ExprInfo{result});
     return {result};
   }
 
-  ExprInfo check_if(const ast::Node &node, const ast::IfExpr &branch, const TyPtr &expected) {
+  ExprInfo check_if(const ast::Node &node, const ast::IfExpr &branch,
+                    const TyPtr &expected) {
     auto condition = check_expr(branch.condition, ty(Ty::Kind::Bool));
-    if (!same(condition.type, ty(Ty::Kind::Bool))) mismatch(branch.condition->span, condition.type, ty(Ty::Kind::Bool));
+    if (!same(condition.type, ty(Ty::Kind::Bool)))
+      mismatch(branch.condition->span, condition.type, ty(Ty::Kind::Bool));
     auto then_value = check_block(*branch.then_block, expected);
     if (!branch.else_branch) {
-      if (then_value.type->kind != Ty::Kind::Unit && then_value.type->kind != Ty::Kind::Never)
+      if (then_value.type->kind != Ty::Kind::Unit &&
+          then_value.type->kind != Ty::Kind::Never)
         report(node.span, "if without else requires a unit consequent");
       return {ty(Ty::Kind::Unit)};
     }
     ast::NodeId else_id;
-    auto else_value = std::visit(ast::Overloaded{
-      [&](const ast::Box<ast::Block> &p) { else_id = p->id; return check_block(*p, expected); },
-      [&](const ast::Box<ast::IfBranch> &p) {
-        else_id = p->id;
-        auto result = check_if(*p, p->data, expected);
-        record_node(*p, result);
-        return result;
-      }
-    }, *branch.else_branch);
-    if (then_value.type->kind == Ty::Kind::Never) return else_value;
-    if (else_value.type->kind == Ty::Kind::Never) return then_value;
+    auto else_value =
+        std::visit(ast::Overloaded{[&](const ast::Box<ast::Block> &p) {
+                                     else_id = p->id;
+                                     return check_block(*p, expected);
+                                   },
+                                   [&](const ast::Box<ast::IfBranch> &p) {
+                                     else_id = p->id;
+                                     auto result =
+                                         check_if(*p, p->data, expected);
+                                     record_node(*p, result);
+                                     return result;
+                                   }},
+                   *branch.else_branch);
+    if (then_value.type->kind == Ty::Kind::Never)
+      return else_value;
+    if (else_value.type->kind == Ty::Kind::Never)
+      return then_value;
     if (coercible(else_value.type, then_value.type)) {
-      append_adjustments(else_id, coercion_adjustments(else_value.type, then_value.type)); return then_value;
+      append_adjustments(
+          else_id, coercion_adjustments(else_value.type, then_value.type));
+      return then_value;
     }
     if (coercible(then_value.type, else_value.type)) {
-      append_adjustments(branch.then_block->id, coercion_adjustments(then_value.type, else_value.type)); return else_value;
+      append_adjustments(
+          branch.then_block->id,
+          coercion_adjustments(then_value.type, else_value.type));
+      return else_value;
     }
-    mismatch(node.span, else_value.type, then_value.type); return {};
+    mismatch(node.span, else_value.type, then_value.type);
+    return {};
   }
 
   ExprInfo check_loop(const ast::ExprPtr &expression, const TyPtr &expected) {
@@ -1072,8 +1233,7 @@ private:
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
-      report(loop_expr.body->span,
-             "loop body must have unit type");
+      report(loop_expr.body->span, "loop body must have unit type");
     auto loop = std::move(loops_.back());
     loops_.pop_back();
     if (loop.break_types.empty())
@@ -1093,8 +1253,7 @@ private:
     auto condition = check_expr(while_expr.condition, ty(Ty::Kind::Bool));
     loops_ = std::move(surrounding_loops);
     if (!same(condition.type, ty(Ty::Kind::Bool)))
-      mismatch(while_expr.condition->span, condition.type,
-               ty(Ty::Kind::Bool));
+      mismatch(while_expr.condition->span, condition.type, ty(Ty::Kind::Bool));
     loops_.push_back({ty(Ty::Kind::Unit), {}});
     auto body = check_block(*while_expr.body, ty(Ty::Kind::Unit));
     if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
@@ -1110,7 +1269,8 @@ private:
     const auto &borrow = std::get<ast::BorrowExpr>(expression->data);
     auto operand = check_expr(borrow.operand);
     bool mutable_ref = borrow.mutability == ast::Mutability::Mutable;
-    if (mutable_ref && ((operand.is_place && !operand.is_mutable) || operand.access_locked))
+    if (mutable_ref &&
+        ((operand.is_place && !operand.is_mutable) || operand.access_locked))
       report(borrow.operator_span, "mutable borrow requires a mutable place");
     return {compound(Ty::Kind::Ref, operand.type, mutable_ref)};
   }
@@ -1167,7 +1327,8 @@ private:
         report(expression->span, "equality requires PartialEq");
       return {ty(Ty::Kind::Bool)};
     }
-    if (op == ast::BinaryOp::Lt || op == ast::BinaryOp::Le || op == ast::BinaryOp::Gt || op == ast::BinaryOp::Ge) {
+    if (op == ast::BinaryOp::Lt || op == ast::BinaryOp::Le ||
+        op == ast::BinaryOp::Gt || op == ast::BinaryOp::Ge) {
       auto ordering_left = left.type;
       auto ordering_right = right.type;
       if ((ordering_left->kind == Ty::Kind::Ref) !=
@@ -1193,8 +1354,9 @@ private:
         report(expression->span, "shift operands must be integers");
       return {lhs};
     }
-    if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr || op == ast::BinaryOp::BitXor) && lhs->kind == Ty::Kind::Bool &&
-        rhs->kind == Ty::Kind::Bool)
+    if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr ||
+         op == ast::BinaryOp::BitXor) &&
+        lhs->kind == Ty::Kind::Bool && rhs->kind == Ty::Kind::Bool)
       return {ty(Ty::Kind::Bool)};
     if (!integer(lhs) || !same(lhs, rhs))
       report(expression->span,
@@ -1213,33 +1375,40 @@ private:
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
-    if (!coercible(source.type, destination.type)) mismatch(assignment.value->span, source.type, destination.type);
+    if (!coercible(source.type, destination.type))
+      mismatch(assignment.value->span, source.type, destination.type);
     return {ty(Ty::Kind::Unit)};
   }
-  void check_assignment_target(const ast::ExprPtr &target, const ExprInfo &destination) {
-    if (!destination.is_place) report(target->span, "assignment destination is not a place");
-    else if (!destination.is_mutable) report(target->span, "assignment destination is immutable");
+  void check_assignment_target(const ast::ExprPtr &target,
+                               const ExprInfo &destination) {
+    if (!destination.is_place)
+      report(target->span, "assignment destination is not a place");
+    else if (!destination.is_mutable)
+      report(target->span, "assignment destination is immutable");
   }
   ExprInfo check_compound_assignment(const ast::ExprPtr &expression) {
-    const auto &assignment = std::get<ast::CompoundAssignExpr>(expression->data);
+    const auto &assignment =
+        std::get<ast::CompoundAssignExpr>(expression->data);
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
     auto scalar = scalar_operand(source.type);
-    bool shift = assignment.op == ast::CompoundAssignOp::Shl || assignment.op == ast::CompoundAssignOp::Shr;
-    if (!(shift && integer(scalar) && integer(destination.type)) && !same(scalar, destination.type))
+    bool shift = assignment.op == ast::CompoundAssignOp::Shl ||
+                 assignment.op == ast::CompoundAssignOp::Shr;
+    if (!(shift && integer(scalar) && integer(destination.type)) &&
+        !same(scalar, destination.type))
       mismatch(assignment.value->span, scalar, destination.type);
     if (!integer(destination.type) && destination.type->kind != Ty::Kind::Bool)
-      report(expression->span, "compound assignment requires a scalar destination");
+      report(expression->span,
+             "compound assignment requires a scalar destination");
     return {ty(Ty::Kind::Unit)};
   }
 
   ExprInfo check_cast(const ast::ExprPtr &expression) {
     const auto &cast = std::get<ast::CastExpr>(expression->data);
     auto source = check_expr(cast.value);
-    auto destination =
-        resolve_type(cast.target_type,
-                     current_function_ ? current_function_->owner : "");
+    auto destination = resolve_type(
+        cast.target_type, current_function_ ? current_function_->owner : "");
     const bool valid =
         (integer(source.type) && integer(destination)) ||
         (source.type->kind == Ty::Kind::Bool && integer(destination));
@@ -1254,10 +1423,12 @@ private:
     const auto &call = std::get<ast::CallExpr>(expression->data);
     auto callee = check_expr(call.callee);
     auto *path = ast::get_if<ast::PathExpr>(*ast::unparen(call.callee));
-    auto arguments = path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
+    auto arguments =
+        path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
     if (callee.type->kind != Ty::Kind::Function) {
       report(expression->span, "called expression is not a function");
-      for (const auto &argument : call.arguments) check_expr(argument);
+      for (const auto &argument : call.arguments)
+        check_expr(argument);
       return {};
     }
     const auto &name = callee.type->name;
@@ -1285,7 +1456,8 @@ private:
         auto self = ty(Ty::Kind::Struct);
         self->name = it->second.owner;
         if (ast::by_reference(*it->second.ast->signature.receiver))
-          self = compound(Ty::Kind::Ref, self, ast::is_mutable(*it->second.ast->signature.receiver));
+          self = compound(Ty::Kind::Ref, self,
+                          ast::is_mutable(*it->second.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
       return finish(check_signature(expression, parameters, it->second.result));
@@ -1444,18 +1616,20 @@ private:
                                    "called with dot syntax");
           return finish({}, key, symbol_for(function.ast->id));
         }
-        if (ast::by_reference(*function.ast->signature.receiver) && ast::is_mutable(*function.ast->signature.receiver) &&
+        if (ast::by_reference(*function.ast->signature.receiver) &&
+            ast::is_mutable(*function.ast->signature.receiver) &&
             !writable(receiver))
           report(expression->span, "method requires a mutable receiver");
-        return finish(check_method_signature(expression, function.parameters,
-                                             function.result),
-                      key, symbol_for(function.ast->id),
-                      ast::by_reference(*function.ast->signature.receiver)
-                          ? std::optional<Adjustment::Kind>(
-                                ast::is_mutable(*function.ast->signature.receiver)
-                                    ? Adjustment::Kind::BorrowMutable
-                                    : Adjustment::Kind::BorrowShared)
-                          : std::nullopt);
+        return finish(
+            check_method_signature(expression, function.parameters,
+                                   function.result),
+            key, symbol_for(function.ast->id),
+            ast::by_reference(*function.ast->signature.receiver)
+                ? std::optional<Adjustment::Kind>(
+                      ast::is_mutable(*function.ast->signature.receiver)
+                          ? Adjustment::Kind::BorrowMutable
+                          : Adjustment::Kind::BorrowShared)
+                : std::nullopt);
       }
     }
     report(expression->span, "unknown method '" + name + "'");
@@ -1465,7 +1639,8 @@ private:
   ExprInfo check_method_signature(const ast::ExprPtr &expression,
                                   const std::vector<TyPtr> &parameters,
                                   TyPtr result) {
-    const auto &arguments = std::get<ast::MethodCallExpr>(expression->data).arguments;
+    const auto &arguments =
+        std::get<ast::MethodCallExpr>(expression->data).arguments;
     const auto count = arguments.size();
     if (count != parameters.size())
       report(expression->span, "wrong number of method arguments");
@@ -1558,7 +1733,8 @@ private:
     }
     auto value =
         std::get<ast::BreakExpr>(expression->data).value
-            ? check_expr(*std::get<ast::BreakExpr>(expression->data).value, loops_.back().expected)
+            ? check_expr(*std::get<ast::BreakExpr>(expression->data).value,
+                         loops_.back().expected)
             : ExprInfo{ty(Ty::Kind::Unit)};
     loops_.back().break_types.push_back(value.type);
     return {ty(Ty::Kind::Never)};
@@ -1573,9 +1749,11 @@ private:
   ExprInfo check_return(const ast::ExprPtr &expression) {
     auto expected =
         current_function_ ? current_function_->result : ty(Ty::Kind::Error);
-    auto value = std::get<ast::ReturnExpr>(expression->data).value
-                     ? check_expr(*std::get<ast::ReturnExpr>(expression->data).value, expected)
-                     : ExprInfo{ty(Ty::Kind::Unit)};
+    auto value =
+        std::get<ast::ReturnExpr>(expression->data).value
+            ? check_expr(*std::get<ast::ReturnExpr>(expression->data).value,
+                         expected)
+            : ExprInfo{ty(Ty::Kind::Unit)};
     if (!coercible(value.type, expected))
       mismatch(expression->span, value.type, expected);
     return {ty(Ty::Kind::Never)};
@@ -1617,7 +1795,8 @@ std::string dump_semantic(const SemanticResult &result) {
       << " constants=" << result.summary.constants << '\n';
   out << "  Symbols\n";
   for (const auto &symbol : result.symbols) {
-    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name << " declaration=#" << symbol.declaration;
+    out << "    #" << symbol.id << ' ' << symbol.kind << ' ' << symbol.name
+        << " declaration=#" << symbol.declaration;
     if (symbol.owner)
       out << " owner=#" << *symbol.owner;
     out << '\n';

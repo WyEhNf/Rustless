@@ -10,7 +10,10 @@ struct LetStmt {
   std::optional<TypePtr> annotation;
   ExprPtr initializer;
 };
-struct ExprStmt { ExprPtr expression; Termination termination; };
+struct ExprStmt {
+  ExprPtr expression;
+  Termination termination;
+};
 struct Stmt : Node {
   using Data = std::variant<EmptyStmt, LetStmt, ExprStmt>;
   explicit Stmt(Data value) : data(std::move(value)) {}

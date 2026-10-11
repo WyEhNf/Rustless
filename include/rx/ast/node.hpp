@@ -44,6 +44,7 @@ public:
   const T *operator->() const { return value_.get(); }
   T *get() { return value_.get(); }
   const T *get() const { return value_.get(); }
+
 private:
   // The deleter is created where T is complete; public recursive headers
   // can destroy a Box without including every other node family.
@@ -54,7 +55,9 @@ template <class T, class... Args> Box<T> box(Args &&...args) {
   return Box<T>{std::make_unique<T>(std::forward<Args>(args)...)};
 }
 
-template <class... Fs> struct Overloaded : Fs... { using Fs::operator()...; };
+template <class... Fs> struct Overloaded : Fs... {
+  using Fs::operator()...;
+};
 template <class... Fs> Overloaded(Fs...) -> Overloaded<Fs...>;
 
 } // namespace rx::ast

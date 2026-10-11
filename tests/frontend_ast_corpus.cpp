@@ -1,3 +1,4 @@
+#include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
 #include "rx/semantic.hpp"
 
@@ -5,6 +6,8 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -16,7 +19,8 @@ int main(int argc, char **argv) {
   }
   std::size_t checked = 0;
   std::size_t failed = 0;
-  for (const auto &entry : std::filesystem::recursive_directory_iterator(argv[1])) {
+  for (const auto &entry :
+       std::filesystem::recursive_directory_iterator(argv[1])) {
     if (!entry.is_regular_file() || entry.path().extension() != ".rx")
       continue;
     std::ifstream input(entry.path(), std::ios::binary);
@@ -25,7 +29,22 @@ int main(int argc, char **argv) {
     rx::DiagnosticEngine diagnostics(entry.path().string());
     try {
       const auto parsed = rx::parse_source(source, diagnostics);
-      bool passed = parsed.syntax_ok && parsed.crate && !diagnostics.has_errors();
+      bool passed =
+          parsed.syntax_ok && parsed.crate && !diagnostics.has_errors();
+      if (passed) {
+        std::set<rx::ast::NodeId> identities;
+        rx::ast::walk(*parsed.crate, [&](const rx::ast::Node &node) {
+          if (node.id.value == 0 || !identities.insert(node.id).second)
+            throw std::logic_error("duplicate or missing syntax identity");
+          if (node.span.begin > node.span.end ||
+              node.span.end > source.size() ||
+              node.span.file != parsed.crate->source.id)
+            throw std::logic_error("invalid syntax source span");
+        });
+        const auto dump = rx::ast::dump(*parsed.crate);
+        if (!dump.starts_with("Crate"))
+          throw std::logic_error("missing AST dump root");
+      }
       if (passed && semantic) {
         rx::analyze(*parsed.crate, diagnostics);
         const auto name = entry.path().filename().string();

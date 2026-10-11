@@ -11,7 +11,8 @@ namespace rx::ast {
 struct SourceFile {
   explicit SourceFile(std::string text) : text(std::move(text)), lines{0} {
     for (std::size_t i = 0; i < this->text.size(); ++i) {
-      if (this->text[i] == '\n') lines.push_back(i + 1);
+      if (this->text[i] == '\n')
+        lines.push_back(i + 1);
       if ((static_cast<unsigned char>(this->text[i]) & 0xc0) != 0x80)
         characters.push_back(i);
     }
@@ -23,10 +24,12 @@ struct SourceFile {
     return std::string_view(text).substr(span.begin, span.end - span.begin);
   }
   std::pair<std::size_t, std::size_t> position(std::size_t offset) const {
-    if (offset > text.size()) throw std::out_of_range("invalid source offset");
+    if (offset > text.size())
+      throw std::out_of_range("invalid source offset");
     auto line = std::upper_bound(lines.begin(), lines.end(), offset);
     auto index = static_cast<std::size_t>(line - lines.begin() - 1);
-    auto begin = std::lower_bound(characters.begin(), characters.end(), lines[index]);
+    auto begin =
+        std::lower_bound(characters.begin(), characters.end(), lines[index]);
     auto end = std::lower_bound(characters.begin(), characters.end(), offset);
     return {index + 1, static_cast<std::size_t>(end - begin)};
   }

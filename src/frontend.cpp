@@ -39,8 +39,8 @@ private:
 };
 
 Span raw_token_span(const antlr4::Token *token) {
-  return {token->getStartIndex(), token->getStopIndex() + 1,
-          token->getLine(), token->getCharPositionInLine()};
+  return {token->getStartIndex(), token->getStopIndex() + 1, token->getLine(),
+          token->getCharPositionInLine()};
 }
 
 Span raw_source_span(ParseContext *context) {
@@ -63,7 +63,8 @@ Span merge(Span first, Span second) {
 // AstBuilder consumes only generated parser contexts; it never reparses tokens.
 class AstBuilder {
 public:
-  AstBuilder(const std::vector<std::string> &rule_names, std::string_view source)
+  AstBuilder(const std::vector<std::string> &rule_names,
+             std::string_view source)
       : rule_names_(rule_names), source_(std::string(source)) {}
 
   std::unique_ptr<ast::Crate>
@@ -153,7 +154,8 @@ private:
 
   template <class Payload>
   ast::TypePtr make_type(ParseContext *context, Payload payload) {
-    auto type = ast::box<ast::TypeSyntax>(ast::TypeSyntax::Data{std::move(payload)});
+    auto type =
+        ast::box<ast::TypeSyntax>(ast::TypeSyntax::Data{std::move(payload)});
     stamp(*type, context);
     return type;
   }
@@ -165,41 +167,50 @@ private:
     return {context->getText(), source_span(context)};
   }
   ast::Binding binding(rxgrammar::RxParser::IdentifierBindingContext *context) {
-    return {identifier(context->identifier()), context->MUT()
-      ? ast::Mutability::Mutable : ast::Mutability::Immutable};
+    return {identifier(context->identifier()),
+            context->MUT() ? ast::Mutability::Mutable
+                           : ast::Mutability::Immutable};
   }
   ast::Mutability mutability(bool mutable_value) {
-    return mutable_value ? ast::Mutability::Mutable : ast::Mutability::Immutable;
+    return mutable_value ? ast::Mutability::Mutable
+                         : ast::Mutability::Immutable;
   }
   std::optional<ast::GenericParameters>
   build_generics(rxgrammar::RxParser::GenericParamsContext *context) {
-    if (!context) return {};
+    if (!context)
+      return {};
     ast::GenericParameters result{source_span(context), {}};
     for (auto *parameter : context->lifetimeParam()) {
       ast::LifetimeParameter value{{}, lifetime(parameter->lifetime()), {}};
       stamp(value, parameter);
       if (auto *bounds = parameter->lifetimeBounds())
-        for (auto *name : bounds->lifetime()) value.bounds.push_back(lifetime(name));
+        for (auto *name : bounds->lifetime())
+          value.bounds.push_back(lifetime(name));
       result.lifetimes.push_back(std::move(value));
     }
     return result;
   }
   std::optional<ast::WhereClause>
   build_where(rxgrammar::RxParser::WhereClauseContext *context) {
-    if (!context) return {};
+    if (!context)
+      return {};
     ast::WhereClause result{source_span(context), {}};
     for (auto *predicate : context->whereClauseItem()) {
       std::vector<ast::LifetimeName> bounds;
       if (auto *list = predicate->lifetimeBounds())
-        for (auto *name : list->lifetime()) bounds.push_back(lifetime(name));
+        for (auto *name : list->lifetime())
+          bounds.push_back(lifetime(name));
       if (auto *list = predicate->typeParamBounds())
-        for (auto *name : list->lifetime()) bounds.push_back(lifetime(name));
+        for (auto *name : list->lifetime())
+          bounds.push_back(lifetime(name));
       if (predicate->lifetime()) {
-        ast::LifetimePredicate value{{}, lifetime(predicate->lifetime()), std::move(bounds)};
+        ast::LifetimePredicate value{
+            {}, lifetime(predicate->lifetime()), std::move(bounds)};
         stamp(value, predicate);
         result.predicates.emplace_back(std::move(value));
       } else {
-        ast::TypePredicate value{{}, build_type(predicate->typeRef()), std::move(bounds)};
+        ast::TypePredicate value{
+            {}, build_type(predicate->typeRef()), std::move(bounds)};
         stamp(value, predicate);
         result.predicates.emplace_back(std::move(value));
       }
@@ -209,39 +220,50 @@ private:
 
   std::optional<ast::GenericArguments>
   build_arguments(rxgrammar::RxParser::GenericArgsContext *context) {
-    if (!context) return {};
+    if (!context)
+      return {};
     ast::GenericArguments result{source_span(context), {}};
     for (auto *argument : context->genericArg()) {
-      if (argument->typeRef()) result.values.emplace_back(build_type(argument->typeRef()));
-      else result.values.emplace_back(lifetime(argument->lifetime()));
+      if (argument->typeRef())
+        result.values.emplace_back(build_type(argument->typeRef()));
+      else
+        result.values.emplace_back(lifetime(argument->lifetime()));
     }
     return result;
   }
-  ast::PathName path_ident(rxgrammar::RxParser::PathIdentSegmentContext *context) {
-    if (context->SELF_VALUE()) return ast::SelfValue{source_span(context)};
-    if (context->SELF_TYPE()) return ast::SelfType{source_span(context)};
+  ast::PathName
+  path_ident(rxgrammar::RxParser::PathIdentSegmentContext *context) {
+    if (context->SELF_VALUE())
+      return ast::SelfValue{source_span(context)};
+    if (context->SELF_TYPE())
+      return ast::SelfType{source_span(context)};
     return identifier(context->identifier());
   }
-  template <class Segment>
-  ast::PathSegment path_segment(Segment *context) {
+  template <class Segment> ast::PathSegment path_segment(Segment *context) {
     return {path_ident(context->pathIdentSegment()),
             build_arguments(context->genericArgs()), source_span(context)};
   }
   template <class Context>
   ast::TypePtr reference_type(Context *context, ParseContext *referent) {
     std::optional<ast::LifetimeName> name;
-    if (context->lifetime()) name = lifetime(context->lifetime());
-    auto inner = make_type(context, ast::ReferenceType{
-        std::move(name), mutability(context->MUT() != nullptr), build_type(referent)});
-    if (!context->ANDAND()) return inner;
+    if (context->lifetime())
+      name = lifetime(context->lifetime());
+    auto inner = make_type(
+        context, ast::ReferenceType{std::move(name),
+                                    mutability(context->MUT() != nullptr),
+                                    build_type(referent)});
+    if (!context->ANDAND())
+      return inner;
     // The second ampersand belongs to the inner reference.
     ++inner->span.begin;
     ++inner->span.column;
-    return make_type(context, ast::ReferenceType{
-        {}, ast::Mutability::Immutable, std::move(inner)});
+    return make_type(
+        context,
+        ast::ReferenceType{{}, ast::Mutability::Immutable, std::move(inner)});
   }
   ast::TypePtr build_type(ParseContext *context) {
-    if (auto *type = dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
+    if (auto *type =
+            dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
       if (type->typeRef())
         return make_type(type, ast::ParenType{build_type(type->typeRef())});
       if (type->typePath()) {
@@ -250,76 +272,104 @@ private:
           path.segments.push_back(path_segment(segment));
         return make_type(type, ast::PathType{std::move(path)});
       }
-      if (type->referenceType()) return build_type(type->referenceType());
-      if (type->arrayType()) return build_type(type->arrayType());
+      if (type->referenceType())
+        return build_type(type->referenceType());
+      if (type->arrayType())
+        return build_type(type->arrayType());
       return make_type(type, ast::UnitType{});
     }
-    if (auto *ref = dynamic_cast<rxgrammar::RxParser::ReferenceTypeContext *>(context))
+    if (auto *ref =
+            dynamic_cast<rxgrammar::RxParser::ReferenceTypeContext *>(context))
       return reference_type(ref, ref->typeRef());
-    if (auto *array = dynamic_cast<rxgrammar::RxParser::ArrayTypeContext *>(context))
-      return make_type(array, ast::ArrayType{
-          build_type(array->typeRef()), build_constant(array->constValue())});
-    auto *closed = dynamic_cast<rxgrammar::RxParser::ClosedCastTypeContext *>(context);
-    if (!closed) throw std::logic_error("unexpected type parse context");
+    if (auto *array =
+            dynamic_cast<rxgrammar::RxParser::ArrayTypeContext *>(context))
+      return make_type(array,
+                       ast::ArrayType{build_type(array->typeRef()),
+                                      build_constant(array->constValue())});
+    auto *closed =
+        dynamic_cast<rxgrammar::RxParser::ClosedCastTypeContext *>(context);
+    if (!closed)
+      throw std::logic_error("unexpected type parse context");
     if (closed->typeRef())
       return make_type(closed, ast::ParenType{build_type(closed->typeRef())});
-    if (closed->arrayType()) return build_type(closed->arrayType());
-    if (closed->closedCastType()) return reference_type(closed, closed->closedCastType());
+    if (closed->arrayType())
+      return build_type(closed->arrayType());
+    if (closed->closedCastType())
+      return reference_type(closed, closed->closedCastType());
     if (closed->pathIdentSegment()) {
       ast::Path path{source_span(closed), {}};
       for (auto *segment : closed->typePathSegment())
         path.segments.push_back(path_segment(segment));
       path.segments.push_back({path_ident(closed->pathIdentSegment()),
-          build_arguments(closed->genericArgs()), source_span(closed->pathIdentSegment())});
+                               build_arguments(closed->genericArgs()),
+                               source_span(closed->pathIdentSegment())});
       return make_type(closed, ast::PathType{std::move(path)});
     }
     return make_type(closed, ast::UnitType{});
   }
-  ast::Path expression_path(rxgrammar::RxParser::PathInExpressionContext *context) {
+  ast::Path
+  expression_path(rxgrammar::RxParser::PathInExpressionContext *context) {
     ast::Path path{source_span(context), {}};
     for (auto *segment : context->pathExprSegment())
       path.segments.push_back(path_segment(segment));
     return path;
   }
-  ast::ExprPtr build_path(rxgrammar::RxParser::PathInExpressionContext *context) {
+  ast::ExprPtr
+  build_path(rxgrammar::RxParser::PathInExpressionContext *context) {
     return make_expr(context, ast::PathExpr{expression_path(context)});
   }
 
   ast::ExprPtr integer_expr(ParseContext *context) {
-    return make_expr(context, ast::IntegerExpr{ast::IntegerLiteral::parse(context->getText())});
+    return make_expr(context, ast::IntegerExpr{ast::IntegerLiteral::parse(
+                                  context->getText())});
   }
   ast::ExprPtr build_magnitude(rxgrammar::RxParser::MagnitudeContext *context) {
-    if (context->INTEGER_LITERAL()) return integer_expr(context);
-    if (context->pathInExpression()) return build_path(context->pathInExpression());
-    return make_expr(context, ast::ParenExpr{build_magnitude(context->magnitude())});
+    if (context->INTEGER_LITERAL())
+      return integer_expr(context);
+    if (context->pathInExpression())
+      return build_path(context->pathInExpression());
+    return make_expr(context,
+                     ast::ParenExpr{build_magnitude(context->magnitude())});
   }
   ast::ExprPtr build_constant(rxgrammar::RxParser::ConstValueContext *context) {
-    if (context->INTEGER_LITERAL()) return integer_expr(context);
+    if (context->INTEGER_LITERAL())
+      return integer_expr(context);
     if (context->TRUE() || context->FALSE())
       return make_expr(context, ast::BooleanExpr{context->TRUE() != nullptr});
-    if (context->pathInExpression()) return build_path(context->pathInExpression());
+    if (context->pathInExpression())
+      return build_path(context->pathInExpression());
     if (context->MINUS())
-      return make_expr(context, ast::UnaryExpr{ast::UnaryOp::Negate,
-          token_span(context->MINUS()->getSymbol()), build_magnitude(context->magnitude())});
-    return make_expr(context, ast::ParenExpr{build_constant(context->constValue())});
+      return make_expr(context,
+                       ast::UnaryExpr{ast::UnaryOp::Negate,
+                                      token_span(context->MINUS()->getSymbol()),
+                                      build_magnitude(context->magnitude())});
+    return make_expr(context,
+                     ast::ParenExpr{build_constant(context->constValue())});
   }
-  ast::ExprPtr build_literal(rxgrammar::RxParser::LiteralExpressionContext *context) {
-    if (context->INTEGER_LITERAL()) return integer_expr(context);
+  ast::ExprPtr
+  build_literal(rxgrammar::RxParser::LiteralExpressionContext *context) {
+    if (context->INTEGER_LITERAL())
+      return integer_expr(context);
     return make_expr(context, ast::BooleanExpr{context->TRUE() != nullptr});
   }
-  ast::ExprPtr build_array(rxgrammar::RxParser::ArrayExpressionContext *context) {
+  ast::ExprPtr
+  build_array(rxgrammar::RxParser::ArrayExpressionContext *context) {
     if (context->SEMI())
       return make_expr(context, ast::RepeatArrayExpr{
-          build_expression(context->expression(0)), build_constant(context->constValue())});
+                                    build_expression(context->expression(0)),
+                                    build_constant(context->constValue())});
     ast::ArrayExpr array;
-    for (auto *element : context->expression()) array.elements.push_back(build_expression(element));
+    for (auto *element : context->expression())
+      array.elements.push_back(build_expression(element));
     return make_expr(context, std::move(array));
   }
   ast::IfExpr build_if_data(rxgrammar::RxParser::IfExpressionContext *context) {
     ast::IfExpr result{build_expression(context->conditionExpression()),
-                      build_block(context->blockExpression(0)), {}};
+                       build_block(context->blockExpression(0)),
+                       {}};
     if (context->ifExpression()) {
-      auto branch = ast::box<ast::IfBranch>(build_if_data(context->ifExpression()));
+      auto branch =
+          ast::box<ast::IfBranch>(build_if_data(context->ifExpression()));
       stamp(*branch, context->ifExpression());
       result.else_branch.emplace(std::move(branch));
     } else if (context->blockExpression().size() > 1) {
@@ -330,17 +380,26 @@ private:
   ast::ExprPtr build_if(rxgrammar::RxParser::IfExpressionContext *context) {
     return make_expr(context, build_if_data(context));
   }
-  ast::ExprPtr build_expression_with_block(rxgrammar::RxParser::ExpressionWithBlockContext *context) {
-    if (context->ifExpression()) return build_if(context->ifExpression());
-    if (context->LOOP()) return make_expr(context, ast::LoopExpr{build_block(context->blockExpression())});
-    if (context->WHILE()) return make_expr(context, ast::WhileExpr{
-        build_expression(context->conditionExpression()), build_block(context->blockExpression())});
-    return make_expr(context, ast::BlockExpr{build_block(context->blockExpression())});
+  ast::ExprPtr build_expression_with_block(
+      rxgrammar::RxParser::ExpressionWithBlockContext *context) {
+    if (context->ifExpression())
+      return build_if(context->ifExpression());
+    if (context->LOOP())
+      return make_expr(context,
+                       ast::LoopExpr{build_block(context->blockExpression())});
+    if (context->WHILE())
+      return make_expr(
+          context,
+          ast::WhileExpr{build_expression(context->conditionExpression()),
+                         build_block(context->blockExpression())});
+    return make_expr(context,
+                     ast::BlockExpr{build_block(context->blockExpression())});
   }
 
   ast::StmtPtr build_let(rxgrammar::RxParser::LetStatementContext *context) {
     std::optional<ast::TypePtr> annotation;
-    if (context->typeRef()) annotation.emplace(build_type(context->typeRef()));
+    if (context->typeRef())
+      annotation.emplace(build_type(context->typeRef()));
     auto statement = ast::box<ast::Stmt>(ast::LetStmt{
         binding(context->identifierBinding()), std::move(annotation),
         build_expression(context->expression())});
@@ -348,24 +407,29 @@ private:
     return statement;
   }
   ast::StmtPtr build_statement(rxgrammar::RxParser::StatementContext *context) {
-    if (context->letStatement()) return build_let(context->letStatement());
+    if (context->letStatement())
+      return build_let(context->letStatement());
     if (!context->expressionWithBlock() && !context->statementExpression()) {
       auto statement = ast::box<ast::Stmt>(ast::EmptyStmt{});
       stamp(*statement, context);
       return statement;
     }
-    auto expression = context->expressionWithBlock()
-        ? build_expression_with_block(context->expressionWithBlock())
-        : build_expression(context->statementExpression());
-    auto statement = ast::box<ast::Stmt>(ast::ExprStmt{std::move(expression),
-        context->SEMI() ? ast::Termination::Semicolon : ast::Termination::Omitted});
+    auto expression =
+        context->expressionWithBlock()
+            ? build_expression_with_block(context->expressionWithBlock())
+            : build_expression(context->statementExpression());
+    auto statement = ast::box<ast::Stmt>(ast::ExprStmt{
+        std::move(expression), context->SEMI() ? ast::Termination::Semicolon
+                                               : ast::Termination::Omitted});
     stamp(*statement, context);
     return statement;
   }
-  ast::Box<ast::Block> build_block(rxgrammar::RxParser::BlockExpressionContext *context) {
+  ast::Box<ast::Block>
+  build_block(rxgrammar::RxParser::BlockExpressionContext *context) {
     auto block = ast::box<ast::Block>();
     stamp(*block, context);
-    for (auto *child : context->statement()) block->statements.push_back(build_statement(child));
+    for (auto *child : context->statement())
+      block->statements.push_back(build_statement(child));
     if (context->statementExpression()) {
       block->tail.emplace(build_expression(context->statementExpression()));
     } else if (!block->statements.empty()) {
@@ -380,8 +444,10 @@ private:
   template <class Context>
   ast::ExprPtr build_jump(Context *context, ParseContext *value) {
     std::optional<ast::ExprPtr> operand;
-    if (value) operand.emplace(build_expression(value));
-    if (context->BREAK()) return make_expr(context, ast::BreakExpr{std::move(operand)});
+    if (value)
+      operand.emplace(build_expression(value));
+    if (context->BREAK())
+      return make_expr(context, ast::BreakExpr{std::move(operand)});
     return make_expr(context, ast::ReturnExpr{std::move(operand)});
   }
 
@@ -398,7 +464,8 @@ private:
                 context)) {
       if (primary->conditionPrimaryWithoutBareBlock())
         return build_primary(primary->conditionPrimaryWithoutBareBlock());
-      return make_expr(primary, ast::BlockExpr{build_block(primary->blockExpression())});
+      return make_expr(primary,
+                       ast::BlockExpr{build_block(primary->blockExpression())});
     }
     if (auto *primary =
             dynamic_cast<rxgrammar::RxParser::NonBlockPrimaryContext *>(
@@ -406,11 +473,15 @@ private:
       if (primary->literalExpression())
         return build_literal(primary->literalExpression());
       if (primary->pathInExpression()) {
-        if (!primary->LBRACE()) return build_path(primary->pathInExpression());
-        ast::StructExpr structure{expression_path(primary->pathInExpression()), {}};
+        if (!primary->LBRACE())
+          return build_path(primary->pathInExpression());
+        ast::StructExpr structure{expression_path(primary->pathInExpression()),
+                                  {}};
         if (primary->structExprFields())
           for (auto *field : primary->structExprFields()->structExprField()) {
-            ast::FieldInit value{{}, identifier(field->identifier()), build_expression(field->expression())};
+            ast::FieldInit value{{},
+                                 identifier(field->identifier()),
+                                 build_expression(field->expression())};
             stamp(value, field);
             structure.fields.push_back(std::move(value));
           }
@@ -418,9 +489,13 @@ private:
       }
       if (primary->arrayExpression())
         return build_array(primary->arrayExpression());
-      if (primary->BREAK() || primary->RETURN()) return build_jump(primary, primary->expression());
-      if (primary->CONTINUE()) return make_expr(primary, ast::ContinueExpr{});
-      if (primary->expression()) return make_expr(primary, ast::ParenExpr{build_expression(primary->expression())});
+      if (primary->BREAK() || primary->RETURN())
+        return build_jump(primary, primary->expression());
+      if (primary->CONTINUE())
+        return make_expr(primary, ast::ContinueExpr{});
+      if (primary->expression())
+        return make_expr(
+            primary, ast::ParenExpr{build_expression(primary->expression())});
       return make_expr(primary, ast::UnitExpr{});
     }
     auto *primary = dynamic_cast<
@@ -436,47 +511,71 @@ private:
       return build_array(primary->arrayExpression());
     if (primary->ifExpression())
       return build_if(primary->ifExpression());
-    if (primary->LOOP()) return make_expr(primary, ast::LoopExpr{build_block(primary->blockExpression())});
-    if (primary->WHILE()) return make_expr(primary, ast::WhileExpr{
-        build_expression(primary->conditionExpression()), build_block(primary->blockExpression())});
-    if (primary->BREAK()) return build_jump(primary, primary->conditionBreakExpression());
-    if (primary->RETURN()) return build_jump(primary, primary->conditionExpression());
-    if (primary->CONTINUE()) return make_expr(primary, ast::ContinueExpr{});
-    if (primary->expression()) return make_expr(primary, ast::ParenExpr{build_expression(primary->expression())});
+    if (primary->LOOP())
+      return make_expr(primary,
+                       ast::LoopExpr{build_block(primary->blockExpression())});
+    if (primary->WHILE())
+      return make_expr(
+          primary,
+          ast::WhileExpr{build_expression(primary->conditionExpression()),
+                         build_block(primary->blockExpression())});
+    if (primary->BREAK())
+      return build_jump(primary, primary->conditionBreakExpression());
+    if (primary->RETURN())
+      return build_jump(primary, primary->conditionExpression());
+    if (primary->CONTINUE())
+      return make_expr(primary, ast::ContinueExpr{});
+    if (primary->expression())
+      return make_expr(primary,
+                       ast::ParenExpr{build_expression(primary->expression())});
     return make_expr(primary, ast::UnitExpr{});
   }
 
   std::vector<ast::ExprPtr>
   call_arguments(rxgrammar::RxParser::CallArgumentsContext *context) {
     std::vector<ast::ExprPtr> values;
-    for (auto *value : context->expression()) values.push_back(build_expression(value));
+    for (auto *value : context->expression())
+      values.push_back(build_expression(value));
     return values;
   }
-  ast::ExprPtr apply_call(ast::ExprPtr base, rxgrammar::RxParser::CallArgumentsContext *context) {
+  ast::ExprPtr apply_call(ast::ExprPtr base,
+                          rxgrammar::RxParser::CallArgumentsContext *context) {
     auto span = merge(base->span, source_span(context));
-    auto call = make_expr(context, ast::CallExpr{std::move(base), call_arguments(context)});
+    auto call = make_expr(
+        context, ast::CallExpr{std::move(base), call_arguments(context)});
     call->span = span;
     return call;
   }
-  ast::ExprPtr apply_dot(ast::ExprPtr base, rxgrammar::RxParser::DotSuffixContext *context) {
+  ast::ExprPtr apply_dot(ast::ExprPtr base,
+                         rxgrammar::RxParser::DotSuffixContext *context) {
     auto span = merge(base->span, source_span(context));
     if (!context->callArguments()) {
-      auto field = make_expr(context, ast::FieldExpr{std::move(base), identifier(context->identifier())});
+      auto field =
+          make_expr(context, ast::FieldExpr{std::move(base),
+                                            identifier(context->identifier())});
       field->span = span;
       return field;
     }
     auto *segment = context->pathExprSegment();
-    auto method = make_expr(context, ast::MethodCallExpr{
-        std::move(base), identifier(segment->pathIdentSegment()),
-        build_arguments(segment->genericArgs()), call_arguments(context->callArguments())});
+    auto method = make_expr(
+        context, ast::MethodCallExpr{std::move(base),
+                                     identifier(segment->pathIdentSegment()),
+                                     build_arguments(segment->genericArgs()),
+                                     call_arguments(context->callArguments())});
     method->span = span;
     return method;
   }
-  ast::ExprPtr apply_postfix(ast::ExprPtr base, rxgrammar::RxParser::PostfixSuffixContext *context) {
-    if (context->callArguments()) return apply_call(std::move(base), context->callArguments());
-    if (context->dotSuffix()) return apply_dot(std::move(base), context->dotSuffix());
+  ast::ExprPtr
+  apply_postfix(ast::ExprPtr base,
+                rxgrammar::RxParser::PostfixSuffixContext *context) {
+    if (context->callArguments())
+      return apply_call(std::move(base), context->callArguments());
+    if (context->dotSuffix())
+      return apply_dot(std::move(base), context->dotSuffix());
     auto span = merge(base->span, source_span(context));
-    auto index = make_expr(context, ast::IndexExpr{std::move(base), build_expression(context->expression())});
+    auto index = make_expr(
+        context, ast::IndexExpr{std::move(base),
+                                build_expression(context->expression())});
     index->span = span;
     return index;
   }
@@ -502,7 +601,8 @@ private:
                                child_context));
       }
     }
-    if (!result) throw std::logic_error("missing postfix base");
+    if (!result)
+      throw std::logic_error("missing postfix base");
     return std::move(*result);
   }
 
@@ -511,16 +611,23 @@ private:
     std::optional<ast::ExprPtr> operand;
     for (auto *child : context->children) {
       auto *part = as_context(child);
-      if (!part) continue;
-      if (rule(part) == "unaryOperator") operator_context = part;
-      else if (is_expression_context(part)) operand.emplace(build_expression(part));
+      if (!part)
+        continue;
+      if (rule(part) == "unaryOperator")
+        operator_context = part;
+      else if (is_expression_context(part))
+        operand.emplace(build_expression(part));
     }
-    if (!operand) throw std::logic_error("missing unary operand");
-    if (!operator_context) return std::move(*operand);
+    if (!operand)
+      throw std::logic_error("missing unary operand");
+    if (!operator_context)
+      return std::move(*operand);
     auto op = operator_context->getText();
     if (op.starts_with("&")) {
-      auto inner = make_expr(context, ast::BorrowExpr{
-          mutability(op.ends_with("mut")), source_span(operator_context), std::move(*operand)});
+      auto inner =
+          make_expr(context, ast::BorrowExpr{mutability(op.ends_with("mut")),
+                                             source_span(operator_context),
+                                             std::move(*operand)});
       if (op.starts_with("&&")) {
         ++inner->span.begin;
         ++inner->span.column;
@@ -528,30 +635,37 @@ private:
         ++std::get<ast::BorrowExpr>(inner->data).operator_span.column;
         auto outer_span = source_span(operator_context);
         outer_span.end = outer_span.begin + 1;
-        return make_expr(context, ast::BorrowExpr{
-            ast::Mutability::Immutable, outer_span, std::move(inner)});
+        return make_expr(context,
+                         ast::BorrowExpr{ast::Mutability::Immutable, outer_span,
+                                         std::move(inner)});
       }
       return inner;
     }
     return make_expr(context, ast::UnaryExpr{ast::unary_operator(op),
-        source_span(operator_context), std::move(*operand)});
+                                             source_span(operator_context),
+                                             std::move(*operand)});
   }
   ast::ExprPtr build_cast(ParseContext *context) {
     std::optional<ast::ExprPtr> result;
     for (auto *child : context->children) {
       auto *part = as_context(child);
-      if (!part) continue;
+      if (!part)
+        continue;
       auto name = rule(part);
-      if (is_expression_context(part)) result.emplace(build_expression(part));
+      if (is_expression_context(part))
+        result.emplace(build_expression(part));
       else if (name == "typeRef" || name == "closedCastType") {
-        if (!result) throw std::logic_error("missing cast operand");
+        if (!result)
+          throw std::logic_error("missing cast operand");
         auto span = merge((*result)->span, source_span(part));
-        auto cast = make_expr(context, ast::CastExpr{std::move(*result), build_type(part)});
+        auto cast = make_expr(
+            context, ast::CastExpr{std::move(*result), build_type(part)});
         cast->span = span;
         result = std::move(cast);
       }
     }
-    if (!result) throw std::logic_error("missing cast expression");
+    if (!result)
+      throw std::logic_error("missing cast expression");
     return std::move(*result);
   }
   ast::ExprPtr fold_binary(ParseContext *context) {
@@ -566,20 +680,30 @@ private:
         continue;
       }
       auto *part = as_context(child);
-      if (!part) continue;
+      if (!part)
+        continue;
       if (is_operator_rule(rule(part))) {
-        operator_text = part->getText(); operator_span = source_span(part); continue;
+        operator_text = part->getText();
+        operator_span = source_span(part);
+        continue;
       }
-      if (!is_expression_context(part)) continue;
+      if (!is_expression_context(part))
+        continue;
       auto operand = build_expression(part);
-      if (!result) { result.emplace(std::move(operand)); continue; }
+      if (!result) {
+        result.emplace(std::move(operand));
+        continue;
+      }
       auto span = merge((*result)->span, operand->span);
-      auto binary = make_expr(context, ast::BinaryExpr{ast::binary_operator(operator_text),
-          operator_span, std::move(*result), std::move(operand)});
+      auto binary = make_expr(
+          context,
+          ast::BinaryExpr{ast::binary_operator(operator_text), operator_span,
+                          std::move(*result), std::move(operand)});
       binary->span = span;
       result = std::move(binary);
     }
-    if (!result) throw std::logic_error("missing binary expression");
+    if (!result)
+      throw std::logic_error("missing binary expression");
     return std::move(*result);
   }
   ast::ExprPtr build_assignment(ParseContext *context) {
@@ -587,26 +711,39 @@ private:
     ParseContext *operator_context = nullptr;
     for (auto *child : context->children) {
       auto *part = as_context(child);
-      if (!part) continue;
-      if (is_operator_rule(rule(part))) operator_context = part;
+      if (!part)
+        continue;
+      if (is_operator_rule(rule(part)))
+        operator_context = part;
       else if (is_expression_context(part)) {
-        if (!left) left.emplace(build_expression(part));
-        else right.emplace(build_expression(part));
+        if (!left)
+          left.emplace(build_expression(part));
+        else
+          right.emplace(build_expression(part));
       }
     }
-    if (!left) throw std::logic_error("missing assignment target");
-    if (!right) return std::move(*left);
+    if (!left)
+      throw std::logic_error("missing assignment target");
+    if (!right)
+      return std::move(*left);
     auto op = operator_context->getText();
-    if (op == "=") return make_expr(context, ast::AssignExpr{std::move(*left), std::move(*right)});
-    return make_expr(context, ast::CompoundAssignExpr{ast::compound_operator(op),
-        source_span(operator_context), std::move(*left), std::move(*right)});
+    if (op == "=")
+      return make_expr(context,
+                       ast::AssignExpr{std::move(*left), std::move(*right)});
+    return make_expr(
+        context, ast::CompoundAssignExpr{ast::compound_operator(op),
+                                         source_span(operator_context),
+                                         std::move(*left), std::move(*right)});
   }
 
   ast::ExprPtr build_expression(ParseContext *context) {
     const auto name = rule(context);
     if (name == "blockExpression")
-      return make_expr(context, ast::BlockExpr{build_block(
-          static_cast<rxgrammar::RxParser::BlockExpressionContext *>(context))});
+      return make_expr(
+          context,
+          ast::BlockExpr{build_block(
+              static_cast<rxgrammar::RxParser::BlockExpressionContext *>(
+                  context))});
     if (name == "expressionWithBlock")
       return build_expression_with_block(
           static_cast<rxgrammar::RxParser::ExpressionWithBlockContext *>(
@@ -648,27 +785,35 @@ private:
     stamp(tree, context);
     tree.prefix.span = source_span(context);
     tree.prefix.root = context->getStart()->getText() == "::"
-        ? ast::PathRoot::Absolute : ast::PathRoot::Relative;
+                           ? ast::PathRoot::Absolute
+                           : ast::PathRoot::Relative;
     if (auto *path = context->usePath()) {
       tree.prefix.span = source_span(path);
       for (auto *segment : path->usePathSegment()) {
-        if (segment->identifier()) tree.prefix.segments.emplace_back(identifier(segment->identifier()));
-        else tree.prefix.segments.emplace_back(ast::UseKeywordName{
-            segment->SELF_VALUE() ? ast::UseKeyword::Self :
-            segment->SUPER() ? ast::UseKeyword::Super : ast::UseKeyword::Crate,
-            source_span(segment)});
+        if (segment->identifier())
+          tree.prefix.segments.emplace_back(identifier(segment->identifier()));
+        else
+          tree.prefix.segments.emplace_back(
+              ast::UseKeywordName{segment->SELF_VALUE() ? ast::UseKeyword::Self
+                                  : segment->SUPER()    ? ast::UseKeyword::Super
+                                                     : ast::UseKeyword::Crate,
+                                  source_span(segment)});
       }
     }
-    if (context->STAR()) tree.target = ast::GlobImport{};
+    if (context->STAR())
+      tree.target = ast::GlobImport{};
     else if (context->LBRACE()) {
       ast::GroupImport group;
-      for (auto *child : context->useTree()) group.children.push_back(build_use_tree(child));
+      for (auto *child : context->useTree())
+        group.children.push_back(build_use_tree(child));
       tree.target = std::move(group);
     } else {
       ast::NameImport name;
-      if (context->identifier()) name.alias.emplace(identifier(context->identifier()));
-      else if (context->UNDERSCORE()) name.alias.emplace(ast::UnderscoreAlias{
-          token_span(context->UNDERSCORE()->getSymbol())});
+      if (context->identifier())
+        name.alias.emplace(identifier(context->identifier()));
+      else if (context->UNDERSCORE())
+        name.alias.emplace(ast::UnderscoreAlias{
+            token_span(context->UNDERSCORE()->getSymbol())});
       tree.target = std::move(name);
     }
     return tree;
@@ -678,12 +823,16 @@ private:
     stamp(use, context);
     return use;
   }
-  ast::Parameter build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
-    ast::Parameter parameter{{}, binding(context->identifierBinding()), build_type(context->typeRef())};
+  ast::Parameter
+  build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
+    ast::Parameter parameter{{},
+                             binding(context->identifierBinding()),
+                             build_type(context->typeRef())};
     stamp(parameter, context);
     return parameter;
   }
-  ast::Function build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
+  ast::Function
+  build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
     ast::FunctionSignature signature;
     if (auto *parameters = context->functionParameters()) {
       if (auto *self = parameters->selfParam()) {
@@ -691,49 +840,73 @@ private:
         stamp(receiver, self);
         if (self->AMP()) {
           std::optional<ast::LifetimeName> name;
-          if (self->lifetime()) name = lifetime(self->lifetime());
-          receiver.data = ast::ReferenceSelf{mutability(self->MUT() != nullptr), std::move(name)};
-        } else receiver.data = ast::ValueSelf{mutability(self->MUT() != nullptr)};
+          if (self->lifetime())
+            name = lifetime(self->lifetime());
+          receiver.data = ast::ReferenceSelf{mutability(self->MUT() != nullptr),
+                                             std::move(name)};
+        } else
+          receiver.data = ast::ValueSelf{mutability(self->MUT() != nullptr)};
         signature.receiver = std::move(receiver);
       }
-      for (auto *parameter : parameters->functionParam()) signature.parameters.push_back(build_parameter(parameter));
+      for (auto *parameter : parameters->functionParam())
+        signature.parameters.push_back(build_parameter(parameter));
     }
-    if (context->typeRef()) signature.return_annotation.emplace(build_type(context->typeRef()));
-    ast::Function function{{}, identifier(context->identifier()), build_generics(context->genericParams()),
-        std::move(signature), build_where(context->whereClause()), build_block(context->blockExpression())};
+    if (context->typeRef())
+      signature.return_annotation.emplace(build_type(context->typeRef()));
+    ast::Function function{{},
+                           identifier(context->identifier()),
+                           build_generics(context->genericParams()),
+                           std::move(signature),
+                           build_where(context->whereClause()),
+                           build_block(context->blockExpression())};
     stamp(function, context);
     return function;
   }
-  ast::Struct build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
-    ast::Struct structure{{}, identifier(context->identifier()), {},
-        build_generics(context->genericParams()), build_where(context->whereClause()), {}};
+  ast::Struct
+  build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
+    ast::Struct structure{{},
+                          identifier(context->identifier()),
+                          {},
+                          build_generics(context->genericParams()),
+                          build_where(context->whereClause()),
+                          {}};
     stamp(structure, context);
     for (auto *attribute : context->outerAttribute()) {
       ast::DeriveAttribute value{source_span(attribute), {}};
       for (auto *name : attribute->deriveName())
-        value.names.push_back({ast::derive_kind(name->getText()), source_span(name)});
+        value.names.push_back(
+            {ast::derive_kind(name->getText()), source_span(name)});
       structure.attributes.push_back(std::move(value));
     }
     for (auto *field : context->structField()) {
-      ast::StructField value{{}, identifier(field->identifier()), build_type(field->typeRef())};
+      ast::StructField value{
+          {}, identifier(field->identifier()), build_type(field->typeRef())};
       stamp(value, field);
       structure.fields.push_back(std::move(value));
     }
     return structure;
   }
-  ast::Constant build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
-    ast::Constant value{{}, identifier(context->identifier()), build_type(context->typeRef()),
-        build_constant(context->constValue())};
+  ast::Constant
+  build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
+    ast::Constant value{{},
+                        identifier(context->identifier()),
+                        build_type(context->typeRef()),
+                        build_constant(context->constValue())};
     stamp(value, context);
     return value;
   }
   ast::Impl build_impl(rxgrammar::RxParser::InherentImplContext *context) {
-    ast::Impl value{{}, build_generics(context->genericParams()), build_type(context->typeRef()),
-        build_where(context->whereClause()), {}};
+    ast::Impl value{{},
+                    build_generics(context->genericParams()),
+                    build_type(context->typeRef()),
+                    build_where(context->whereClause()),
+                    {}};
     stamp(value, context);
     for (auto *item : context->associatedItem()) {
-      if (item->functionDefinition()) value.members.emplace_back(build_function(item->functionDefinition()));
-      else value.members.emplace_back(build_constant(item->constantItem()));
+      if (item->functionDefinition())
+        value.members.emplace_back(build_function(item->functionDefinition()));
+      else
+        value.members.emplace_back(build_constant(item->constantItem()));
     }
     return value;
   }

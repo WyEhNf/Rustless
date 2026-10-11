@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstddef>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <iosfwd>
 #include <string>

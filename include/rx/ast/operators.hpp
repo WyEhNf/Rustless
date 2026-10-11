@@ -6,22 +6,45 @@
 
 namespace rx::ast {
 enum class BinaryOp {
-  Add, Sub, Mul, Div, Rem, BitAnd, BitOr, BitXor, Shl, Shr,
-  Eq, Ne, Lt, Le, Gt, Ge, LogicalAnd, LogicalOr
+  Add,
+  Sub,
+  Mul,
+  Div,
+  Rem,
+  BitAnd,
+  BitOr,
+  BitXor,
+  Shl,
+  Shr,
+  Eq,
+  Ne,
+  Lt,
+  Le,
+  Gt,
+  Ge,
+  LogicalAnd,
+  LogicalOr
 };
 enum class UnaryOp { Negate, Not, Dereference };
 enum class CompoundAssignOp {
-  Add, Sub, Mul, Div, Rem, BitAnd, BitOr, BitXor, Shl, Shr
+  Add,
+  Sub,
+  Mul,
+  Div,
+  Rem,
+  BitAnd,
+  BitOr,
+  BitXor,
+  Shl,
+  Shr
 };
 
 inline constexpr std::array binary_spellings{
-  "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
-  "==", "!=", "<", "<=", ">", ">=", "&&", "||"
-};
+    "+",  "-",  "*",  "/", "%",  "&", "|",  "^",  "<<",
+    ">>", "==", "!=", "<", "<=", ">", ">=", "&&", "||"};
 inline constexpr std::array unary_spellings{"-", "!", "*"};
 inline constexpr std::array compound_spellings{
-  "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="
-};
+    "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="};
 
 inline std::string_view spelling(BinaryOp op) {
   return binary_spellings.at(static_cast<std::size_t>(op));
@@ -35,7 +58,8 @@ inline std::string_view spelling(CompoundAssignOp op) {
 
 // Text conversion is used only at the parser boundary.
 template <class Op, std::size_t N>
-Op parse_operator(std::string_view text, const std::array<const char *, N> &names) {
+Op parse_operator(std::string_view text,
+                  const std::array<const char *, N> &names) {
   for (std::size_t i = 0; i < N; ++i)
     if (text == names[i])
       return static_cast<Op>(i);
