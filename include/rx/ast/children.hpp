@@ -10,7 +10,7 @@ public:
   explicit ChildEnumerator(Recurse &recurse) : recurse_(recurse) {}
   void operator()(const Crate &p) {
     for (const auto &item : p.items)
-      dispatch(item, [&](const auto &owner, const auto &) { recurse_(owner); });
+      visit(item, [&](const auto &owner, const auto &) { recurse_(owner); });
   }
   void operator()(const Block &p) {
     for (const auto &statement : p.statements)
@@ -59,7 +59,7 @@ public:
     recurse_(*p.target);
     where_clause(p.where_clause);
     for (const auto &member : p.members)
-      dispatch(member, [&](const auto &owner, const auto &) { recurse_(owner); });
+      visit(member, [&](const auto &owner, const auto &) { recurse_(owner); });
   }
   void operator()(const UnitType &) {}
   void operator()(const PathType &p) { path(p.path); }
@@ -169,7 +169,7 @@ private:
   void where_clause(const std::optional<WhereClause> &value) {
     if (value)
       for (const auto &predicate : value->predicates)
-        dispatch(predicate, [&](const auto &owner, const auto &) { recurse_(owner); });
+        visit(predicate, [&](const auto &owner, const auto &) { recurse_(owner); });
   }
   Recurse &recurse_;
 };
@@ -179,6 +179,6 @@ private:
 template <class T, class Recurse>
 void for_each_child(const T &node, Recurse &&recurse) {
   detail::ChildEnumerator<std::remove_reference_t<Recurse>> children(recurse);
-  dispatch(node, [&](const auto &, const auto &p) { children(p); });
+  visit(node, [&](const auto &, const auto &p) { children(p); });
 }
 } // namespace rx::ast

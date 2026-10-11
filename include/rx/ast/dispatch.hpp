@@ -44,7 +44,7 @@ template <class V, class T>
 concept ExhaustiveVisitor = detail::Coverage<V, T>::value;
 
 template <class T, class V> requires ExhaustiveVisitor<V, T>
-decltype(auto) dispatch(const T &node, V &&visitor) {
+decltype(auto) visit(const T &node, V &&visitor) {
   const auto &value = detail::payload(node);
   if constexpr (requires { std::variant_size<std::remove_cvref_t<decltype(value)>>::value; }) {
     return std::visit([&](const auto &p) -> decltype(auto) {
@@ -61,10 +61,10 @@ struct Coverage<V, std::variant<Ts...>> {
   static consteval bool compatible() {
     if constexpr ((ExhaustiveVisitor<V, Ts> && ...)) {
       using First = std::variant_alternative_t<0, std::variant<Ts...>>;
-      using Result = decltype(dispatch(std::declval<const First &>(),
+      using Result = decltype(visit(std::declval<const First &>(),
                                        std::declval<V &>()));
       return (std::same_as<Result,
-          decltype(dispatch(std::declval<const Ts &>(), std::declval<V &>()))> && ...);
+          decltype(visit(std::declval<const Ts &>(), std::declval<V &>()))> && ...);
     }
     return false;
   }
@@ -75,9 +75,9 @@ struct Coverage<V, std::variant<Ts...>> {
 // Item, ImplMember and WherePredicate select their own concrete owner.
 template <class... Ts, class V>
   requires ExhaustiveVisitor<V, std::variant<Ts...>>
-decltype(auto) dispatch(const std::variant<Ts...> &nodes, V &&visitor) {
+decltype(auto) visit(const std::variant<Ts...> &nodes, V &&visitor) {
   return std::visit([&](const auto &node) -> decltype(auto) {
-    return dispatch(node, visitor);
+    return visit(node, visitor);
   }, nodes);
 }
 } // namespace rx::ast

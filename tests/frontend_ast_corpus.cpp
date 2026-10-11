@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
           parsed.syntax_ok && parsed.crate && !diagnostics.has_errors();
       if (passed) {
         std::set<rx::ast::NodeId> identities;
-        rx::ast::walk(*parsed.crate, [&](const rx::ast::Node &node) {
+        rx::ast::walk(*parsed.crate, [&](const rx::ast::Node &node, const auto &) {
           if (node.id.value == 0 || !identities.insert(node.id).second)
             throw std::logic_error("duplicate or missing syntax identity");
           if (node.span.begin > node.span.end ||

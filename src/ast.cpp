@@ -54,7 +54,7 @@ public:
   std::string print(const Crate &crate) {
     heading("Crate", crate, 0);
     for (const auto &item : crate.items)
-      dispatch(item, [&](const auto &, const auto &value) { declaration(value, 1); });
+      visit(item, [&](const auto &, const auto &value) { declaration(value, 1); });
     return out_.str();
   }
 
@@ -92,7 +92,7 @@ private:
     }
   }
   void type(const TypePtr &syntax) {
-    dispatch(*syntax,
+    visit(*syntax,
           Overloaded{[&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
                      [&](const TypeSyntax &, const PathType &value) { path(value.path); },
                      [&](const TypeSyntax &, const ReferenceType &value) {
@@ -137,7 +137,7 @@ private:
     indent(level);
     out_ << "Where\n";
     for (const auto &predicate : value->predicates)
-      dispatch(predicate, Overloaded{[&](const Node &, const LifetimePredicate &p) {
+      visit(predicate, Overloaded{[&](const Node &, const LifetimePredicate &p) {
                               indent(level + 1);
                               out_ << p.subject.text;
                               bounds(p.bounds);
@@ -158,7 +158,7 @@ private:
         out_ << "::";
       out_ << name_text(tree.prefix.segments[i]);
     }
-    dispatch(tree,
+    visit(tree,
         Overloaded{[&](const UseTree &, const NameImport &name) {
                      if (name.alias) {
                        out_ << " as ";
@@ -206,7 +206,7 @@ private:
       const auto &self = *value.signature.receiver;
       indent(level + 1);
       out_ << "Self ";
-      dispatch(self, Overloaded{[&](const SelfParam &, const ValueSelf &p) {
+      visit(self, Overloaded{[&](const SelfParam &, const ValueSelf &p) {
                               if (p.mutability == Mutability::Mutable)
                                 out_ << "mut ";
                             },
@@ -275,7 +275,7 @@ private:
     }
     where_clause(value.where_clause, level + 1);
     for (const auto &member : value.members)
-      dispatch(member, [&](const auto &, const auto &p) { declaration(p, level + 1); });
+      visit(member, [&](const auto &, const auto &p) { declaration(p, level + 1); });
   }
   void expression(const ExprPtr &value, int level);
   void block(const Block &value, int level);
@@ -287,7 +287,7 @@ private:
 void Printer::block(const Block &value, int level) {
   heading("Block", value, level);
   for (const auto &statement : value.statements)
-    dispatch(*statement,
+    visit(*statement,
           Overloaded{[&](const Stmt &node, const EmptyStmt &) {
                        heading("EmptyStmt", node, level + 1);
                      },
@@ -333,7 +333,7 @@ void Printer::conditional(const IfExpr &value, int level) {
 void Printer::expression(const ExprPtr &value, int level) {
   auto label = [&](const Expr &node, std::string text) { heading(text, node, level); };
   auto child = [&](const ExprPtr &p) { expression(p, level + 1); };
-  dispatch(*value,
+  visit(*value,
         Overloaded{[&](const Expr &node, const IntegerExpr &p) {
                      label(node, "Integer " + p.literal.spelling);
                    },

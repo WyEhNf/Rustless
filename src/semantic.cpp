@@ -220,7 +220,7 @@ private:
     std::unordered_set<std::string> type_names;
     std::unordered_set<std::string> value_names;
     for (const auto &item : crate_.items) {
-      ast::dispatch(item,
+      ast::visit(item,
           [&](const ast::Node &, const auto &value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, ast::Struct>) {
@@ -301,7 +301,7 @@ private:
   }
   TyPtr resolve_type_impl(const ast::TypePtr &syntax,
                           std::string_view self_name) {
-    return ast::dispatch(
+    return ast::visit(
         *syntax,
         ast::Overloaded{
             [&](const ast::TypeSyntax &, const ast::UnitType &) { return ty(Ty::Kind::Unit); },
@@ -430,7 +430,7 @@ private:
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
-        ast::dispatch(member,
+        ast::visit(member,
             [&](const ast::Node &, const auto &declaration) {
               using T = std::decay_t<decltype(declaration)>;
               const auto &name = declaration.name.text;
@@ -877,7 +877,7 @@ private:
     record_node(*expression, result);
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
-    auto result = ast::dispatch(
+    auto result = ast::visit(
         *expression,
         ast::Overloaded{
             [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
@@ -1129,7 +1129,7 @@ private:
     TyPtr result = ty(Ty::Kind::Unit);
     for (std::size_t i = 0; i < block.statements.size(); ++i) {
       const auto &statement = block.statements[i];
-      ast::dispatch(
+      ast::visit(
           *statement,
           ast::Overloaded{
               [&](const ast::Stmt &node, const ast::EmptyStmt &) {},

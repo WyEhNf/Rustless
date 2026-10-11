@@ -130,7 +130,7 @@ fn ops() {
   auto reparsed = rx::parse_source(source, repeat_diagnostics);
   assert(reparsed.syntax_ok && ast::dump(crate) == ast::dump(*reparsed.crate));
   std::set<ast::NodeId> identities;
-  ast::walk(crate, [&](const ast::Node &node) {
+  ast::walk(crate, [&](const ast::Node &node, const auto &) {
     assert(node.id.value != 0 && identities.insert(node.id).second);
     assert(node.span.begin <= node.span.end && node.span.end <= source.size());
   });

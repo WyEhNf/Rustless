@@ -78,10 +78,5 @@ struct Crate : Node {
   std::vector<Item> items;
 };
 
-template <class NodeT, class Visitor>
-decltype(auto) visit(const NodeT &node, Visitor &&visitor) {
-  return std::visit(std::forward<Visitor>(visitor), node.data);
-}
-
 std::string dump(const Crate &crate);
 } // namespace rx::ast

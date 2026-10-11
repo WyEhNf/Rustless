@@ -47,19 +47,19 @@ template <class V>
 concept TraversalVisitor = detail::covers_tree<detail::EnterAdapter<V>> &&
                            detail::covers_tree<detail::LeaveAdapter<V>>;
 
-template <TraversalVisitor V> class TypedWalker {
+template <TraversalVisitor V> class Walker {
 public:
-  explicit TypedWalker(V &visitor) : visitor_(visitor) {}
+  explicit Walker(V &visitor) : visitor_(visitor) {}
   template <class T> WalkResult walk(const T &node) {
     if (stopped_)
       return WalkResult::Stopped;
-    auto control = dispatch(node, detail::EnterAdapter<V>{visitor_});
+    auto control = visit(node, detail::EnterAdapter<V>{visitor_});
     if (control == WalkControl::Stop)
       stopped_ = true;
     else if (control == WalkControl::Continue)
       for_each_child(node, [&](const auto &child) { walk(child); });
     // Balance every successful enter, including skip and stop, on unwinding.
-    dispatch(node, detail::LeaveAdapter<V>{visitor_});
+    visit(node, detail::LeaveAdapter<V>{visitor_});
     return stopped_ ? WalkResult::Stopped : WalkResult::Completed;
   }
 
@@ -69,8 +69,8 @@ private:
 };
 
 template <class T, class V> requires TraversalVisitor<std::remove_reference_t<V>>
-WalkResult walk_typed(const T &root, V &&visitor) {
-  TypedWalker<std::remove_reference_t<V>> walker(visitor);
+WalkResult walk(const T &root, V &&visitor) {
+  Walker<std::remove_reference_t<V>> walker(visitor);
   return walker.walk(root);
 }
 
@@ -99,8 +99,8 @@ concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
 
 template <class T, class V>
   requires TraversalCallback<std::remove_reference_t<V>>
-WalkResult walk_preorder(const T &root, V &&callback) {
+WalkResult walk(const T &root, V &&callback) {
   detail::PreorderAdapter<std::remove_reference_t<V>> visitor(callback);
-  return walk_typed(root, visitor);
+  return walk(root, visitor);
 }
 } // namespace rx::ast

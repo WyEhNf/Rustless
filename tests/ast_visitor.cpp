@@ -78,35 +78,35 @@ static_assert(!ast::TraversalCallback<IdentityVisitor>);
 void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   const auto &binary = *ast::get_if<ast::BinaryExpr>(expr);
   BinaryObserver observer;
-  assert(ast::walk_typed(crate, observer) == ast::WalkResult::Completed);
+  assert(ast::walk(crate, observer) == ast::WalkResult::Completed);
   assert(observer.count == 1);
   TraceVisitor full;
-  assert(ast::walk_typed(crate, full) == ast::WalkResult::Completed);
+  assert(ast::walk(crate, full) == ast::WalkResult::Completed);
   assert(full.entered.size() == 7 && full.left.size() == 7 && full.stack.empty());
   assert(full.entered[4] == expr.id && full.entered[5] == binary.left->id &&
          full.entered[6] == binary.right->id);
   TraceVisitor skipped;
   skipped.target = expr.id;
   skipped.action = ast::WalkControl::SkipChildren;
-  assert(ast::walk_typed(crate, skipped) == ast::WalkResult::Completed);
+  assert(ast::walk(crate, skipped) == ast::WalkResult::Completed);
   assert(skipped.entered.size() == 5 && skipped.left.size() == 5 && skipped.stack.empty());
   TraceVisitor stopped;
   stopped.target = binary.left->id;
   stopped.action = ast::WalkControl::Stop;
-  assert(ast::walk_typed(crate, stopped) == ast::WalkResult::Stopped);
+  assert(ast::walk(crate, stopped) == ast::WalkResult::Stopped);
   assert(stopped.entered.size() == 6 && stopped.left.size() == 6 && stopped.stack.empty());
   TraceVisitor root_stop;
   root_stop.target = crate.id;
   root_stop.action = ast::WalkControl::Stop;
-  assert(ast::walk_typed(crate, root_stop) == ast::WalkResult::Stopped);
+  assert(ast::walk(crate, root_stop) == ast::WalkResult::Stopped);
   assert(root_stop.entered.size() == 1 && root_stop.left.size() == 1);
   std::vector<ast::NodeId> callback_ids;
-  assert(ast::walk_preorder(crate, [&](const ast::Node &node, const auto &) {
+  assert(ast::walk(crate, [&](const ast::Node &node, const auto &) {
     callback_ids.push_back(node.id);
   }) == ast::WalkResult::Completed);
   assert(callback_ids == full.entered);
   callback_ids.clear();
-  assert(ast::walk_preorder(crate, [&](const ast::Node &node, const auto &) {
+  assert(ast::walk(crate, [&](const ast::Node &node, const auto &) {
     callback_ids.push_back(node.id);
     return node.id == expr.id ? ast::WalkControl::Stop : ast::WalkControl::Continue;
   }) == ast::WalkResult::Stopped);
@@ -120,7 +120,7 @@ int main() {
   const auto &function = std::get<ast::Function>(parsed.crate->items[0]);
   const auto &statement = *function.body->statements[0];
   const auto &expr = *std::get<ast::ExprStmt>(statement.data).expression;
-  const auto id = ast::dispatch(expr, ast::Overloaded{
+  const auto id = ast::visit(expr, ast::Overloaded{
     [&](const ast::Expr &owner, const ast::BinaryExpr &value) {
       assert(&owner == &expr && &value == ast::get_if<ast::BinaryExpr>(expr));
       assert(parsed.crate->source.slice(owner.span) == "1 + 2");
@@ -128,7 +128,7 @@ int main() {
       return owner.id;
     }, IdentityVisitor{}});
   assert(id == expr.id);
-  assert(ast::dispatch(parsed.crate->items[0], IdentityVisitor{}) == function.id);
+  assert(ast::visit(parsed.crate->items[0], IdentityVisitor{}) == function.id);
   std::vector<ast::NodeId> child_ids;
   ast::for_each_child(expr, [&](const ast::Node &child) {
     child_ids.push_back(child.id);
