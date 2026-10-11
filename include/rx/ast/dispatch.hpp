@@ -43,7 +43,8 @@ struct Coverage<V, T> : VisitorCoverage<V, T,
 template <class V, class T>
 concept ExhaustiveVisitor = detail::Coverage<V, T>::value;
 
-template <class T, class V> requires ExhaustiveVisitor<V, T>
+template <class T, class V>
+  requires std::derived_from<T, Node> && ExhaustiveVisitor<V, T>
 decltype(auto) visit(const T &node, V &&visitor) {
   const auto &value = detail::payload(node);
   if constexpr (requires { std::variant_size<std::remove_cvref_t<decltype(value)>>::value; }) {

@@ -252,7 +252,9 @@ private:
               constants_[value.name.text].ast = &value;
             } else if constexpr (std::is_same_v<T, ast::Impl>) {
               impls_.push_back(&value);
-            } else if constexpr (std::is_same_v<T, ast::Use>) {
+            } else {
+              static_assert(std::is_same_v<T, ast::Use>,
+                            "unhandled AST declaration");
               (void)value;
             }
           });

@@ -98,7 +98,8 @@ template <class V>
 concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
 
 template <class T, class V>
-  requires TraversalCallback<std::remove_reference_t<V>>
+  requires (!TraversalVisitor<std::remove_reference_t<V>>) &&
+           TraversalCallback<std::remove_reference_t<V>>
 WalkResult walk(const T &root, V &&callback) {
   detail::PreorderAdapter<std::remove_reference_t<V>> visitor(callback);
   return walk(root, visitor);
