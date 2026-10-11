@@ -196,116 +196,82 @@ private:
     return result;
   }
 
-  void
-  append_generic_arguments(std::vector<ast::TypePtr> &arguments,
-                           rxgrammar::RxParser::GenericArgsContext *context) {
-    if (!context)
-      return;
-    for (auto *argument : context->genericArg())
-      if (argument->typeRef())
-        arguments.push_back(build_type(argument->typeRef()));
-  }
-
-  void
-  append_type_segment(std::vector<std::string> &path,
-                      std::vector<ast::TypePtr> &arguments,
-                      rxgrammar::RxParser::TypePathSegmentContext *segment) {
-    path.push_back(segment->pathIdentSegment()->getText());
-    append_generic_arguments(arguments, segment->genericArgs());
-  }
-
-  void append_expression_segment(
-      std::vector<std::string> &path, std::vector<ast::TypePtr> &arguments,
-      rxgrammar::RxParser::PathExprSegmentContext *segment) {
-    path.push_back(segment->pathIdentSegment()->getText());
-    append_generic_arguments(arguments, segment->genericArgs());
-  }
-
-  ast::TypePtr build_type(ParseContext *context) {
-    if (auto *type =
-            dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
-      if (type->typeRef())
-        return build_type(type->typeRef());
-      if (type->typePath()) {
-        auto result = std::make_shared<ast::Type>();
-        stamp(*result, type);
-        result->kind = ast::Type::Kind::Path;
-        for (auto *segment : type->typePath()->typePathSegment())
-          append_type_segment(result->path, result->arguments, segment);
-        return result;
-      }
-      if (type->referenceType())
-        return build_type(type->referenceType());
-      if (type->arrayType())
-        return build_type(type->arrayType());
-      return unit_type(type);
+  std::optional<ast::GenericArguments>
+  build_arguments(rxgrammar::RxParser::GenericArgsContext *context) {
+    if (!context) return {};
+    ast::GenericArguments result{source_span(context), {}};
+    for (auto *argument : context->genericArg()) {
+      if (argument->typeRef()) result.values.emplace_back(build_type(argument->typeRef()));
+      else result.values.emplace_back(lifetime(argument->lifetime()));
     }
-    if (auto *reference =
-            dynamic_cast<rxgrammar::RxParser::ReferenceTypeContext *>(
-                context)) {
-      auto inner = std::make_shared<ast::Type>();
-      stamp(*inner, reference);
-      inner->kind = ast::Type::Kind::Reference;
-      inner->is_mutable = reference->MUT() != nullptr;
-      inner->element = build_type(reference->typeRef());
-      if (!reference->ANDAND())
-        return inner;
-      auto outer = std::make_shared<ast::Type>();
-      stamp(*outer, reference);
-      outer->kind = ast::Type::Kind::Reference;
-      outer->element = std::move(inner);
-      return outer;
-    }
-    if (auto *array =
-            dynamic_cast<rxgrammar::RxParser::ArrayTypeContext *>(context)) {
-      auto result = std::make_shared<ast::Type>();
-      stamp(*result, array);
-      result->kind = ast::Type::Kind::Array;
-      result->element = build_type(array->typeRef());
-      result->array_length = array->constValue()->getText();
-      return result;
-    }
-    auto *closed =
-        dynamic_cast<rxgrammar::RxParser::ClosedCastTypeContext *>(context);
-    if (!closed)
-      throw std::logic_error("unexpected type parse context");
-    if (closed->typeRef())
-      return build_type(closed->typeRef());
-    if (closed->arrayType())
-      return build_type(closed->arrayType());
-    if (closed->closedCastType()) {
-      auto inner = std::make_shared<ast::Type>();
-      stamp(*inner, closed);
-      inner->kind = ast::Type::Kind::Reference;
-      inner->is_mutable = closed->MUT() != nullptr;
-      inner->element = build_type(closed->closedCastType());
-      if (!closed->ANDAND())
-        return inner;
-      auto outer = std::make_shared<ast::Type>();
-      stamp(*outer, closed);
-      outer->kind = ast::Type::Kind::Reference;
-      outer->element = std::move(inner);
-      return outer;
-    }
-    if (closed->pathIdentSegment()) {
-      auto result = std::make_shared<ast::Type>();
-      stamp(*result, closed);
-      result->kind = ast::Type::Kind::Path;
-      for (auto *segment : closed->typePathSegment())
-        append_type_segment(result->path, result->arguments, segment);
-      result->path.push_back(closed->pathIdentSegment()->getText());
-      append_generic_arguments(result->arguments, closed->genericArgs());
-      return result;
-    }
-    return unit_type(closed);
-  }
-
-  ast::ExprPtr
-  build_path(rxgrammar::RxParser::PathInExpressionContext *context) {
-    auto result = make_expr(ast::Expr::Kind::Path, context);
-    for (auto *segment : context->pathExprSegment())
-      append_expression_segment(result->path, result->type_arguments, segment);
     return result;
+  }
+  ast::PathName path_ident(rxgrammar::RxParser::PathIdentSegmentContext *context) {
+    if (context->SELF_VALUE()) return ast::SelfValue{source_span(context)};
+    if (context->SELF_TYPE()) return ast::SelfType{source_span(context)};
+    return identifier(context->identifier());
+  }
+  template <class Segment>
+  ast::PathSegment path_segment(Segment *context) {
+    return {path_ident(context->pathIdentSegment()),
+            build_arguments(context->genericArgs()), source_span(context)};
+  }
+  template <class Context>
+  ast::TypePtr reference_type(Context *context, ParseContext *referent) {
+    std::optional<ast::LifetimeName> name;
+    if (context->lifetime()) name = lifetime(context->lifetime());
+    auto inner = make_type(context, ast::ReferenceType{
+        std::move(name), mutability(context->MUT() != nullptr), build_type(referent)});
+    if (!context->ANDAND()) return inner;
+    // The second ampersand belongs to the inner reference.
+    ++inner->span.begin;
+    ++inner->span.column;
+    return make_type(context, ast::ReferenceType{
+        {}, ast::Mutability::Immutable, std::move(inner)});
+  }
+  ast::TypePtr build_type(ParseContext *context) {
+    if (auto *type = dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
+      if (type->typeRef())
+        return make_type(type, ast::ParenType{build_type(type->typeRef())});
+      if (type->typePath()) {
+        ast::Path path{source_span(type->typePath()), {}};
+        for (auto *segment : type->typePath()->typePathSegment())
+          path.segments.push_back(path_segment(segment));
+        return make_type(type, ast::PathType{std::move(path)});
+      }
+      if (type->referenceType()) return build_type(type->referenceType());
+      if (type->arrayType()) return build_type(type->arrayType());
+      return make_type(type, ast::UnitType{});
+    }
+    if (auto *ref = dynamic_cast<rxgrammar::RxParser::ReferenceTypeContext *>(context))
+      return reference_type(ref, ref->typeRef());
+    if (auto *array = dynamic_cast<rxgrammar::RxParser::ArrayTypeContext *>(context))
+      return make_type(array, ast::ArrayType{
+          build_type(array->typeRef()), build_constant(array->constValue())});
+    auto *closed = dynamic_cast<rxgrammar::RxParser::ClosedCastTypeContext *>(context);
+    if (!closed) throw std::logic_error("unexpected type parse context");
+    if (closed->typeRef())
+      return make_type(closed, ast::ParenType{build_type(closed->typeRef())});
+    if (closed->arrayType()) return build_type(closed->arrayType());
+    if (closed->closedCastType()) return reference_type(closed, closed->closedCastType());
+    if (closed->pathIdentSegment()) {
+      ast::Path path{source_span(closed), {}};
+      for (auto *segment : closed->typePathSegment())
+        path.segments.push_back(path_segment(segment));
+      path.segments.push_back({path_ident(closed->pathIdentSegment()),
+          build_arguments(closed->genericArgs()), source_span(closed->pathIdentSegment())});
+      return make_type(closed, ast::PathType{std::move(path)});
+    }
+    return make_type(closed, ast::UnitType{});
+  }
+  ast::Path expression_path(rxgrammar::RxParser::PathInExpressionContext *context) {
+    ast::Path path{source_span(context), {}};
+    for (auto *segment : context->pathExprSegment())
+      path.segments.push_back(path_segment(segment));
+    return path;
+  }
+  ast::ExprPtr build_path(rxgrammar::RxParser::PathInExpressionContext *context) {
+    return make_expr(context, ast::PathExpr{expression_path(context)});
   }
 
   ast::ExprPtr build_magnitude(rxgrammar::RxParser::MagnitudeContext *context) {
