@@ -48,217 +48,166 @@ void DiagnosticEngine::print(std::ostream &out) const {
 
 namespace rx::ast {
 namespace {
-
-std::string indent(int level) {
-  return std::string(static_cast<std::size_t>(level) * 2, ' ');
-}
-
-void dump_node(std::ostringstream &out, const Node &node) {
-  out << " #" << node.id << " @" << node.span.line << ':'
-      << (node.span.column + 1) << " [" << node.span.begin << ','
-      << node.span.end << ')';
-}
-
-void dump_type(std::ostringstream &out, const TypePtr &type) {
-  // The dump mirrors source-like type spelling for readable snapshots.
-  if (!type) {
-    out << "()";
-    return;
+class Printer {
+public:
+  explicit Printer(const Crate &crate) : source_(crate.source) {}
+  std::string print(const Crate &crate) {
+    heading("Crate", crate, 0);
+    for (const auto &item : crate.items) std::visit([&](const auto &value) { declaration(value, 1); }, item);
+    return out_.str();
   }
-  switch (type->kind) {
-  case Type::Kind::Unit:
-    out << "()";
-    break;
-  case Type::Kind::Path:
-    for (std::size_t i = 0; i < type->path.size(); ++i) {
-      if (i)
-        out << "::";
-      out << type->path[i];
+private:
+  void indent(int level) { out_ << std::string(static_cast<std::size_t>(level) * 2, ' '); }
+  void heading(std::string_view name, const Node &node, int level) {
+    indent(level); out_ << name;
+    out_ << " #" << node.id << " @" << node.span.line << ':' << node.span.column + 1
+         << " [" << node.span.begin << ',' << node.span.end << ")\n";
+  }
+  void arguments(const GenericArguments &args) {
+    out_ << '<';
+    for (std::size_t i = 0; i < args.values.size(); ++i) {
+      if (i) out_ << ", ";
+      std::visit(Overloaded{
+        [&](const TypePtr &value) { type(value); },
+        [&](const LifetimeName &value) { out_ << value.text; }
+      }, args.values[i]);
     }
-    if (!type->arguments.empty()) {
-      out << '<';
-      for (std::size_t i = 0; i < type->arguments.size(); ++i) {
-        if (i)
-          out << ", ";
-        dump_type(out, type->arguments[i]);
+    out_ << '>';
+  }
+  void path(const Path &value) {
+    for (std::size_t i = 0; i < value.segments.size(); ++i) {
+      if (i) out_ << "::";
+      const auto &segment = value.segments[i];
+      out_ << name_text(segment.name);
+      if (segment.arguments) arguments(*segment.arguments);
+    }
+  }
+  void type(const TypePtr &syntax) {
+    visit(*syntax, Overloaded{
+      [&](const UnitType &) { out_ << "()"; },
+      [&](const PathType &value) { path(value.path); },
+      [&](const ReferenceType &value) {
+        out_ << '&';
+        if (value.lifetime) out_ << value.lifetime->text << ' ';
+        if (value.mutability == Mutability::Mutable) out_ << "mut ";
+        type(value.referent);
+      },
+      [&](const ArrayType &value) {
+        out_ << '['; type(value.element);
+        out_ << "; " << source_.slice(value.length->span) << ']';
+      },
+      [&](const ParenType &value) { out_ << '('; type(value.inner); out_ << ')'; }
+    });
+  }
+  void generics(const std::optional<GenericParameters> &value) {
+    if (!value) return;
+    out_ << '<';
+    for (std::size_t i = 0; i < value->lifetimes.size(); ++i) {
+      if (i) out_ << ", ";
+      const auto &parameter = value->lifetimes[i];
+      out_ << parameter.name.text;
+      bounds(parameter.bounds);
+    }
+    out_ << '>';
+  }
+  void bounds(const std::vector<LifetimeName> &values) {
+    for (std::size_t i = 0; i < values.size(); ++i)
+      out_ << (i ? " + " : ": ") << values[i].text;
+  }
+  void where_clause(const std::optional<WhereClause> &value, int level) {
+    if (!value) return;
+    indent(level); out_ << "Where\n";
+    for (const auto &predicate : value->predicates) std::visit(Overloaded{
+      [&](const LifetimePredicate &p) { indent(level + 1); out_ << p.subject.text; bounds(p.bounds); out_ << '\n'; },
+      [&](const TypePredicate &p) { indent(level + 1); type(p.subject); bounds(p.bounds); out_ << '\n'; }
+    }, predicate);
+  }
+  void use_tree(const UseTree &tree) {
+    if (tree.prefix.root == PathRoot::Absolute) out_ << "::";
+    for (std::size_t i = 0; i < tree.prefix.segments.size(); ++i) {
+      if (i) out_ << "::";
+      out_ << name_text(tree.prefix.segments[i]);
+    }
+    std::visit(Overloaded{
+      [&](const NameImport &name) {
+        if (name.alias) {
+          out_ << " as ";
+          std::visit(Overloaded{
+            [&](const Identifier &value) { out_ << value.text; },
+            [&](const UnderscoreAlias &) { out_ << '_'; }
+          }, *name.alias);
+        }
+      },
+      [&](const GlobImport &) { if (!tree.prefix.segments.empty()) out_ << "::"; out_ << '*'; },
+      [&](const GroupImport &group) {
+        if (!tree.prefix.segments.empty()) out_ << "::";
+        out_ << '{';
+        for (std::size_t i = 0; i < group.children.size(); ++i) {
+          if (i) out_ << ", "; use_tree(group.children[i]);
+        }
+        out_ << '}';
       }
-      out << '>';
+    }, tree.target);
+  }
+  void declaration(const Use &value, int level) {
+    heading("Use", value, level); indent(level + 1); use_tree(value.tree); out_ << '\n';
+  }
+  void declaration(const Function &value, int level) {
+    heading("Function " + value.name.text, value, level);
+    if (value.generics) { indent(level + 1); out_ << "Generics "; generics(value.generics); out_ << '\n'; }
+    if (value.signature.receiver) {
+      const auto &self = *value.signature.receiver;
+      indent(level + 1); out_ << "Self ";
+      std::visit(Overloaded{
+        [&](const ValueSelf &p) { if (p.mutability == Mutability::Mutable) out_ << "mut "; },
+        [&](const ReferenceSelf &p) {
+          out_ << '&'; if (p.lifetime) out_ << p.lifetime->text << ' ';
+          if (p.mutability == Mutability::Mutable) out_ << "mut ";
+        }
+      }, self.data);
+      out_ << "self\n";
     }
-    break;
-  case Type::Kind::Reference:
-    out << '&' << (type->is_mutable ? "mut " : "");
-    dump_type(out, type->element);
-    break;
-  case Type::Kind::Array:
-    out << '[';
-    dump_type(out, type->element);
-    out << "; " << type->array_length << ']';
-    break;
-  }
-}
-
-void dump_expr(std::ostringstream &out, const ExprPtr &expression, int level);
-
-void dump_stmt(std::ostringstream &out, const std::shared_ptr<Stmt> &statement,
-               int level) {
-  if (!statement) {
-    out << indent(level) << "<missing statement>\n";
-    return;
-  }
-  if (statement->kind == Stmt::Kind::Empty) {
-    out << indent(level) << "EmptyStmt";
-    dump_node(out, *statement);
-    out << '\n';
-    return;
-  }
-  if (statement->kind == Stmt::Kind::Let) {
-    out << indent(level) << "Let " << (statement->is_mutable ? "mut " : "")
-        << statement->name;
-    if (statement->annotation) {
-      out << ": ";
-      dump_type(out, statement->annotation);
+    for (const auto &parameter : value.signature.parameters) {
+      heading("Parameter " + parameter.binding.name.text, parameter, level + 1);
+      indent(level + 2); type(parameter.type); out_ << '\n';
     }
-    dump_node(out, *statement);
-    out << '\n';
-    dump_expr(out, statement->expression, level + 1);
-    return;
+    if (value.signature.return_annotation) {
+      indent(level + 1); out_ << "Result "; type(*value.signature.return_annotation); out_ << '\n';
+    }
+    where_clause(value.where_clause, level + 1);
+    block(*value.body, level + 1);
   }
-  out << indent(level) << (statement->has_semicolon ? "ExprStmt" : "TailExpr");
-  dump_node(out, *statement);
-  out << '\n';
-  dump_expr(out, statement->expression, level + 1);
-}
-
-void dump_expr(std::ostringstream &out, const ExprPtr &expression, int level) {
-  // Child order matches the AST operand order established by the parser.
-  if (!expression) {
-    out << indent(level) << "<missing>\n";
-    return;
+  void declaration(const Constant &value, int level) {
+    heading("Constant " + value.name.text, value, level);
+    indent(level + 1); type(value.type); out_ << '\n'; expression(value.value, level + 1);
   }
-  static const char *names[] = {
-      "Integer", "Boolean",  "Unit",  "Path",       "Array", "Struct",
-      "Block",   "If",       "Loop",  "While",      "Unary", "Binary",
-      "Assign",  "Cast",     "Call",  "MethodCall", "Field", "Index",
-      "Break",   "Continue", "Return"};
-  out << indent(level) << names[static_cast<int>(expression->kind)];
-  if (!expression->text.empty())
-    out << " " << expression->text;
-  if (!expression->path.empty()) {
-    out << " path=";
-    for (std::size_t i = 0; i < expression->path.size(); ++i) {
-      if (i)
-        out << "::";
-      out << expression->path[i];
+  void declaration(const Struct &value, int level) {
+    heading("Struct " + value.name.text, value, level);
+    if (value.generics) { indent(level + 1); generics(value.generics); out_ << '\n'; }
+    for (const auto &attribute : value.attributes) {
+      indent(level + 1); out_ << "Derive";
+      for (const auto &name : attribute.names) out_ << ' ' << spelling(name.kind);
+      out_ << '\n';
+    }
+    where_clause(value.where_clause, level + 1);
+    for (const auto &field : value.fields) {
+      heading("Field " + field.name.text, field, level + 1);
+      indent(level + 2); type(field.type); out_ << '\n';
     }
   }
-  if (expression->cast_type) {
-    out << " type=";
-    dump_type(out, expression->cast_type);
+  void declaration(const Impl &value, int level) {
+    heading("Impl", value, level); indent(level + 1); type(value.target); out_ << '\n';
+    if (value.generics) { indent(level + 1); generics(value.generics); out_ << '\n'; }
+    where_clause(value.where_clause, level + 1);
+    for (const auto &member : value.members) std::visit([&](const auto &p) { declaration(p, level + 1); }, member);
   }
-  if (!expression->type_arguments.empty()) {
-    out << " type-args=<";
-    for (std::size_t i = 0; i < expression->type_arguments.size(); ++i) {
-      if (i)
-        out << ", ";
-      dump_type(out, expression->type_arguments[i]);
-    }
-    out << '>';
-  }
-  if (expression->kind == Expr::Kind::Array && expression->flag)
-    out << " repeat";
-  dump_node(out, *expression);
-  out << '\n';
-  for (const auto &field : expression->fields) {
-    out << indent(level + 1) << "field " << field.name << '\n';
-    dump_expr(out, field.value, level + 2);
-  }
-  for (const auto &operand : expression->operands)
-    dump_expr(out, operand, level + 1);
-  for (const auto &statement : expression->statements)
-    dump_stmt(out, statement, level + 1);
-}
-
-void dump_function(std::ostringstream &out, const Function &function,
-                   int level) {
-  out << indent(level) << "Function " << function.name;
-  if (function.has_self)
-    out << " self=" << (function.self_by_ref ? "&" : "")
-        << (function.self_mutable ? "mut " : "") << "self";
-  dump_node(out, function);
-  out << '\n';
-  for (const auto &parameter : function.parameters) {
-    out << indent(level + 1) << "Parameter "
-        << (parameter.is_mutable ? "mut " : "") << parameter.name << ": ";
-    dump_type(out, parameter.type);
-    dump_node(out, parameter);
-    out << '\n';
-  }
-  out << indent(level + 1) << "Result ";
-  dump_type(out, function.result);
-  out << '\n';
-  dump_expr(out, function.body, level + 1);
-}
-
-void dump_constant(std::ostringstream &out, const Constant &constant,
-                   int level) {
-  out << indent(level) << "Constant " << constant.name << ": ";
-  dump_type(out, constant.type);
-  dump_node(out, constant);
-  out << '\n';
-  dump_expr(out, constant.value, level + 1);
-}
+  void expression(const ExprPtr &value, int level);
+  void block(const Block &value, int level);
+  void conditional(const IfExpr &value, int level);
+  std::ostringstream out_;
+  const SourceFile &source_;
+};
 
 } // namespace
-
-std::string dump(const Crate &crate) {
-  std::ostringstream out;
-  out << "Crate";
-  dump_node(out, crate);
-  out << '\n';
-  for (const auto &item : crate.items) {
-    std::visit(
-        [&](const auto &value) {
-          using T = std::decay_t<decltype(value)>;
-          if constexpr (std::is_same_v<T, Use>) {
-            out << "  Use " << value.text;
-            dump_node(out, value);
-            out << '\n';
-          } else if constexpr (std::is_same_v<T, Struct>) {
-            out << "  Struct " << value.name;
-            if (!value.derives.empty()) {
-              out << " derives=";
-              for (std::size_t i = 0; i < value.derives.size(); ++i) {
-                if (i)
-                  out << ',';
-                out << value.derives[i];
-              }
-            }
-            dump_node(out, value);
-            out << '\n';
-            for (const auto &field : value.fields) {
-              out << "    Field " << field.name << ": ";
-              dump_type(out, field.type);
-              dump_node(out, field);
-              out << '\n';
-            }
-          } else if constexpr (std::is_same_v<T, Function>) {
-            dump_function(out, value, 1);
-          } else if constexpr (std::is_same_v<T, Constant>) {
-            dump_constant(out, value, 1);
-          } else if constexpr (std::is_same_v<T, Impl>) {
-            out << "  Impl ";
-            dump_type(out, value.target);
-            dump_node(out, value);
-            out << '\n';
-            for (const auto &function : value.functions)
-              dump_function(out, function, 2);
-            for (const auto &constant : value.constants)
-              dump_constant(out, constant, 2);
-          }
-        },
-        item);
-  }
-  return out.str();
-}
-
+std::string dump(const Crate &crate) { return Printer(crate).print(crate); }
 } // namespace rx::ast
