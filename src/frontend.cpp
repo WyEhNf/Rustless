@@ -63,12 +63,12 @@ Span merge(Span first, Span second) {
 // AstBuilder consumes only generated parser contexts; it never reparses tokens.
 class AstBuilder {
 public:
-  explicit AstBuilder(const std::vector<std::string> &rule_names)
-      : rule_names_(rule_names) {}
+  AstBuilder(const std::vector<std::string> &rule_names, std::string_view source)
+      : rule_names_(rule_names), source_(source) {}
 
-  std::shared_ptr<ast::Crate>
+  std::unique_ptr<ast::Crate>
   build(rxgrammar::RxParser::CrateContext *context) {
-    auto crate = std::make_shared<ast::Crate>();
+    auto crate = std::make_unique<ast::Crate>(std::string(source_));
     stamp(*crate, context);
     for (auto *item : context->item()) {
       if (item->useDeclaration())
@@ -637,93 +637,103 @@ private:
                            std::string(name));
   }
 
+  ast::UseTree build_use_tree(rxgrammar::RxParser::UseTreeContext *context) {
+    ast::UseTree tree;
+    stamp(tree, context);
+    tree.prefix.span = source_span(context);
+    tree.prefix.root = context->getStart()->getText() == "::"
+        ? ast::PathRoot::Absolute : ast::PathRoot::Relative;
+    if (auto *path = context->usePath()) {
+      tree.prefix.span = source_span(path);
+      for (auto *segment : path->usePathSegment()) {
+        if (segment->identifier()) tree.prefix.segments.emplace_back(identifier(segment->identifier()));
+        else tree.prefix.segments.emplace_back(ast::UseKeywordName{
+            segment->SELF_VALUE() ? ast::UseKeyword::Self :
+            segment->SUPER() ? ast::UseKeyword::Super : ast::UseKeyword::Crate,
+            source_span(segment)});
+      }
+    }
+    if (context->STAR()) tree.target = ast::GlobImport{};
+    else if (context->LBRACE()) {
+      ast::GroupImport group;
+      for (auto *child : context->useTree()) group.children.push_back(build_use_tree(child));
+      tree.target = std::move(group);
+    } else {
+      ast::NameImport name;
+      if (context->identifier()) name.alias.emplace(identifier(context->identifier()));
+      else if (context->UNDERSCORE()) name.alias.emplace(ast::UnderscoreAlias{
+          token_span(context->UNDERSCORE()->getSymbol())});
+      tree.target = std::move(name);
+    }
+    return tree;
+  }
   ast::Use build_use(rxgrammar::RxParser::UseDeclarationContext *context) {
-    ast::Use use;
+    ast::Use use{{}, build_use_tree(context->useTree())};
     stamp(use, context);
-    use.text = context->useTree()->getText();
     return use;
   }
-
-  ast::Parameter
-  build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
-    ast::Parameter parameter;
+  ast::Parameter build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
+    ast::Parameter parameter{{}, binding(context->identifierBinding()), build_type(context->typeRef())};
     stamp(parameter, context);
-    parameter.name = context->identifierBinding()->identifier()->getText();
-    parameter.is_mutable = context->identifierBinding()->MUT() != nullptr;
-    parameter.type = build_type(context->typeRef());
     return parameter;
   }
-
-  ast::Function
-  build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
-    ast::Function function;
-    stamp(function, context);
-    function.name = context->identifier()->getText();
-    function.lifetime_parameters =
-        lifetime_parameters(context->genericParams());
+  ast::Function build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
+    ast::FunctionSignature signature;
     if (auto *parameters = context->functionParameters()) {
       if (auto *self = parameters->selfParam()) {
-        function.has_self = true;
-        function.self_by_ref = self->AMP() != nullptr;
-        function.self_mutable = self->MUT() != nullptr;
+        ast::SelfParam receiver;
+        stamp(receiver, self);
+        if (self->AMP()) {
+          std::optional<ast::LifetimeName> name;
+          if (self->lifetime()) name = lifetime(self->lifetime());
+          receiver.data = ast::ReferenceSelf{mutability(self->MUT() != nullptr), std::move(name)};
+        } else receiver.data = ast::ValueSelf{mutability(self->MUT() != nullptr)};
+        signature.receiver = std::move(receiver);
       }
-      for (auto *parameter : parameters->functionParam())
-        function.parameters.push_back(build_parameter(parameter));
+      for (auto *parameter : parameters->functionParam()) signature.parameters.push_back(build_parameter(parameter));
     }
-    function.result = context->typeRef() ? build_type(context->typeRef())
-                                         : unit_type(context);
-    function.body = build_block(context->blockExpression());
+    if (context->typeRef()) signature.return_annotation.emplace(build_type(context->typeRef()));
+    ast::Function function{{}, identifier(context->identifier()), build_generics(context->genericParams()),
+        std::move(signature), build_where(context->whereClause()), build_block(context->blockExpression())};
+    stamp(function, context);
     return function;
   }
-
-  ast::Struct
-  build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
-    ast::Struct structure;
+  ast::Struct build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
+    ast::Struct structure{{}, identifier(context->identifier()), {},
+        build_generics(context->genericParams()), build_where(context->whereClause()), {}};
     stamp(structure, context);
-    structure.name = context->identifier()->getText();
-    structure.lifetime_parameters =
-        lifetime_parameters(context->genericParams());
-    for (auto *attribute : context->outerAttribute())
-      for (auto *derive : attribute->deriveName())
-        structure.derives.push_back(derive->getText());
-    for (auto *field_context : context->structField()) {
-      ast::StructField field;
-      stamp(field, field_context);
-      field.name = field_context->identifier()->getText();
-      field.type = build_type(field_context->typeRef());
-      structure.fields.push_back(std::move(field));
+    for (auto *attribute : context->outerAttribute()) {
+      ast::DeriveAttribute value{source_span(attribute), {}};
+      for (auto *name : attribute->deriveName())
+        value.names.push_back({ast::derive_kind(name->getText()), source_span(name)});
+      structure.attributes.push_back(std::move(value));
+    }
+    for (auto *field : context->structField()) {
+      ast::StructField value{{}, identifier(field->identifier()), build_type(field->typeRef())};
+      stamp(value, field);
+      structure.fields.push_back(std::move(value));
     }
     return structure;
   }
-
-  ast::Constant
-  build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
-    ast::Constant constant;
-    stamp(constant, context);
-    constant.name = context->identifier()->getText();
-    constant.type = build_type(context->typeRef());
-    constant.value = build_constant(context->constValue());
-    return constant;
+  ast::Constant build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
+    ast::Constant value{{}, identifier(context->identifier()), build_type(context->typeRef()),
+        build_constant(context->constValue())};
+    stamp(value, context);
+    return value;
   }
-
   ast::Impl build_impl(rxgrammar::RxParser::InherentImplContext *context) {
-    ast::Impl implementation;
-    stamp(implementation, context);
-    implementation.lifetime_parameters =
-        lifetime_parameters(context->genericParams());
-    implementation.target = build_type(context->typeRef());
+    ast::Impl value{{}, build_generics(context->genericParams()), build_type(context->typeRef()),
+        build_where(context->whereClause()), {}};
+    stamp(value, context);
     for (auto *item : context->associatedItem()) {
-      if (item->functionDefinition())
-        implementation.functions.push_back(
-            build_function(item->functionDefinition()));
-      else
-        implementation.constants.push_back(
-            build_constant(item->constantItem()));
+      if (item->functionDefinition()) value.members.emplace_back(build_function(item->functionDefinition()));
+      else value.members.emplace_back(build_constant(item->constantItem()));
     }
-    return implementation;
+    return value;
   }
 
   const std::vector<std::string> &rule_names_;
+  std::string_view source_;
   std::uint32_t next_id_{1};
 };
 
@@ -803,7 +813,7 @@ FrontendResult parse_source(std::string_view source,
   if (diagnostics.has_errors())
     return {{}, false};
 
-  auto crate = AstBuilder(parser.getRuleNames()).build(tree);
+  auto crate = AstBuilder(parser.getRuleNames(), source).build(tree);
   return {std::move(crate), true};
 }
 

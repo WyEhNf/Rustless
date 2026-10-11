@@ -10,7 +10,7 @@
 namespace rx {
 
 struct FrontendResult {
-  std::shared_ptr<ast::Crate> crate;
+  std::unique_ptr<const ast::Crate> crate;
   // False means the generated parser rejected the token stream.
   bool syntax_ok{};
 };
