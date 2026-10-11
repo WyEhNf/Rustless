@@ -49,4 +49,29 @@ BinaryLowering SemanticBridge::binary(const ast::Expr &node,
   }();
   return {operation, *operand, *result};
 }
+BinaryOp SemanticBridge::compound(const ast::Expr &node,
+                                  const ast::CompoundAssignExpr &payload) const {
+  if (std::get_if<ast::CompoundAssignExpr>(&node.data) != &payload)
+    throw std::invalid_argument("assignment payload does not belong to this AST node");
+  (void)semantic_.expression(node);
+  auto target = semantic_.expression(*payload.target).type;
+  auto type = scalar_type(target);
+  if (!type || (*type != Type::I32 && *type != Type::I1))
+    throw std::invalid_argument("compound assignment requires a scalar integer or bool");
+  const bool sign = signed_type(target);
+  using A = ast::CompoundAssignOp;
+  switch (payload.op) {
+  case A::Add: return BinaryOp::Add;
+  case A::Sub: return BinaryOp::Sub;
+  case A::Mul: return BinaryOp::Mul;
+  case A::Div: return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
+  case A::Rem: return sign ? BinaryOp::SRem : BinaryOp::URem;
+  case A::BitAnd: return BinaryOp::And;
+  case A::BitOr: return BinaryOp::Or;
+  case A::BitXor: return BinaryOp::Xor;
+  case A::Shl: return BinaryOp::Shl;
+  case A::Shr: return sign ? BinaryOp::AShr : BinaryOp::LShr;
+  }
+  throw std::invalid_argument("invalid AST compound assignment operator");
+}
 } // namespace rx::ir
