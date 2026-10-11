@@ -12,7 +12,7 @@ namespace {
 std::string value(const Operand &operand) {
   return std::visit(ast::Overloaded{
     [](const LocalOperand &p) { return "%v" + std::to_string(p.id.value); },
-    [](const GlobalOperand &p) { return "@" + p.symbol; },
+    [](const GlobalOperand &p) { return "@" + symbol_name(p.symbol); },
     [&](const ConstantOperand &p) {
       return operand.type == Type::Ptr ? std::string("null") : std::to_string(p.bits);
     }}, operand.data);
@@ -96,7 +96,7 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
     },
     [&](const Instruction &, const Call &p) {
       out << "call " << type_name(p.result ? p.result->type : Type::Void)
-          << " @" << p.callee << '(';
+          << " @" << symbol_name(p.callee) << '(';
       for (std::size_t i = 0; i < p.arguments.size(); ++i) {
         if (i) out << ", ";
         out << typed(p.arguments[i]);
@@ -125,6 +125,25 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
 
 } // namespace
 
+std::string symbol_name(std::string_view name) {
+  auto initial = [](unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           c == '_' || c == '.' || c == '$' || c == '-';
+  };
+  bool plain = !name.empty() && initial(name.front());
+  for (unsigned char c : name)
+    plain &= initial(c) || (c >= '0' && c <= '9');
+  if (plain) return std::string(name);
+  std::string result = "\"";
+  constexpr std::string_view hex = "0123456789ABCDEF";
+  for (unsigned char c : name) {
+    if (c == '"' || c == '\\' || c < 32 || c >= 127) {
+      result += '\\'; result += hex[c >> 4]; result += hex[c & 15];
+    } else result += static_cast<char>(c);
+  }
+  return result + '"';
+}
+
 std::string print(const Module &module) {
   if (auto errors = verify(module); !errors.empty())
     throw std::invalid_argument("invalid IR in " + errors.front().function + ": " + errors.front().message);
@@ -134,7 +153,7 @@ std::string print(const Module &module) {
       << "target triple = \"riscv32-unknown-elf\"\n\n";
   for (const auto &declaration : module.declarations) {
     out << "declare " << type_name(declaration.result) << " @"
-        << declaration.name << '(';
+        << symbol_name(declaration.name) << '(';
     for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
       if (i)
         out << ", ";
@@ -144,7 +163,7 @@ std::string print(const Module &module) {
   }
   for (const auto &function : module.functions) {
     out << "\ndefine " << type_name(function.result) << " @"
-        << function.name << '(';
+        << symbol_name(function.name) << '(';
     for (std::size_t i = 0; i < function.parameters.size(); ++i) {
       if (i)
         out << ", ";
@@ -153,7 +172,10 @@ std::string print(const Module &module) {
     }
     out << ") {\n";
     for (const auto &block : function.blocks) {
-      out << "b" << block.id << ": ; " << block.name << '\n';
+      std::string comment = block.name;
+      std::replace(comment.begin(), comment.end(), '\n', ' ');
+      std::replace(comment.begin(), comment.end(), '\r', ' ');
+      out << "b" << block.id << ": ; " << comment << '\n';
       for (const auto &instruction : block.instructions)
         print_instruction(out, instruction);
     }

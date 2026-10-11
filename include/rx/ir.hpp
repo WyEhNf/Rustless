@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -176,5 +177,6 @@ std::string type_name(Type type);
 bool is_value_type(Type type);
 unsigned integer_width(Type type);
 std::string print(const Module &module);
+std::string symbol_name(std::string_view name);
 
 } // namespace rx::ir
