@@ -440,73 +440,64 @@ private:
     return make_expr(primary, ast::UnitExpr{});
   }
 
-  ast::ExprPtr apply_call(ast::ExprPtr base,
-                          rxgrammar::RxParser::CallArgumentsContext *context) {
-    auto call = make_expr(ast::Expr::Kind::Call, context);
-    call->span = merge(base->span, source_span(context));
-    call->operands.push_back(std::move(base));
-    for (auto *argument : context->expression())
-      call->operands.push_back(build_expression(argument));
+  std::vector<ast::ExprPtr>
+  call_arguments(rxgrammar::RxParser::CallArgumentsContext *context) {
+    std::vector<ast::ExprPtr> values;
+    for (auto *value : context->expression()) values.push_back(build_expression(value));
+    return values;
+  }
+  ast::ExprPtr apply_call(ast::ExprPtr base, rxgrammar::RxParser::CallArgumentsContext *context) {
+    auto span = merge(base->span, source_span(context));
+    auto call = make_expr(context, ast::CallExpr{std::move(base), call_arguments(context)});
+    call->span = span;
     return call;
   }
-
-  ast::ExprPtr apply_dot(ast::ExprPtr base,
-                         rxgrammar::RxParser::DotSuffixContext *context) {
+  ast::ExprPtr apply_dot(ast::ExprPtr base, rxgrammar::RxParser::DotSuffixContext *context) {
+    auto span = merge(base->span, source_span(context));
     if (!context->callArguments()) {
-      auto field = make_expr(ast::Expr::Kind::Field, context,
-                             context->identifier()->getText());
-      field->span = merge(base->span, source_span(context));
-      field->operands.push_back(std::move(base));
+      auto field = make_expr(context, ast::FieldExpr{std::move(base), identifier(context->identifier())});
+      field->span = span;
       return field;
     }
-    auto method =
-        make_expr(ast::Expr::Kind::MethodCall, context,
-                  context->pathExprSegment()->pathIdentSegment()->getText());
-    method->span = merge(base->span, source_span(context));
-    append_generic_arguments(method->type_arguments,
-                             context->pathExprSegment()->genericArgs());
-    method->operands.push_back(std::move(base));
-    for (auto *argument : context->callArguments()->expression())
-      method->operands.push_back(build_expression(argument));
+    auto *segment = context->pathExprSegment();
+    auto method = make_expr(context, ast::MethodCallExpr{
+        std::move(base), identifier(segment->pathIdentSegment()),
+        build_arguments(segment->genericArgs()), call_arguments(context->callArguments())});
+    method->span = span;
     return method;
   }
-
-  ast::ExprPtr
-  apply_postfix(ast::ExprPtr base,
-                rxgrammar::RxParser::PostfixSuffixContext *context) {
-    if (context->callArguments())
-      return apply_call(std::move(base), context->callArguments());
-    if (context->dotSuffix())
-      return apply_dot(std::move(base), context->dotSuffix());
-    auto index = make_expr(ast::Expr::Kind::Index, context);
-    index->span = merge(base->span, source_span(context));
-    index->operands.push_back(std::move(base));
-    index->operands.push_back(build_expression(context->expression()));
+  ast::ExprPtr apply_postfix(ast::ExprPtr base, rxgrammar::RxParser::PostfixSuffixContext *context) {
+    if (context->callArguments()) return apply_call(std::move(base), context->callArguments());
+    if (context->dotSuffix()) return apply_dot(std::move(base), context->dotSuffix());
+    auto span = merge(base->span, source_span(context));
+    auto index = make_expr(context, ast::IndexExpr{std::move(base), build_expression(context->expression())});
+    index->span = span;
     return index;
   }
 
   ast::ExprPtr build_postfix(ParseContext *context) {
-    ast::ExprPtr result;
     // Context order preserves the source order of a chained postfix expression.
+    std::optional<ast::ExprPtr> result;
     for (auto *child : context->children) {
       auto *child_context = as_context(child);
       if (!child_context)
         continue;
       const auto name = rule(child_context);
       if (!result) {
-        result = build_expression(child_context);
+        result.emplace(build_expression(child_context));
       } else if (name == "postfixSuffix") {
         result = apply_postfix(
-            std::move(result),
+            std::move(*result),
             static_cast<rxgrammar::RxParser::PostfixSuffixContext *>(
                 child_context));
       } else if (name == "dotSuffix") {
-        result = apply_dot(std::move(result),
+        result = apply_dot(std::move(*result),
                            static_cast<rxgrammar::RxParser::DotSuffixContext *>(
                                child_context));
       }
     }
-    return result;
+    if (!result) throw std::logic_error("missing postfix base");
+    return std::move(*result);
   }
 
   ast::ExprPtr build_unary(ParseContext *context) {
