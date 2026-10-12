@@ -68,9 +68,9 @@ fn main() {
       std::get<rx::ast::LetStmt>(main.body->statements[1]->data).initializer;
   const auto &borrow = rx::ast::unparen(initializer);
   for (const auto &fact : paren_semantics.data().expressions) {
-    if (fact.node == initializer->id)
+    if (fact.node == borrow->id)
       assert(fact.adjustments.empty());
-    if (fact.node == borrow->id) {
+    if (fact.node == initializer->id) {
       assert(fact.adjustments.size() == 1);
       assert(fact.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
     }
