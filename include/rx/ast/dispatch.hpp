@@ -67,6 +67,23 @@ struct Coverage<Visitor, Owner,
     : VisitorCoverage<Visitor, Owner,
                       std::decay_t<decltype(payload(
                           std::declval<const Owner &>()))>> {};
+
+template <class Owner, class Payload, class Visitor>
+decltype(auto) dispatch_payload(const Owner &node, const Payload &value,
+                                Visitor &visitor) {
+  return std::invoke(visitor, node, value);
+}
+
+template <class Owner, class... Payloads, class Visitor>
+decltype(auto) dispatch_payload(const Owner &node,
+                                const std::variant<Payloads...> &value,
+                                Visitor &visitor) {
+  return std::visit(
+      [&](const auto &data) -> decltype(auto) {
+        return std::invoke(visitor, node, data);
+      },
+      value);
+}
 }
 
 template <class Owner>
@@ -75,47 +92,43 @@ inline constexpr bool SyntaxRoot = detail::RootType<std::decay_t<Owner>>::value;
 template <class Visitor, class Owner>
 inline constexpr bool ExhaustiveVisitor = detail::Coverage<Visitor, Owner>::value;
 
-template <class T, class V>
-  requires detail::SyntaxOwners::contains<T> && ExhaustiveVisitor<V, T>
-decltype(auto) visit(const T &node, V &&visitor) {
+template <class Owner, class Visitor,
+          std::enable_if_t<detail::SyntaxOwners::contains<Owner> &&
+                               ExhaustiveVisitor<Visitor, Owner>,
+                           int> = 0>
+decltype(auto) visit(const Owner &node, Visitor &&visitor) {
   const auto &value = detail::payload(node);
-  if constexpr (requires {
-                  std::variant_size<
-                      std::remove_cvref_t<decltype(value)>>::value;
-                }) {
-    return std::visit(
-        [&](const auto &p) -> decltype(auto) {
-          return std::invoke(visitor, node, p);
-        },
-        value);
-  } else {
-    return std::invoke(visitor, node, value);
-  }
+  return detail::dispatch_payload(node, value, visitor);
 }
 
 namespace detail {
-template <class V, class... Ts> struct Coverage<V, std::variant<Ts...>> {
-  static consteval bool compatible() {
-    if constexpr ((ExhaustiveVisitor<V, Ts> && ...)) {
-      using First = std::variant_alternative_t<0, std::variant<Ts...>>;
+template <class Visitor, class... Owners>
+struct Coverage<Visitor, std::variant<Owners...>, void> {
+  static constexpr bool compatible() {
+    constexpr bool all_covered =
+        std::conjunction_v<Coverage<Visitor, Owners>...>;
+    if constexpr (all_covered) {
+      using FirstOwner =
+          std::variant_alternative_t<0, std::variant<Owners...>>;
       using Result =
-          decltype(visit(std::declval<const First &>(), std::declval<V &>()));
-      return (std::same_as<Result, decltype(visit(std::declval<const Ts &>(),
-                                                  std::declval<V &>()))> &&
-              ...);
+          decltype(visit(std::declval<const FirstOwner &>(),
+                         std::declval<Visitor &>()));
+      return std::conjunction_v<std::is_same<
+          Result, decltype(visit(std::declval<const Owners &>(),
+                                 std::declval<Visitor &>()))>...>;
     }
     return false;
   }
   static constexpr bool value = compatible();
 };
-} // namespace detail
+}
 
-// Item, ImplMember and WherePredicate select their own concrete owner.
-template <class... Ts, class V>
-  requires ExhaustiveVisitor<V, std::variant<Ts...>>
-decltype(auto) visit(const std::variant<Ts...> &nodes, V &&visitor) {
+template <class... Owners, class Visitor,
+          std::enable_if_t<ExhaustiveVisitor<Visitor, std::variant<Owners...>>,
+                           int> = 0>
+decltype(auto) visit(const std::variant<Owners...> &nodes, Visitor &&visitor) {
   return std::visit(
       [&](const auto &node) -> decltype(auto) { return visit(node, visitor); },
       nodes);
 }
-} // namespace rx::ast
+}
