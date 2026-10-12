@@ -7,9 +7,7 @@
 
 namespace rx::ast {
 namespace detail {
-template <class Owner> const Owner &payload(const Owner &node) {
-  return node;
-}
+template <class Owner> const Owner &payload(const Owner &node) { return node; }
 inline const auto &payload(const Expr &node) { return node.data; }
 inline const auto &payload(const TypeSyntax &node) { return node.data; }
 inline const auto &payload(const Stmt &node) { return node.data; }
@@ -32,8 +30,8 @@ struct VisitorCoverage<Visitor, Owner, std::variant<Payloads...>> {
       using Result =
           std::invoke_result_t<Visitor &, const Owner &, const FirstPayload &>;
       return std::conjunction_v<
-          std::is_same<Result, std::invoke_result_t<
-                                   Visitor &, const Owner &, const Payloads &>>...>;
+          std::is_same<Result, std::invoke_result_t<Visitor &, const Owner &,
+                                                    const Payloads &>>...>;
     }
     return false;
   }
@@ -57,16 +55,16 @@ template <class Owner>
 struct RootType : std::bool_constant<SyntaxOwners::contains<Owner>> {};
 template <class... Owners>
 struct RootType<std::variant<Owners...>>
-    : std::conjunction<std::bool_constant<SyntaxOwners::contains<Owners>>...> {};
+    : std::conjunction<std::bool_constant<SyntaxOwners::contains<Owners>>...> {
+};
 
 template <class Visitor, class Owner, class Enable>
 struct Coverage : std::false_type {};
 template <class Visitor, class Owner>
-struct Coverage<Visitor, Owner,
-                std::enable_if_t<SyntaxOwners::contains<Owner>>>
-    : VisitorCoverage<Visitor, Owner,
-                      std::decay_t<decltype(payload(
-                          std::declval<const Owner &>()))>> {};
+struct Coverage<Visitor, Owner, std::enable_if_t<SyntaxOwners::contains<Owner>>>
+    : VisitorCoverage<
+          Visitor, Owner,
+          std::decay_t<decltype(payload(std::declval<const Owner &>()))>> {};
 
 template <class Owner, class Payload, class Visitor>
 decltype(auto) dispatch_payload(const Owner &node, const Payload &value,
@@ -90,7 +88,8 @@ template <class Owner>
 inline constexpr bool SyntaxRoot = detail::RootType<std::decay_t<Owner>>::value;
 
 template <class Visitor, class Owner>
-inline constexpr bool ExhaustiveVisitor = detail::Coverage<Visitor, Owner>::value;
+inline constexpr bool ExhaustiveVisitor =
+    detail::Coverage<Visitor, Owner>::value;
 
 template <class Owner, class Visitor,
           std::enable_if_t<detail::SyntaxOwners::contains<Owner> &&
@@ -108,14 +107,12 @@ struct Coverage<Visitor, std::variant<Owners...>, void> {
     constexpr bool all_covered =
         std::conjunction_v<Coverage<Visitor, Owners>...>;
     if constexpr (all_covered) {
-      using FirstOwner =
-          std::variant_alternative_t<0, std::variant<Owners...>>;
-      using Result =
-          decltype(visit(std::declval<const FirstOwner &>(),
-                         std::declval<Visitor &>()));
-      return std::conjunction_v<std::is_same<
-          Result, decltype(visit(std::declval<const Owners &>(),
-                                 std::declval<Visitor &>()))>...>;
+      using FirstOwner = std::variant_alternative_t<0, std::variant<Owners...>>;
+      using Result = decltype(visit(std::declval<const FirstOwner &>(),
+                                    std::declval<Visitor &>()));
+      return std::conjunction_v<
+          std::is_same<Result, decltype(visit(std::declval<const Owners &>(),
+                                              std::declval<Visitor &>()))>...>;
     }
     return false;
   }
