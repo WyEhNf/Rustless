@@ -423,3 +423,467 @@ if (const auto found = impl_->types.find(key);
 
 \paragraph{本章小结与下一章。}
 类型语法保存写法，语义类型保存可比较的含义。具体载荷和受控构造限制了非法形状，不可变性保证已有判断不会被查询者修改，唯一化管理重复类型。预期类型与常量补足局部上下文和编译时知识。下一章将在这些类型之外，继续解释表达式的存储位置、可变权限和有序转换。
+
+\chapter{表达式规则、存储位置与隐式转换}
+\label{chap:semantic-expressions}
+\section*{本章导读}
+知道 \lstinline[language=Rustless]|x| 的类型是 i32，并不能判断 \lstinline[language=Rustless]|x = 2| 是否合法：还需要知道它是否代表一个位置，以及是否允许修改。本章把类型判断扩展为表达式属性判断，介绍位置、可变性和转换序列。随后讨论为何普通运算与复合赋值应共享规则，以及为何接收者的转换必须与表达式结果的转换分开。读者将看到，优雅的表达式设计不仅有清楚的节点类型，还应当把已经作出的语义决定保存为下一阶段能够直接使用的知识。
+
+\section{具体载荷与类型规则的组织}
+可以用 $\Gamma\vdash e:T$ 表示“在环境 $\Gamma$ 中，表达式 $e$ 具有类型 $T$”。这里的环境包含局部绑定、声明签名、当前函数和循环上下文。对于整数加法，规则需要先知道两个子表达式的类型；对于函数调用，规则需要知道被调用函数的签名。语法形状决定采用哪种规则，环境则为规则提供必要信息。
+
+当前 \texttt{check\_expr} 使用 AST Visitor 将具体载荷交给相应规则。下面是 \texttt{src/semantic.cpp} 中两个相邻分支的实际摘录：
+\begin{lstlisting}[language=C++]
+[&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
+  return {ty(Ty::Kind::Bool)};
+},
+[&](const ast::Expr &, const ast::UnitExpr &) -> ExprInfo {
+  return {ty(Ty::Kind::Unit)};
+},
+\end{lstlisting}
+布尔载荷可以直接得到 Bool；Unit 载荷可以直接得到 Unit。二元、数组、调用等更复杂载荷则调用专门函数递归处理子节点。这些分支共同返回 \texttt{ExprInfo}，统一入口随后记录结果。Visitor 的覆盖检查要求每种载荷得到处理，但不会自动证明其类型规则正确。结构覆盖与语义正确是两个层次。
+
+这种分工使新增规则较容易定位。若语言新增一种表达式，AST 的形状和 Visitor 的覆盖要求会提醒读者补上处理；若已有加法规则改变，则应修改负责运算含义的规则，而无需把通用遍历器变成类型检查器。遍历机制与领域规则相互配合，同时保持各自职责清楚。
+
+下图展示具体载荷如何选择检查规则，以及规则得到的属性如何按 \texttt{NodeId} 保存。它把 Visitor、临时分析结果和最终事实三者的作用分开。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=42mm}]
+\node (expr) {Expr：具体语法载荷};
+\node (rule) [below=of expr] {Visitor 选择对应规则};
+\node (info) [right=17mm of rule] {ExprInfo：类型与属性};
+\node (facts) [above=of info] {按 NodeId 保存表达式事实};
+\draw[->] (expr) -- (rule);
+\draw[->] (rule) -- (info);
+\draw[->] (info) -- (facts);
+\end{tikzpicture}
+\caption{表达式规则与事实记录}
+\end{figure}
+
+\section{值与 place：能否定位到存储位置}
+\begin{lstlisting}[language=Rustless]
+struct Packet { count: i32, bits: [bool; 2] }
+fn main() {
+    let mut packet = Packet { count: 1, bits: [false, false] };
+    packet.count = 2;
+    packet.bits[1] = true;
+    printInt(packet.count + 1);
+}
+\end{lstlisting}
+\lstinline[language=Rustless]|packet.count| 与 \lstinline[language=Rustless]|packet.bits[1]| 表示可以定位到的存储位置，称为 place 表达式。\lstinline[language=Rustless]|packet.count + 1| 表示计算结果。两者都可以有类型，却对赋值具有不同意义。错误例子 \lstinline[language=Rustless]|(1 + 2) = 3| 的问题是左侧没有可写入的目标位置。
+
+位置与可变性也不同。\lstinline[language=Rustless]|let x = 1;| 建立的 \lstinline[language=Rustless]|x| 是位置，却不允许直接赋值。因而 \texttt{is\_place} 与 \texttt{is\_mutable} 需要分别表达。\texttt{access\_locked} 进一步记录访问路径是否已经经过不能再恢复写权限的共享层。
+
+\texttt{check\_assignment\_target} 的实际代码体现了这两个问题的顺序：
+\begin{lstlisting}[language=C++]
+void check_assignment_target(const ast::ExprPtr &target,
+                             const ExprInfo &destination) {
+  if (!destination.is_place)
+    report(target->span, "assignment destination is not a place");
+  else if (!destination.is_mutable)
+    report(target->span, "assignment destination is immutable");
+}
+\end{lstlisting}
+先确认目标是位置，再确认权限。这也让诊断能够指出真正的原因。把二者合成一个名为“可赋值”的布尔标志，可能足以阻止错误，却会丢失字段访问、借用和方法接收者需要继续使用的区别。
+
+下图追踪字段和索引组成的位置路径，并标出共享引用如何限制写权限。上方是直接从可变对象进行投影，下方是从共享引用开始的访问；字段形状相同不意味着权限相同。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=9mm and 12mm,
+ every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (p) {可变 packet};
+\node (field) [right=of p] {字段 bits};
+\node (idx) [right=of field] {元素 1：可写位置};
+\node (r) [below=13mm of p] {共享引用 \texttt{\&packet}};
+\node (rf) [right=of r] {解引用后权限受限};
+\node (ri) [right=of rf] {元素 1：只读位置};
+\draw[->] (p) -- (field);
+\draw[->] (field) -- (idx);
+\draw[->] (r) -- (rf);
+\draw[->] (rf) -- (ri);
+\end{tikzpicture}
+\caption{位置投影与访问权限}
+\end{figure}
+
+\section{绑定可变性与引用可变性}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let mut x = 1;
+    let r = &mut x;
+    *r = 2;
+    printInt(x);
+}
+\end{lstlisting}
+这里 \lstinline[language=Rustless]|r| 的绑定没有 \lstinline[language=Rustless]|mut|，但它保存的是可变引用。因此不可直接把另一个引用赋给 \lstinline[language=Rustless]|r|，却可以经由 \lstinline[language=Rustless]|*r| 修改所指对象。绑定是否可替换与所指对象是否可修改，属于两个不同层面。
+
+反过来，一个可变绑定保存共享引用，并不会使共享引用所指对象变得可写。若访问路径已经经过共享引用，后续遇到某个可变引用也不能随意撤销先前的限制。字段和索引规则据此传播访问属性，\texttt{check\_borrow} 则在建立可变引用时检查目标权限。
+
+Box 与引用也应分别解释。Box 表示拥有间接存储的容器，显式 \lstinline[language=Rustless]|*boxed| 得到其中的位置；共享引用限制访问权，不能只因为二者后端都可能表现为指针而套用同一权限规则。机器表示相似，不代表源语言含义相同。
+
+\section{相等、可转换与有序转换步骤}
+\begin{lstlisting}[language=Rustless]
+fn read(value: &i32) -> i32 { *value }
+fn main() {
+    let mut x = 1;
+    let r: &mut i32 = &mut x;
+    printInt(read(r));
+}
+\end{lstlisting}
+可变引用与共享引用不是严格相同的类型，但在这个调用位置可以把可变引用作为共享引用使用。类型相等、是否允许使用以及如何实现这种使用，需要三个分别明确的回答。\texttt{same\_type} 回答严格相等，\texttt{coercible} 回答上下文兼容，\texttt{Adjustment} 保存所需步骤。
+
+当前 \texttt{include/rx/semantic\_operation.hpp} 的定义为：
+\begin{lstlisting}[language=C++]
+struct Adjustment {
+  enum class Kind {
+    Dereference, BorrowShared, BorrowMutable,
+    MutToShared, NeverToAny
+  } kind{Kind::Dereference};
+  SemanticTypePtr target;
+};
+struct OperandSemantics {
+  ast::NodeId node;
+  SemanticTypePtr effective_type;
+  std::vector<Adjustment> adjustments;
+};
+\end{lstlisting}
+表达式的内在类型说明它本身产生什么；一次使用的有效类型说明完成转换后，当前操作看到什么。转换序列按执行顺序排列，每一步保存完成后的目标类型。读取一个 \texttt{OperandSemantics}，后续过程就能从原始表达式沿这些步骤获得有效操作数，无需再猜测检查器剥离了几层引用。
+
+下图把隐式使用过程改写为有顺序的解引用和借用步骤，说明一个“可以转换”的布尔判断为何不够。图中的步骤用于说明顺序；实际是否允许该转换仍由当前子集规则决定。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=45mm}]
+\node (source) {原始表达式与内在类型};
+\node (deref) [below=of source] {Dereference：取得所指内容};
+\node (borrow) [right=17mm of deref] {BorrowShared：建立所需引用};
+\node (effective) [above=of borrow] {当前使用的有效类型};
+\draw[->] (source) -- (deref);
+\draw[->] (deref) -- (borrow);
+\draw[->] (borrow) -- (effective);
+\end{tikzpicture}
+\caption{转换序列与有效操作数}
+\end{figure}
+
+转换链也可以逐步验证。解引用步骤的来源必须是 Ref 或 Box，目标必须是其元素；共享借用的目标必须是相应共享 Ref；可变转共享不能改变所指类型；Never 转换的来源必须确实是 Never。最终类型还必须等于保存的有效类型。这比仅验证每个目标类型非空更强，因为合法的类型对象也可能被排列成没有含义的转换序列。
+
+Rust 编译器的 \href{https://rustc-dev-guide.rust-lang.org/hir-typeck/coercions.html}{转换设计说明}介绍了检查阶段记录 adjustments、后续表示将其显式化的思路。Rustless 采用相同的分工原则，并只实现当前子集需要的转换类别。
+
+\section{运算符怎样选择其类型规则}
+运算符并不只表示一个语法标记。相同的除法写法要结合类型选择带符号或无符号含义；相等比较可能是标量比较，也可能是逐字段或逐元素比较；逻辑运算还规定右侧是否执行。下面按类别归纳当前设计。
+\begin{longtable}{p{0.20\textwidth}p{0.32\textwidth}p{0.39\textwidth}}
+\toprule
+类别 & 示例 & 必须保存的含义 \\
+\midrule
+算术 & \lstinline[language=Rustless]|x + y|、\lstinline[language=Rustless]|x / y| & 同类整数操作数、运算类别与结果类型。\\
+位运算 & \lstinline[language=Rustless]|x & y|、\lstinline[language=Rustless]|a ^ b| & 匹配的整数或 bool；不能因此允许 bool 加法。\\
+移位 & \lstinline[language=Rustless]|x << count| & 整数操作数、左右方向与计数规范化规则。\\
+相等 & \lstinline[language=Rustless]|x == y| & 标量或结构相等，及 PartialEq 能力要求。\\
+排序 & \lstinline[language=Rustless]|x < y| & 匹配的有效标量与关系类别。\\
+短路 & \lstinline[language=Rustless]|ready && test()| & bool 操作数，右侧有条件执行。\\
+一元 & \lstinline[language=Rustless]|-x|、\lstinline[language=Rustless]|!flag|、\lstinline[language=Rustless]|*r| & 取负、取反或显式解引用的具体含义。\\
+转换 & \lstinline[language=Rustless]|x as u32| & 显式目标类型及允许的转换关系。\\
+\bottomrule
+\end{longtable}
+当前算术、位运算、移位和一元标量运算允许一层共享引用的自动解引用。因而 \lstinline[language=Rustless]|&x + &x| 可以形成整数加法，而不能据此推断任意层的 \lstinline[language=Rustless]|&&x + &x| 都被允许。排序比较按现行子集规则处理成对引用层，并保留左右引用可变性的限制。自动解引用的深度与权限是语言规则的一部分，不能为了让记录转换步骤更方便而扩大可接受语法。
+
+\texttt{ResolvedOperation} 将已决定的含义分成整数算术、位操作、移位、标量比较、结构相等和逻辑操作。它不直接保存 LLVM 操作码。这样，源语言规则可以独立于机器表示表达：移位保存计数策略，结构相等保持内容含义，短路保持控制流含义。后端再选择如何实现它们。
+
+\section{赋值与复合赋值}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let mut x = 8;
+    x += 2;
+    x -= 1;
+    x *= 3;
+    x /= 2;
+    x %= 5;
+    x &= 7;
+    x |= 1;
+    x ^= 2;
+    x <<= 1;
+    x >>= 1;
+    let mut flag = true;
+    flag &= false;
+}
+\end{lstlisting}
+十类复合赋值共享相应二元运算的类型要求，但还需要一个可写目标。赋值表达式本身产生 Unit；内部运算则产生将要写回目标的类型。当前 \texttt{compound} 事实保存内部运算结果类型，表达式事实保存 Unit，二者不应混为一项。
+
+复合赋值也不能总是把源码文字替换为 \lstinline[language=Rustless]|target = target + value|。若目标包含索引函数或其他有副作用的计算，重复定位目标可能重复执行这些计算。语义设计应保留“定位目标一次，读取旧值，完成运算，写回”的结构。具体求值顺序将在 lowering 章节展开，此处先明确这项必须延续的含义。
+
+\section{集中表达共同规则}
+假设普通加法只允许整数，复合赋值却只检查目标是“整数或 bool”。这会出现 \lstinline[language=Rustless]|b + false| 被拒绝，而 \lstinline[language=Rustless]|b += false| 被接受的矛盾。节点载荷再类型安全，也不能自动防止规则在不同函数中发生分歧。
+
+当前设计通过 \texttt{resolve\_operation} 统一选择运算类别，复合赋值先将自身运算符对应到二元运算符，然后使用同一规则。因此 bool 的位运算赋值可以被接受，bool 算术和移位赋值会被拒绝。这里的集中并不是建立一个接受所有节点的巨大函数，而是把真正相同的语言决定放在共同位置。
+
+下面是 \texttt{src/semantic\_operation.cpp} 中算术分支的节选：
+\begin{lstlisting}[language=C++]
+case A::Add: case A::Sub: case A::Mul: case A::Div: case A::Rem:
+  if (!integers || !equal) return {};
+  switch (op) {
+  case A::Add: return IntegerArithmetic{ArithmeticOp::Add};
+  case A::Sub: return IntegerArithmetic{ArithmeticOp::Sub};
+  case A::Mul: return IntegerArithmetic{ArithmeticOp::Mul};
+  case A::Div: return IntegerArithmetic{ArithmeticOp::Div};
+  default: return IntegerArithmetic{ArithmeticOp::Rem};
+  }
+\end{lstlisting}
+调用者仍负责环境、源码诊断和目标权限，共同函数负责运算类型与类别。这样的接口使新增运算规则容易找到，也让成功结果发布时可以检查保存的操作是否与 AST 运算符和有效类型一致。
+
+\section{输入转换与结果转换的不同范围}
+考虑 \lstinline[language=Rustless]|p.get() + 1|。方法 \lstinline[language=Rustless]|get| 可能需要先把 \lstinline[language=Rustless]|p| 借用为共享引用，但调用结果仍然是 i32。若把接收者的借用步骤放入调用结果的转换序列，后续加法就可能把 i32 误当成结构体引用。接收者转换与结果转换必须分别保存。
+
+当前 \texttt{ExpressionSemantics} 中，\texttt{adjustments} 只描述表达式结果在使用位置的转换；\texttt{receiver} 保存方法、字段和索引的输入转换；\texttt{binary}、\texttt{compound}、\texttt{unary} 保存相应运算的操作数使用事实。不同转换范围有各自的身份和有效类型，因此可以分别验证。
+
+括号是另一个容易混淆的地方。\lstinline[language=Rustless]|(x + y)| 的内层仍有二元操作事实，但外层括号不能复制一份“自己的二元操作”，因为外层载荷是 ParenExpr，操作数结构属于内层节点。当前检查器保留外层结果类型和可调用身份，同时清除不属于外层载荷的操作、接收者事实。形状与语义记录因此一一对应。
+
+\section{访问检查的边界}
+当前实现检查位置、引用可变性、共享层限制和容器的可变访问条件。它没有完整的移动状态、析构插入、别名借用冲突、区域推断和生命周期证明。因此，本章关于 \lstinline[language=Rustless]|&mut| 的说明不能被读作已经实现完整 Rust 借用检查器。
+
+若未来语言要求禁止同时存在的可变借用，需要先确定借用的有效区间以及哪些路径可能重叠，再选择合适的数据流表示。若要求 move 与 drop，则需要明确所有权转移和离开作用域时的行为。这些扩展与当前 place 信息有联系，却不是增加一个布尔字段就能完成。优雅的扩展首先要求规则清楚，其次才是表示与算法。
+
+\paragraph{本章小结与下一章。}
+表达式规则依赖类型，也依赖位置、访问权和使用上下文。具体载荷选择规则，有序转换记录步骤，已解析运算保持源语言含义，接收者转换与结果转换分开。下一章将这些局部判断放回数组、结构体、函数调用和控制流，说明它们怎样共同决定完整程序的类型。
+
+\chapter{声明、调用与控制流的类型}
+\label{chap:semantic-control}
+\section*{本章导读}
+数组元素、结构体字段、函数参数和条件分支都会向内部表达式提出类型要求。一个表达式还可能通过 return 或 break 结束当前路径，根本不在原位置产生正常结果。本章将前面的局部规则组合起来，介绍聚合值、递归能力、方法和内建调用，再用 Unit 与 Never 解释块、分支和循环。学习重点是这些信息如何相互连接，而不是逐个记忆检查函数的名字。
+
+\section{数组与重复数组}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let values: [i32; 2] = [1, 2];
+    let zeros: [i32; 3] = [0; 3];
+    let empty: [i32; 0] = [];
+    printInt(values[0] + zeros[0]);
+}
+\end{lstlisting}
+普通数组需要确定所有元素的共同类型和元素数量。已有注解可以提供元素预期类型；没有注解时，检查器尝试从已有元素得到合适的共同类型。空数组没有元素提供类型信息，因此需要外部上下文。长度属于数组类型，\lstinline[language=Rustless]|[i32; 2]| 与 \lstinline[language=Rustless]|[i32; 3]| 是不同类型。
+
+重复数组保存一个元素表达式和一个常量计数表达式。类型检查不仅确认计数可作为 usize，还检查重复元素满足 Copy 要求。不能因为 AST 只有一个元素节点，就认为生成代码时可以随意重复计算这个节点。语言必须明确初始化表达式的求值次数，以及重复的是值还是计算；后续转换要延续这个决定。
+
+当前数组规则在合并元素类型时可以记录必要转换，重复数组则查询元素能力。两者的载荷不同，因而各自的检查入口能够直接看到需要的信息。将它们都放进“操作数 vector 加一个 flag”的表示，会使计数、元素顺序与复制要求依赖额外约定。
+
+\section{结构体构造与三种字段顺序}
+\begin{lstlisting}[language=Rustless]
+struct Pair { left: i32, right: i32 }
+fn main() {
+    let p = Pair { right: 2, left: 1 };
+    printInt(p.left + p.right);
+}
+\end{lstlisting}
+构造检查要确认结构体存在、每个字段有效、没有重复字段、没有缺失字段，并用声明中的字段类型检查初始化表达式。字段初始化按源码顺序保存，却通过字段名字连接到声明。这使初始化书写顺序不必与字段声明顺序相同。
+
+这里有三个不同顺序。初始化源码顺序用于保留读者写下的表达式顺序；声明字段顺序用于保存类型定义；存储偏移则由布局规则决定。它们有联系，却不能让某个散列表的迭代顺序偶然承担三种职责。当前 \texttt{StructSemantics} 显式保存声明顺序：
+\begin{lstlisting}[language=C++]
+struct StructSemantics {
+  SymbolId symbol;
+  // Preserve declaration order for aggregate layout, not hash-table order.
+  std::vector<SymbolId> fields;
+};
+\end{lstlisting}
+下图把初始化出现顺序、声明字段顺序和存储偏移并列，说明三者服务于不同任务。例中两个 i32 字段的偏移只是当前布局的简单示意，后续章将系统说明对齐与填充。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 12mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=32mm}]
+\node (source) {初始化源码\par right，left};
+\node (decl) [right=of source] {字段声明\par left，right};
+\node (layout) [right=of decl] {存储位置\par left：0\par right：4};
+\draw[->] (source) -- node[above,draw=none] {名字对应} (decl);
+\draw[->] (decl) -- node[above,draw=none] {布局规则} (layout);
+\end{tikzpicture}
+\caption{字段顺序承担不同含义}
+\end{figure}
+
+\section{有限布局与递归能力}
+下面第一个声明是应当被拒绝的例子，第二个声明以间接层打断内嵌尺寸递归。
+\begin{lstlisting}[language=Rustless]
+// Invalid: a complete Bad must contain another complete Bad.
+struct Bad { next: Bad }
+// Indirection has a finite representation.
+struct Link { next: Box<Link> }
+\end{lstlisting}
+求 Bad 的尺寸需要先求其字段 Bad 的尺寸，从而没有有限终点。求 Link 的尺寸只需要保存 Box 的间接表示，不需要在同一对象里无限内嵌下一个 Link。当前布局合法性检查沿结构体和数组的内嵌边递归，引用、Box 等间接层不沿同一方式展开。
+
+下图区分内嵌边与间接边，解释有限布局检查为何不能沿所有引用一律展开。虚线边仍表示类型关联，但不代表在当前对象中内嵌完整对象。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=12mm,
+ every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (bad) {Bad};
+\node (field) [right=20mm of bad] {next：Bad};
+\node (link) [below=17mm of bad] {Link};
+\node (box) [right=20mm of link] {next：Box};
+\draw[->] (bad) -- (field);
+\draw[->] (field.north) to[bend right=30] (bad.north);
+\draw[->] (link) -- (box);
+\draw[->,dashed] (box.south) to[bend left=30] (link.south);
+\end{tikzpicture}
+\caption{内嵌递归与间接递归}
+\end{figure}
+
+派生能力也按字段递归判断：
+\begin{lstlisting}[language=Rustless]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pair { left: i32, right: i32 }
+fn main() {
+    let p = Pair { left: 1, right: 2 };
+    let q = p.clone();
+    let equal = p == q;
+}
+\end{lstlisting}
+当前 Copy 要求显式 Clone，Eq 要求显式 PartialEq。Box 与 Vec 不因其间接表示可复制就自动拥有 Copy；它们的内容能力参与 Clone 与相等判断。数组能力依赖元素能力，结构体能力依赖字段能力。此处实现的是固定的派生能力检查，并没有完整 trait 定义、用户实现选择或通用 trait solver。
+
+循环检测与能力递归还须区分。一个间接递归类型可以具有有限存储，但递归检查某种能力时仍需要处理再次访问。不能把“有限尺寸”直接理解为“所有能力都自动成立”。每一种递归算法都应明确自身沿哪些边展开，以及再次遇到节点时意味着什么。
+
+\section{函数签名与方法接收者}
+\begin{lstlisting}[language=Rustless]
+struct Counter { value: i32 }
+impl Counter {
+    fn new() -> Self { Self { value: 0 } }
+    fn add(&mut self, amount: i32) { self.value += amount; }
+    fn get(&self) -> i32 { self.value }
+}
+fn main() {
+    let mut c = Counter::new();
+    c.add(2);
+    printInt(c.get() + 1);
+}
+\end{lstlisting}
+普通函数调用按签名检查参数数量与类型。方法调用还需要解析接收者类型、寻找对应成员、形成所需 receiver，并检查可变访问。\lstinline[language=Rustless]|c.add(2)| 对应可变引用接收者，\lstinline[language=Rustless]|c.get()| 对应共享引用接收者。关联函数 \lstinline[language=Rustless]|Counter::new()| 没有 receiver，因此不应以对象点语法冒充方法调用。
+
+当前函数事实将 receiver 与普通参数分开：
+\begin{lstlisting}[language=C++]
+struct FunctionSemantics {
+  SymbolId symbol;
+  std::optional<ParameterSemantics> receiver;
+  std::vector<ParameterSemantics> parameters;
+  SemanticTypePtr result;
+};
+\end{lstlisting}
+这种分开保留源层的角色区别，后续 ABI 再决定接收者如何排入机器参数序列。直接在语义分析时把所有源参数揉成一个缺少身份的机器类型列表，会丢失诊断和一致性检查所需的信息。
+
+下图追踪方法符号、接收者转换与参数核对，展示一个已确定的调用应包含哪些知识。调用结果单独输出，不与接收者的借用步骤混合。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=43mm}]
+\node (syntax) {方法调用：c.add(2)};
+\node (target) [below=of syntax] {解析 Counter::add 身份};
+\node (recv) [right=17mm of target] {c 转为所需可变引用};
+\node (args) [above=of recv] {核对 amount：i32};
+\node (result) [below=of recv] {调用结果：Unit};
+\draw[->] (syntax) -- (target);
+\draw[->] (target) -- (recv);
+\draw[->] (recv) -- (args);
+\draw[->] (args.east) to[bend left=25] (result.east);
+\end{tikzpicture}
+\caption{方法调用的语义决定}
+\end{figure}
+
+\section{Box、Vec 与具体的调用目标}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let boxed = Box::<i32>::new(1);
+    let copy = boxed.clone();
+    let equal = boxed == copy;
+    let mut values = Vec::<i32>::new();
+    values.push(*boxed);
+    let n: usize = values.len();
+    printInt(values.remove(0));
+}
+\end{lstlisting}
+内建构造需要明确元素类型。\lstinline[language=Rustless]|push| 与 \lstinline[language=Rustless]|remove| 需要可变容器访问；\lstinline[language=Rustless]|len| 和 \lstinline[language=Rustless]|is_empty| 只查询容器；\lstinline[language=Rustless]|clone| 需要相应能力。Box 的 clone 接收者应是 Box 自身，而不是为了查找方法就把 Box 完全解引用到 i32 后借用该整数。
+
+两个保存相同内容的 Box 是否相等，属于内容语义。它们的存储地址可以不同，但结构相等仍应根据所指内容判断。当前语义操作将这类比较表示为 \texttt{StructuralEquality}。后端可以决定调用辅助函数或递归生成比较，却不能仅因为 Box 以指针表示，就生成地址相等比较。
+
+调用目标也有不同来源。用户函数具有 \texttt{SymbolId}，内建操作具有 \texttt{BuiltinId}，当前定义如下：
+\begin{lstlisting}[language=C++]
+struct FunctionTarget { SymbolId symbol; };
+struct BuiltinTarget { BuiltinId builtin; };
+using CallTarget = std::variant<FunctionTarget, BuiltinTarget>;
+\end{lstlisting}
+内建身份说明语言操作的类别，不伪装成某个没有源码声明的用户符号。I/O 的 \lstinline[language=Rustless]|getInt|、\lstinline[language=Rustless]|printInt|、\lstinline[language=Rustless]|printlnInt| 也通过这种身份解释签名。展示名称可以保留别名，后续转换依据已确定的类别选择运行时操作。
+
+当前函数项别名也保留原函数身份：\lstinline[language=Rustless]|let g = f; g();| 的局部符号是 g，调用目标却是 f。这里并没有实现任意函数指针签名与动态间接调用。将来支持这类调用时，应当增加相应的类型和目标表示，不应把任意函数值都重新解释成名称字符串。
+
+\section{块的 tail、Unit 与 if 结果}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let value: i32 = { let x = 1; x + 1 };
+    let nothing: () = { printInt(value); };
+    let chosen: i32 = if true { 1 } else { 2 };
+    printInt(chosen);
+}
+\end{lstlisting}
+块的尾表达式没有分号时，提供块的结果；带分号的表达式作为语句执行，通常不提供该值。没有尾表达式的正常块结果为 Unit。AST 已将语句序列与可选 tail 分开，语义规则因而能够直接表达这个区别。
+
+if 的条件需要 bool。带 else 时，两条正常分支需要形成共同结果类型，可以依据预期类型或允许的转换得到一致含义。没有 else 的 if 在条件为假时仍会正常继续，却没有另一个值，因此正常结果要求 Unit。当前共同类型选择基于可转换关系，不是为任意类型层次求一般最小上界的复杂算法。
+
+若一条分支没有正常结果，它不需要提供与另一条分支相同的值。这将把我们带到 Never。这里也应注意，类型检查仍然可以检查源码中的两条分支；运行时代码生成只执行实际选择的那一条。
+
+\section{Never 与函数退出}
+\begin{lstlisting}[language=Rustless]
+fn select(flag: bool) -> i32 {
+    if flag { return 1; }
+    2
+}
+fn main() { printInt(select(false)); }
+\end{lstlisting}
+\lstinline[language=Rustless]|return 1| 检查返回值是否适合函数结果，然后离开函数。它不会在该表达式原来的位置正常产生一个值。因此这个表达式具有 Never，而不是 i32，也不是 Unit。i32 是函数交给调用者的结果类型，Never 是当前源码位置没有正常续行的描述。
+
+Unit 与 Never 的差别可以从执行行为理解：Unit 表示正常完成却不携带普通数据；Never 表示没有正常完成这一步的路径。后端 Void 则是机器接口中的“无普通返回值”表示。即使一个后端类型函数把 Unit 与 Never 都映射到 Void，控制流仍必须保留两者的区别，否则可能在 return 之后继续生成普通指令，或给合流点制造并不存在的输入。
+
+下图呈现 return 路径离开函数、正常分支到达结果的区别，解释 Never 如何影响共同类型。离开函数的边不参与下方的正常结果汇合。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=9mm and 17mm,
+ every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (cond) {检查 flag};
+\node (ret) [below left=of cond] {return 1：Never};
+\node (normal) [below right=of cond] {正常继续};
+\node (exit) [below=of ret] {函数退出};
+\node (value) [below=of normal] {尾表达式 2：i32};
+\draw[->] (cond) -- node[above,draw=none] {真} (ret);
+\draw[->] (cond) -- node[above,draw=none] {假} (normal);
+\draw[->] (ret) -- (exit);
+\draw[->] (normal) -- (value);
+\end{tikzpicture}
+\caption{发散路径与正常结果}
+\end{figure}
+
+\section{loop、while 与跳转上下文}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let answer: i32 = loop { break 42; };
+    let mut n = 0;
+    while n < 3 {
+        n += 1;
+        if n == 2 { continue; }
+        printInt(n);
+    }
+    printInt(answer);
+}
+\end{lstlisting}
+loop 的结果由离开它的 break 值决定。没有 break 的 loop 不会正常结束，因而结果是 Never。多个 break 的值需要满足共同结果要求，外部注解可以提供预期类型。break 表达式自身仍然是 Never，因为它离开当前路径；其携带值才成为循环的正常结果。
+
+while 的条件是 bool，循环整体正常结束时产生 Unit，因而不允许带有普通值的 break。continue 跳到最近相关循环的下一次迭代，不在原位置正常产生结果。当前分析器以循环上下文栈记录预期类型与 break 类型，并在进入和离开循环时维护这项信息。
+
+嵌套循环中，一个 break 必须归属正确循环；在循环之外出现 break 或 continue 则应报告错误。当前 while 条件还有明确的上下文边界：条件中的跳转只能针对在该条件内部建立的循环，而不能任意跳向包围的循环。这样的规则需要在条件检查前后处理循环上下文，不能只看是否存在某个全局“当前正在循环”的布尔值。
+
+\section{入口、整体声明与生命周期边界}
+当前可执行程序要求顶层 \lstinline[language=Rustless]|main|，其普通参数列表为空，结果为 Unit，并满足子集关于泛型参数的入口限制。重复参数、重复字段与重复关联成员也在声明检查中报告。入口规则属于程序整体要求，不是某个局部表达式的类型规则。
+
+生命周期和 where 语法仍需要准确限定。下面的生命周期写法可以被语法树保存：
+\begin{lstlisting}[language=Rustless]
+fn read<'a>(x: &'a i32) -> i32 { *x }
+fn main() { printInt(read(&1)); }
+\end{lstlisting}
+保存生命周期名字不代表当前类型检查已经证明引用存活时间。当前语义类型没有完整区域模型，where 类型约束没有获得完整语义解释。用户定义泛型声明也不能与 Box、Vec 的具体元素参数混为一谈。当前泛型声明语法主要保存生命周期参数，不能把它介绍为已经支持任意用户类型泛型。
+
+这些边界并不妨碍清楚的结构设计。保留源码语法可以为以后扩展提供位置与形状，语义结果则应明确哪些部分确实经过判断。下一章将说明这种区别怎样落实到成功结果的完整性检查中。
+
+\paragraph{本章小结与下一章。}
+聚合声明提供成员要求，函数签名提供参数与返回上下文，内建身份提供语言操作类别，控制流决定哪些路径会正常产生结果。有限布局、派生能力和访问权限都必须按自身含义处理递归与间接层。下一章将讨论怎样把这些判断保存为稳定的语义知识，使后续转换能够直接依赖它们。
