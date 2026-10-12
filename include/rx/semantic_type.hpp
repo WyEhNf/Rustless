@@ -106,4 +106,43 @@ private:
 
 bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right);
 std::string type_name(const SemanticTypePtr &type);
+
+template <class Payload> const Payload *get_if(const SemanticType &type) {
+  return std::get_if<Payload>(&type.data());
+}
+
+namespace detail {
+template <class V, class Data> struct SemanticCoverage;
+template <class V, class... Payloads>
+struct SemanticCoverage<V, std::variant<Payloads...>> {
+  static consteval bool compatible() {
+    if constexpr ((std::is_invocable_v<V &, const SemanticType &,
+                                       const Payloads &> &&
+                   ...)) {
+      using First = std::variant_alternative_t<0, std::variant<Payloads...>>;
+      using Result =
+          std::invoke_result_t<V &, const SemanticType &, const First &>;
+      return (
+          std::same_as<Result, std::invoke_result_t<V &, const SemanticType &,
+                                                    const Payloads &>> &&
+          ...);
+    }
+    return false;
+  }
+};
+} // namespace detail
+
+template <class V>
+concept SemanticTypeVisitor =
+    detail::SemanticCoverage<V, SemanticType::Data>::compatible();
+
+template <class V>
+  requires SemanticTypeVisitor<V>
+decltype(auto) visit(const SemanticType &type, V &&visitor) {
+  return std::visit(
+      [&](const auto &payload) -> decltype(auto) {
+        return std::invoke(visitor, type, payload);
+      },
+      type.data());
+}
 } // namespace rx
