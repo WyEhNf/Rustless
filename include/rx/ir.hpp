@@ -92,21 +92,7 @@ struct Gep {
   Operand offset;
 };
 
-enum class BinaryOp {
-  Add,
-  Sub,
-  Mul,
-  SDiv,
-  UDiv,
-  SRem,
-  URem,
-  And,
-  Or,
-  Xor,
-  Shl,
-  LShr,
-  AShr
-};
+enum class BinaryOp { Add, Sub, Mul, SDiv, UDiv, SRem, URem, And, Or, Xor, Shl, LShr, AShr };
 enum class CastOp { ZExt, Trunc, PtrToInt, IntToPtr };
 struct Binary {
   Result result;
@@ -126,7 +112,7 @@ struct Cast {
   Operand operand;
 };
 struct Call {
-  // A missing result means a void call, rather than an SSA id of zero.
+
   std::optional<Result> result;
   std::string callee;
   std::vector<Operand> arguments;
@@ -154,8 +140,8 @@ struct Return {
 struct Unreachable {};
 
 struct Instruction {
-  using Data = std::variant<Alloca, Load, Store, Gep, Binary, Compare, Cast,
-                            Call, Phi, Branch, CondBranch, Return, Unreachable>;
+  using Data = std::variant<Alloca, Load, Store, Gep, Binary, Compare, Cast, Call, Phi, Branch,
+                            CondBranch, Return, Unreachable>;
   explicit Instruction(Data data, std::optional<Origin> origin = {})
       : data(std::move(data)), origin(origin) {}
   Data data;
@@ -209,4 +195,4 @@ unsigned integer_width(Type type);
 std::string print(const Module &module);
 std::string symbol_name(std::string_view name);
 
-} // namespace rx::ir
+}
