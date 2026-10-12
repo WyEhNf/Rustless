@@ -54,6 +54,7 @@ SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
   case K::Ref:
   case K::Box:
   case K::Function:
+  case K::BuiltinFunction:
     return Type::Ptr;
   case K::Array:
   case K::Struct:
@@ -87,6 +88,7 @@ Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
   case K::Ref:
   case K::Box:
   case K::Function:
+  case K::BuiltinFunction:
     return target_.pointer();
   case K::Error:
     break;

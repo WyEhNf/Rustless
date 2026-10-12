@@ -37,10 +37,35 @@ struct FunctionAbi {
   std::vector<AbiParameter> parameters;
 };
 enum class ShortCircuit { And, Or };
-struct BinaryLowering {
-  std::variant<BinaryOp, Predicate, ShortCircuit> operation;
+struct ScalarArithmetic {
+  BinaryOp op;
   Type operand_type;
+  // Lowering must mask the RHS before emitting a shift instruction.
+  std::optional<std::uint32_t> shift_count_mask;
+  bool operator==(const ScalarArithmetic &) const = default;
+};
+struct ScalarComparison {
+  Predicate predicate;
+  Type operand_type;
+  bool operator==(const ScalarComparison &) const = default;
+};
+struct StructuralEquality {
+  SemanticTypePtr compared_type;
+  bool negated;
+};
+using LoweredOperation =
+    std::variant<ScalarArithmetic, ScalarComparison, ShortCircuit,
+                 StructuralEquality>;
+struct BinaryLowering {
+  LoweredOperation operation;
+  OperandSemantics left;
+  OperandSemantics right;
   Type result_type;
+};
+struct CompoundLowering {
+  ScalarArithmetic operation;
+  OperandSemantics target;
+  OperandSemantics value;
 };
 class SemanticBridge {
 public:
@@ -59,13 +84,14 @@ public:
   std::vector<Declaration> declarations() const;
   BinaryLowering binary(const ast::Expr &node,
                         const ast::BinaryExpr &payload) const;
-  BinaryOp compound(const ast::Expr &node,
-                    const ast::CompoundAssignExpr &payload) const;
+  CompoundLowering compound(const ast::Expr &node,
+                           const ast::CompoundAssignExpr &payload) const;
 
 private:
   StructLayout &resolve_structure(SymbolId symbol);
   Layout compute_layout(const SemanticTypePtr &type);
   AbiValue abi(const SemanticTypePtr &type) const;
+  BinaryLowering lower_binary(const ResolvedBinary &resolved) const;
   const SemanticIndex &semantic_;
   const TargetLayout target_;
   std::map<SymbolId, StructLayout> layouts_;
