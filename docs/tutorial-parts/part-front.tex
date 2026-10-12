@@ -311,3 +311,389 @@ ANTLR 是根据语法描述生成词法分析器和语法分析器的工具。\t
 \caption{语法定义决定生成组件，输入程序决定运行时建立的实例。}
 \end{figure}
 生成组件与手写构造器之间仍需清楚的边界。ANTLR 的上下文服务于识别过程，Rustless AST 服务于后续语言分析。下一章将观察二者怎样连接，以及构造器如何把规则层次转成语言概念。
+
+\chapter{从语法分析树到 AST}
+\label{chap:front-builder}
+
+\section*{导读}
+语法分析树记录一段输入怎样满足 grammar，AST 则记录这段程序由哪些语言结构组成。二者可以描述同一个输入，却不需要有相同的节点层次。本章从两种树的差别出发，沿着优先级、结合性、后缀链和语法上下文阅读构造器。重点是理解一个结构怎样被建立，以及哪些依赖应当留在解析边界。掌握这种阅读方法以后，读者可以在不运行整个编译器的情况下推导一段代码的 AST 形状。
+
+\section{Parse tree 与 AST}
+在 grammar 中，加法规则引用乘法规则，乘法规则引用转换规则，转换规则继续引用单目和后缀规则。这些层次很适合表达优先级，因为每一层限制自己可以包含哪些更紧密结合的表达式。但同一个整数也会通过这些中间规则向上到达 \texttt{expression}。
+
+后续分析通常不需要逐层回答“这是 additiveExpression，还是 multiplicativeExpression 的一条通过路径”。它需要知道当前节点是整数、路径、二元运算还是调用。因此，构造器越过仅用于组织 grammar 的中间层，把真正有意义的结构保存为 AST 载荷。
+
+下图对照 \texttt{1 + 2} 的部分语法规则树与最终 AST，呈现前文所述的层次压缩。为便于阅读，语法规则树只画出与论点有关的层级。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=8mm,
+  box/.style={draw,rounded corners,font=\small,align=center}]
+\node[box] (pe) {expression};
+\node[box,below=of pe] (pa) {additiveExpression};
+\node[box,below left=10mm and 2mm of pa] (p1) {multiplicativeExpression\\literal 1};
+\node[box,below right=10mm and 2mm of pa] (p2) {multiplicativeExpression\\literal 2};
+\draw[->] (pe)--(pa); \draw[->] (pa)--(p1); \draw[->] (pa)--(p2);
+\node[box,right=44mm of pa] (ae) {Expr\\BinaryExpr: Add};
+\node[box,below left=10mm and 0mm of ae] (a1) {Expr\\Integer 1};
+\node[box,below right=10mm and 0mm of ae] (a2) {Expr\\Integer 2};
+\draw[->] (ae)--(a1); \draw[->] (ae)--(a2);
+\end{tikzpicture}
+\caption{规则树与 AST 使用不同层次服务不同任务。}
+\end{figure}
+抽象并不意味着删除一切与拼写有关的信息。当前 AST 保留 \texttt{ParenExpr} 与 \texttt{ParenType}，也保存整数原拼写。这些信息可以服务源码观察和精确诊断。需要忽略括号的处理过程通过专门接口展开；它不必迫使其他使用者失去括号的存在信息。
+
+这种分离还有一项重要结果：AST 的公开定义不包含 ANTLR 上下文类型。若调整 grammar 的表达式分层，许多变化只发生在构造器；二元表达式的左右字段及其使用者可以保持稳定。稳定的基础应当是语言结构，而不是生成器当前产生的某个类名。
+
+\section{优先级如何形成父子关系}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let first = 1 + 2 * 3;
+    let second = (1 + 2) * 3;
+    let test = 1 + 2 < 4 && true;
+}
+\end{lstlisting}
+乘法比加法结合得紧密，因此第一条初始化的根是加法，右子节点是乘法。第二条初始化的根是乘法，其左子节点保留括号，括号中再包含加法。第三条初始化先形成整数计算和比较，再把比较结果作为逻辑运算的输入。
+
+\path{E:/RComplier/Rustless/grammar/Parser.g4} 的以下真实产生式说明了这项层次关系：
+\begin{lstlisting}
+additiveExpression
+    : multiplicativeExpression (additiveOperator multiplicativeExpression)*
+    ;
+multiplicativeExpression
+    : castExpression (multiplicativeOperator castExpression)*
+    ;
+castExpression
+    : unaryExpression (AS typeRef)*
+    ;
+\end{lstlisting}
+加法的每个操作数首先是一个完整的乘法表达式，而乘法的每个操作数又首先是一个完整的转换表达式。构造器按该结构读取子上下文，便不必另写一份优先级数值表来重新分析相同输入。
+
+从紧密到松散，当前表达式 grammar 依次组织后缀、单目、转换、乘除余数、加减、移位、按位与、按位异或、按位或、比较、逻辑与、逻辑或和赋值。这个顺序是语言规则，不是 Visitor 重载的先后顺序。即使 C++ 处理函数的排列发生变化，只要 AST 已正确建立，优先级也不会随之改变。
+
+这样的设计使一个重要决定只有一个主要来源。grammar 确定结合关系，构造器保存它，后续过程读取它。若后端再用运算符文本重新判断优先级，就会制造两份需要同时维护的解释。
+
+\section{结合性与左折叠}
+优先级说明不同运算之间怎样嵌套，结合性则说明同一层重复运算怎样组成树。对 \texttt{10 - 3 - 2}，左结合产生 \texttt{(10 - 3) - 2}；若错误地右结合，结果结构会变为 \texttt{10 - (3 - 2)}，语义也随之改变。
+
+构造器用一个逐步累积的结果实现左折叠。它先接收第一个操作数，然后每遇到下一个操作数，就把已经建立的结果作为新节点的左孩子。以下是 \path{E:/RComplier/Rustless/src/frontend.cpp} 中 \texttt{fold\_binary} 的真实删节摘录；省去了 token 与规则上下文识别，只保留建立关系的部分。
+\begin{lstlisting}[language=C++]
+auto operand = build_expression(part);
+if (!result) {
+  result.emplace(std::move(operand));
+  continue;
+}
+auto span = merge((*result)->span, operand->span);
+auto binary = make_expr(
+    context,
+    ast::BinaryExpr{ast::binary_operator(operator_text), operator_span,
+                    std::move(*result), std::move(operand)});
+binary->span = span;
+result = std::move(binary);
+\end{lstlisting}
+\texttt{std::move} 在这里转移已经建立的子树拥有关系。它没有深复制整个左子树；新二元节点接管旧结果，随后累积变量接管新节点。这样，构树步骤与最后的树形一致，且不会因反复复制已有前缀而增加不必要的工作。
+
+下图逐步展示左折叠怎样把三个操作数组成两层二元节点，对应上述累积过程。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,
+ box/.style={draw,rounded corners,font=\small,align=center,text width=30mm}]
+\node[box] (one) {第一步\\\texttt{10}};
+\node[box,right=of one] (two) {第二步\\\texttt{Sub(10, 3)}};
+\node[box,right=of two] (three) {第三步\\\texttt{Sub(previous, 2)}};
+\draw[->] (one)--(two); \draw[->] (two)--(three);
+\end{tikzpicture}
+\caption{旧结果成为下一层二元表达式的左子树。}
+\end{figure}
+赋值 grammar 采用另一种结构：右侧递归到整个表达式，所以 \texttt{a = b = 1} 的语法树按右侧嵌套。本例仅用于说明构树，不能据此断言赋值链通过语义检查。转换链 \texttt{x as u32 as i32} 则逐步包裹前一个结果：先形成转换到 \texttt{u32} 的节点，再以它为输入形成转换到 \texttt{i32} 的节点。
+
+这几种构造方式不应被统一成没有说明的“不断添加操作数”。每一步到底是在左侧累积、递归右侧，还是包裹先前结果，是语言结构必须保留的差别。
+
+\section{后缀链怎样包裹已有表达式}
+下例使用具有实际声明的字段与方法：
+\begin{lstlisting}[language=Rustless]
+struct Pair { values: [i32; 2] }
+impl Pair {
+    fn get(&self) -> i32 { self.values[0] }
+}
+fn main() {
+    let p = Pair { values: [1, 2] };
+    let a = p.values[0];
+    let b = p.get();
+}
+\end{lstlisting}
+\texttt{p.values[0]} 的起点是路径 \texttt{p}。读取点号后，构造器建立字段节点，把 \texttt{p} 放入 \texttt{base}。读取方括号后，又建立索引节点，把整个字段节点放入新的 \texttt{base}。最终根节点是 IndexExpr，而不是一条平铺的“路径及附件”记录。
+
+方法调用 \texttt{p.get()} 则把 \texttt{p} 作为 \texttt{receiver}，将方法名字与普通参数分开保存。普通调用的起点是 \texttt{callee}；它可以本身是一个表达式，例如局部变量所持有的函数项。相似的表面标点因此并不意味着所有后缀都应使用同一个字段集合。
+
+下面是 \texttt{apply\_call} 的真实摘录，来自 \path{E:/RComplier/Rustless/src/frontend.cpp}：
+\begin{lstlisting}[language=C++]
+auto span = merge(base->span, source_span(context));
+auto call = make_expr(
+    context, ast::CallExpr{std::move(base), call_arguments(context)});
+call->span = span;
+return call;
+\end{lstlisting}
+范围合并说明完整调用包括它的被调用表达式，而不只包括参数括号。子树移动说明调用接管已有 base 的所有权。构造器的后缀循环按源顺序应用这些变换，每一步都产生下一步可以接收的完整表达式。
+
+下图呈现调用、字段与索引依次包裹已有 base 的过程。图中的复杂链只是语法结构示意，不假定 \texttt{f} 与它返回的类型已经声明。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=8mm,
+ box/.style={draw,rounded corners,font=\small,align=center,text width=27mm}]
+\node[box] (p) {\texttt{f}\\PathExpr};
+\node[box,right=of p] (c) {\texttt{f(1)}\\CallExpr};
+\node[box,right=of c] (f) {\texttt{f(1).items}\\FieldExpr};
+\node[box,right=of f] (i) {\texttt{f(1).items[0]}\\IndexExpr};
+\draw[->] (p)--(c); \draw[->] (c)--(f); \draw[->] (f)--(i);
+\end{tikzpicture}
+\caption{每一步后缀都接收前一步形成的表达式。}
+\end{figure}
+
+\section{块、分号和尾表达式}
+块包含语句序列，也可以有一个没有分号的尾表达式。
+\begin{lstlisting}[language=Rustless]
+fn first() -> i32 {
+    let x = 1;
+    x + 2
+}
+fn second() {
+    let x = 1;
+    x + 2;
+}
+\end{lstlisting}
+第一段中的加法属于 \texttt{Block.tail}，第二段则属于语句序列中的 ExprStmt。若只在某个通用标志中记录“块最后没有分号”，每个使用者仍要重新找到最后节点并解释这个标志。当前构造器把该关系直接变成不同的结构位置。
+
+对于 grammar 已形成的语句，构造器逐项建立 Stmt；对于明确的尾表达式，构造器建立可选 tail。某些无分号的块类表达式先经语句规则识别，随后在构造阶段从最后一条语句移入 tail。真实的相关代码如下：
+\begin{lstlisting}[language=C++]
+if (context->statementExpression()) {
+  block->tail.emplace(build_expression(context->statementExpression()));
+} else if (!block->statements.empty()) {
+  auto *last = std::get_if<ast::ExprStmt>(&block->statements.back()->data);
+  if (last && last->termination == ast::Termination::Omitted) {
+    block->tail.emplace(std::move(last->expression));
+    block->statements.pop_back();
+  }
+}
+\end{lstlisting}
+这是 \texttt{build\_block} 的删节摘录，来源仍是 \path{E:/RComplier/Rustless/src/frontend.cpp}。它解释的是 AST 的归属整理，尚未决定整个块的类型。块值与函数返回值是否匹配，需要后面的语义判断。
+
+\section{类型与词法歧义的构造边界}
+某些标点在不同上下文中有不同用途。\texttt{Vec::<Vec<i32>>::new()} 含有两层泛型闭合符；\texttt{x >> 1} 含有一个右移运算；\texttt{x >>= 1} 又是复合赋值。把所有相邻的 \texttt{>} 随意拼成右移，会破坏嵌套类型；无条件拆分右移也会使运算规则难以识别原来的整体 token。
+
+当前 Lexer 在读取 \texttt{>} 后进入专门模式，用不同 token 类型保留一个最大标点组合中的后续部分。parser 的 \texttt{genericClose} 读取单个闭合部分，\texttt{shiftRight} 与赋值规则则读取相应完整组合。来自两个不同 token 的部分不能仅凭相邻位置重新组成一个运算符。这项细节被限制在 Lexer 与 grammar 中；AST 保存的仍然是 \texttt{BinaryOp::Shr} 或 \texttt{CompoundAssignOp::Shr}。
+
+引用类型中的 \texttt{&&} 也需要展开为两层，而不是一种新的“二重引用”节点。对语法片段 \texttt{\&\&'a mut i32}，外层是不可变引用，生命周期和可变性属于内层。构造器首先建立内层，再用外层包裹它，并调整内层的源码起点。这样，嵌套引用直接复用 ReferenceType，不需要让语义阶段再解释一个特殊旗标。
+
+转换后的 \texttt{<} 同样可能被看作类型参数的开始。写为 \texttt{x as (i32) < y} 时，括号明确界定转换类型；grammar 中的 closed 类型和表达式规则负责表达这类边界。教读者理解这些规则，比让后续阶段看到“含糊的转换字符串”后再猜测意图更清晰。
+
+\section{普通、条件与语句表达式}
+条件中的 \texttt{if value \{ ... \}} 需要区分条件路径与随后分支块。若无界定地允许 \texttt{value \{ ... \}} 在该处成为结构体构造，parser 就可能把分支大括号吞进条件。当前 condition 规则因此限制未加界定的结构体构造，而括号、数组、调用参数等界定结构中的表达式可以使用普通规则。
+
+条件中的 break 操作数还有相似问题：若它以一个裸块开始，块可能与正在寻找的分支边界混淆。因此 grammar 对该起点作出限制，同时保持后续操作数的正常结合。这些规则是为消除具体语法歧义而设，不应被推广成“条件表达式的语义总是不同”。
+
+语句开头也有自己的限制。一个块类表达式可以直接组成语句；若它还要继续形成后缀表达式，当前 grammar 要求先经过点号后缀。用括号界定的表达式则有更清楚的起点。这些选择说明了为什么 Parser.g4 同时存在普通、条件和语句表达式家族。
+
+构造器根据规则名称识别这些家族，却把相同的实际结构转成同一套 AST 载荷。条件中的加法、语句中的加法与普通加法都成为 BinaryExpr。于是语义规则只需要处理“加法表达式”，不必复制三套以 parser 上下文命名的类型。
+
+这一点体现了抽象边界的作用：grammar 可以因识别需求更细分，AST 则按已确定的语言形状汇合。若让三个语法上下文变成三个语义节点，每当修改整数运算规则，就必须重复修改原本相同的判断。
+
+\section{构树成功与错误处理}
+\texttt{AstBuilder} 只在 parser 没有报告错误时建立并发布树。节点身份和源码范围由 \texttt{stamp} 统一填写，表达式的具体载荷则由 \texttt{make\_expr} 装入 variant。真实摘录来自 \path{E:/RComplier/Rustless/src/frontend.cpp}：
+\begin{lstlisting}[language=C++]
+template <typename Node> void stamp(Node &node, ParseContext *context) {
+  node.id = ast::NodeId{next_id_++};
+  node.span = source_span(context);
+}
+template <class Payload>
+ast::ExprPtr make_expr(ParseContext *context, Payload payload) {
+  auto expression = ast::box<ast::Expr>(ast::Expr::Data{std::move(payload)});
+  stamp(*expression, context);
+  return expression;
+}
+\end{lstlisting}
+集中处理共同信息能够减少遗漏，但它不代替各载荷的构造责任。二元载荷仍需要明确提供两个子节点，函数仍需要提供函数体。构造器遇到已经假定存在却找不到的操作数时，抛出内部逻辑错误；这种错误说明手写构造逻辑或 grammar 适配出了问题，与用户程序的正常语法诊断不同。
+
+生成 parser 的类在输入流、token stream 和 parser 对象的寿命范围内使用。构树器把语言所需的数据移入自己的 AST，\texttt{parse\_source} 最后返回拥有树的结果。后续使用者不需要保存 parser 来读取表达式。下一章将从这些构造要求出发，研究 AST 的类型和拥有关系。
+
+\chapter{节点身份、具体载荷与所有权}
+\label{chap:front-ownership}
+
+\section*{导读}
+二元表达式需要左右两个操作数，返回表达式可以没有返回值，函数调用则需要一个有序参数序列。让这些差别停留在注释和约定中，处理过程就必须反复检查它们。本章讨论如何把结构要求写入 C++ 类型，并解释节点身份、活动载荷和子节点拥有关系各自承担的职责。这里的类型安全首先指语法结构的可表达性；表达式的语言类型仍由语义阶段判断。
+
+\section{相同拼写与不同出现}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let first = 1 + 2;
+    let second = 1 + 2;
+}
+\end{lstlisting}
+两次加法有相同运算符和相同字面量，却位于不同源码范围中，也属于不同变量的初始化。若一条语义事实只用字符串 \texttt{1 + 2} 作为键，便无法确定它属于哪一次出现。\texttt{NodeId} 为节点提供身份，使位置相同与结构相同不必被误认为同一节点。
+
+项目使用带标签的整数包装，而非把每种身份都声明为普通 \texttt{uint32\_t}。来自 \path{E:/RComplier/Rustless/include/rx/ast/node.hpp} 的摘录如下：
+\begin{lstlisting}[language=C++]
+template <class Tag> struct Id {
+  std::uint32_t value{};
+  auto operator<=>(const Id &) const = default;
+};
+struct NodeTag;
+using NodeId = Id<NodeTag>;
+\end{lstlisting}
+标签参与 C++ 类型，因此节点身份与使用另一个标签的声明身份不能无意互换。它们可能使用相同的数值表示，却不是相同的概念。源码范围也不适合充当唯一身份：不同层次节点的范围可以重叠，括号包装与内部表达式还可能具有紧密相邻的范围。
+
+当前身份在一次构树过程中分配，零通常表示尚未设置。它不是跨编译持久编号，也不保证按源位置排序；某些外层节点是在子结构完成后才分配。若未来支持增量分析，需要另行设计版本与持久关联，不能仅凭当前递增整数推导出这些能力。
+
+\section{Node 与承载节点}
+\texttt{Node} 保存各类有身份节点共同需要的信息：
+\begin{lstlisting}[language=C++]
+struct Node {
+  NodeId id{};
+  Span span{};
+};
+\end{lstlisting}
+\texttt{Expr : Node} 继承这两项信息，但一个 Expr 的具体形状由其 \texttt{Data} 决定。我们把有身份的外层称为承载节点，即 owner，把描述形状的数据称为具体载荷，即 payload。例如，BinaryExpr 保存运算和左右孩子；它本身没有继承 Expr。
+
+下图把表达式身份与范围放在外层，把具体语法字段放在活动载荷中，呈现这两层共同参与访问的关系。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=9mm,font=\small,
+ box/.style={draw,rounded corners,align=center}]
+\node[box,text width=76mm] (owner) {Expr：NodeId、Span 与 Data};
+\node[box,text width=76mm,below=of owner] (payload) {活动载荷 BinaryExpr\\op、operator span、left、right};
+\node[box,below left=10mm and 3mm of payload] (left) {左 Expr\\自身身份与载荷};
+\node[box,below right=10mm and 3mm of payload] (right) {右 Expr\\自身身份与载荷};
+\draw[->] (owner)--node[right]{拥有载荷}(payload);
+\draw[->] (payload)--node[left]{left}(left);
+\draw[->] (payload)--node[right]{right}(right);
+\end{tikzpicture}
+\caption{身份层与具体形状层分别表达不同的结构信息。}
+\end{figure}
+不是每种节点都需要两种 C++ 结构体。Function 的字段直接描述一种确定形状，因此 Function 自身既提供身份，也提供具体内容。统一访问接口仍可把它同时作为 owner 与 payload 传入。对读者而言，关键在于理解接口中的职责，而不是要求所有节点机械地多包一层。
+
+\section{从通用字段集合到 variant}
+早期 AST 常采用一个枚举标签和一组通用字段。下面是这种方式的教学缩略示意，不是当前项目定义：
+\begin{lstlisting}[language=C++]
+struct OldExpr {
+  Kind kind;
+  std::string text;
+  std::vector<ExprPtr> operands;
+  TypePtr cast_type;
+  bool flag;
+};
+\end{lstlisting}
+这种结构允许表示整数，却同时携带转换类型；也允许把 kind 设为 Binary 后仍不给两个操作数。\texttt{text} 与 \texttt{flag} 的含义随种类变化，读者必须查找外部约定才能理解字段。每个消费者又都需要自行确认这些约定。
+
+具体载荷将关系改写为命名字段。真实 BinaryExpr 定义如下，来自 \path{E:/RComplier/Rustless/include/rx/ast/expr.hpp}：
+\begin{lstlisting}[language=C++]
+struct BinaryExpr {
+  BinaryOp op;
+  Span operator_span;
+  ExprPtr left;
+  ExprPtr right;
+};
+\end{lstlisting}
+二元表达式不会额外拥有 callee 或字段初始化列表。Expr 的 variant 在同一时刻保存一种载荷，并管理相应对象的构造与析构。kind 与数据形状不再是两份手工维护的声明：当前活动的 C++ 类型就说明形状。
+
+这项约束并不检查 \texttt{left} 的语言类型是否支持 \texttt{op}。\texttt{1 + true} 依然可以建立 BinaryExpr，因为它确实具有两个操作数和一个加法运算符。结构安全使语义检查面对清楚的输入，语义检查再判断这些输入能否组合。让两层承担各自能够表达的关系，比用一个“合法”标志概括全部判断更容易维护。
+
+\section{必需、可选与有序子结构}
+一个二元表达式缺少右操作数，通常没有合理的完整 AST 含义。一个 \texttt{return} 没有返回值，却可能是合法的写法。一个调用没有参数，还应有被调用表达式。这几种情况应当分别表示。
+
+必需孩子使用 \texttt{Box<T>}；可选孩子使用 \texttt{optional<Box<T>>}；有序序列使用 \texttt{vector<Box<T>>}。下面的真实载荷定义显示区别：
+\begin{lstlisting}[language=C++]
+struct CallExpr {
+  ExprPtr callee;
+  std::vector<ExprPtr> arguments;
+};
+struct ReturnExpr {
+  std::optional<ExprPtr> value;
+};
+\end{lstlisting}
+\begin{lstlisting}[language=Rustless]
+fn zero() {}
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn main() {
+    zero();
+    let result = add(1, 2);
+    return;
+}
+\end{lstlisting}
+空参数序列是调用的一个普通状态，空 callee 却不是。没有返回值由 optional 的缺席表示；\texttt{return ()} 则有一个实际 UnitExpr。二者可以在语义上产生相关结果，但在语法结构上仍有区别。
+
+下图用三种边呈现必需、可选与序列关系，对应上述 C++ 容器，而不是程序的运行时对象引用。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=12mm,font=\small,
+ box/.style={draw,rounded corners,align=center}]
+\node[box] (c) {CallExpr};
+\node[box,below left=13mm and 10mm of c] (cal) {callee：必需 Expr};
+\node[box,below right=13mm and 10mm of c] (args) {arguments：有序 Expr 序列};
+\node[box,right=34mm of c] (r) {ReturnExpr};
+\node[box,below=of r] (rv) {value：可选 Expr};
+\draw[->,thick] (c)--(cal); \draw[->,double] (c)--(args);
+\draw[->,dashed] (r)--(rv);
+\end{tikzpicture}
+\caption{子结构是否存在以及存在多少项，由其类型直接表达。}
+\end{figure}
+这里的 C++ Box 用于拥有 AST 子节点，与源语言 \texttt{Box<i32>} 的运行时容器是不同概念。前者解决编译器数据结构的寿命，后者需要语言语义、内存布局和运行时操作。相同名称不能替代对用途的说明。
+
+\section{递归类型与移动所有权}
+Expr 的载荷可以拥有其他 Expr；TypeSyntax 的数组长度又可以拥有 Expr。这形成递归定义。直接把所有孩子按值嵌入对象会导致无法确定有限的对象大小，因此孩子需要间接存储。
+
+当前 Box 使用独占指针，禁止复制，并在构造时拒绝空指针。以下为 \path{E:/RComplier/Rustless/include/rx/ast/node.hpp} 的真实删节摘录：
+\begin{lstlisting}[language=C++]
+template <class T> class Box {
+public:
+  explicit Box(std::unique_ptr<T> value)
+      : value_(value.release(), [](T *pointer) { delete pointer; }) {
+    if (!value_)
+      throw std::invalid_argument("a required AST child cannot be null");
+  }
+  Box(Box &&) noexcept = default;
+  Box &operator=(Box &&) noexcept = default;
+  Box(const Box &) = delete;
+  Box &operator=(const Box &) = delete;
+  const T *operator->() const { return value_.get(); }
+private:
+  std::unique_ptr<T, void (*)(T *)> value_;
+};
+\end{lstlisting}
+独占拥有使树的销毁路径明确：父节点销毁时，其孩子也沿拥有边销毁。构造时移动子树，则把责任交给新的父节点。它不会使两个父节点同时负责删除同一个孩子。若需要跨树共享结构，必须另行选择相应的拥有模型，而不能随意复制 Box。
+
+递归头文件还存在不完整类型问题。某个头文件可能只知道 \texttt{struct Block;}，却需要保存 \texttt{Box<Block>}。当前删除器在 T 已完整的位置创建，并以函数指针保存，销毁持有者时不要求每个递归头文件都包含全部节点定义。这帮助将语法族分开，但通常增加一个删除器指针和间接删除调用的成本。
+
+构造时非空并不意味着任意时刻的任意 Box 都可解引用。移动后原对象可能为空；它应被销毁或重新赋值，不应再被当作有效孩子读取。完整 AST 的必需孩子应处在有效拥有状态。理解 moved-from 对象的限制，才能准确说明这项类型约束。
+
+\section{只读发布与可构造性}
+前端发布 \texttt{unique\_ptr<const Crate>}，正常读取路径因此获得 const 树。Box 的 const 解引用返回 const 子节点，vector 中的载荷与子结构也通过 const 路径观察。Visitor 接口进一步只接收 const owner 和 const payload。
+
+只读发布让多种分析过程可以共享结构，而不必担心某个打印步骤顺手改写运算符或移动孩子。语义事实独立保存，也便于描述“读树并建立结论”这一过程。若某个后续变换需要改写程序，宜为它明确选择修改接口或新的表示，而不是让普通查询隐含修改能力。
+
+不过，节点字段仍可在手工构造时被赋值，id 和 span 也不是构造参数中的强制条件。类型系统已经排除了一部分非法形状，构树器和一致性检查仍负责其他关系，例如身份唯一、范围有效和来源归属。这种分层约束应当如实说明；不能因为接口只读，就推导出每一个手工构造的对象都已经正确。
+
+\section{存储方案的取舍}
+variant 对象需要足够的空间容纳最大的活动载荷，并保存判别信息。它通常不为自己的活动载荷单独申请堆空间，但载荷中的 string、vector 以及 Box 孩子仍可能分配。因而“使用 variant”与“所有节点紧凑连续”之间没有必然关系。
+
+逐节点 Box 分配容易表达树拥有关系，却带来分配次数和间接访问。arena 可以把一批节点放入集中管理的存储区域，用整体寿命减少个别删除操作；索引式节点可以把边表示为编号，并使用数组管理对象。但这些方式还需要回答地址稳定、不同载荷尺寸、容器内部分配和对象析构的问题。
+
+下图比较逐节点拥有与集中分配的访问路径，用来解释上述分配与局部性取舍。集中区域只是后续设计方向，不是当前 AST 的实际布局。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,font=\small,
+ box/.style={draw,rounded corners,minimum width=22mm,minimum height=8mm}]
+\node at (2,1.4) {当前：独立拥有};
+\node[box] (p) at (2,0.6) {父节点};
+\node[box] (a) at (0.7,-0.6) {孩子 A};
+\node[box] (b) at (3.4,-1.1) {孩子 B};
+\draw[->] (p)--(a); \draw[->] (p)--(b);
+\node at (8,1.4) {可能方向：集中存储};
+\node[draw,minimum width=58mm,minimum height=22mm] at (8,-0.2) {};
+\node[box] at (6.5,-0.2) {父};
+\node[box] at (8,-0.2) {A};
+\node[box] at (9.5,-0.2) {B};
+\end{tikzpicture}
+\caption{不同拥有方式改变分配与访问路径，需要结合寿命和测量选择。}
+\end{figure}
+更紧凑的布局可能有利于遍历，也可能使构造和改写更复杂。虚函数对象也有各自的存储与分派代价。应根据实际节点尺寸、分配次数、访问热点与维护需求比较，而不应把任何一种机制当作普遍最优。
+
+本章明确了所有节点共同遵守的原则。下一章将阅读名字、类型语法和声明，观察这些原则怎样落到完整语言子集中的具体字段。
