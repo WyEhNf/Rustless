@@ -7,36 +7,38 @@
 
 namespace rx {
 SemanticType::Kind SemanticType::kind() const noexcept {
-  using K = Kind;
+  using TypeKind = Kind;
   return std::visit(
-      ast::Overloaded{
-          [](const ErrorType &) { return K::Error; },
-          [](const NeverType &) { return K::Never; },
-          [](const UnitType &) { return K::Unit; },
-          [](const BoolType &) { return K::Bool; },
-          [](const I32Type &) { return K::I32; },
-          [](const U32Type &) { return K::U32; },
-          [](const IsizeType &) { return K::Isize; },
-          [](const UsizeType &) { return K::Usize; },
-          [](const StructType &) { return K::Struct; },
-          [](const BoxType &) { return K::Box; },
-          [](const VecType &) { return K::Vec; },
-          [](const ArrayType &) { return K::Array; },
-          [](const RefType &) { return K::Ref; },
-          [](const FunctionType &) { return K::Function; },
-          [](const BuiltinFunctionType &) { return K::BuiltinFunction; }},
+      ast::Overloaded{[](const ErrorType &) { return TypeKind::Error; },
+                      [](const NeverType &) { return TypeKind::Never; },
+                      [](const UnitType &) { return TypeKind::Unit; },
+                      [](const BoolType &) { return TypeKind::Bool; },
+                      [](const I32Type &) { return TypeKind::I32; },
+                      [](const U32Type &) { return TypeKind::U32; },
+                      [](const IsizeType &) { return TypeKind::Isize; },
+                      [](const UsizeType &) { return TypeKind::Usize; },
+                      [](const StructType &) { return TypeKind::Struct; },
+                      [](const BoxType &) { return TypeKind::Box; },
+                      [](const VecType &) { return TypeKind::Vec; },
+                      [](const ArrayType &) { return TypeKind::Array; },
+                      [](const RefType &) { return TypeKind::Ref; },
+                      [](const FunctionType &) { return TypeKind::Function; },
+                      [](const BuiltinFunctionType &) {
+                        return TypeKind::BuiltinFunction;
+                      }},
       data_);
 }
 
 const SemanticTypePtr &SemanticType::element() const {
-  return std::visit(
-      [](const auto &payload) -> const SemanticTypePtr & {
-        if constexpr (requires { payload.element; })
-          return payload.element;
-        else
-          throw std::logic_error("semantic type has no element");
-      },
-      data_);
+  if (const auto *box = get_if<BoxType>(*this))
+    return box->element;
+  if (const auto *vector = get_if<VecType>(*this))
+    return vector->element;
+  if (const auto *array = get_if<ArrayType>(*this))
+    return array->element;
+  if (const auto *reference = get_if<RefType>(*this))
+    return reference->element;
+  throw std::logic_error("semantic type has no element");
 }
 std::uint64_t SemanticType::length() const {
   if (const auto *array = get_if<ArrayType>(*this))
@@ -89,10 +91,10 @@ TypeContext::TypeContext() : impl_(std::make_unique<Impl>()) {}
 TypeContext::~TypeContext() = default;
 
 SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
-  using K = SemanticType::Kind;
+  using TypeKind = SemanticType::Kind;
   SemanticType value(std::move(data));
   Impl::Key key{value.kind()};
-  if (key.kind == K::Struct || key.kind == K::Function) {
+  if (key.kind == TypeKind::Struct || key.kind == TypeKind::Function) {
     key.symbol = value.symbol();
     if (!key.symbol.value || value.name().empty())
       throw std::invalid_argument("nominal types need an identity and name");
@@ -102,20 +104,19 @@ SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
       throw std::invalid_argument("declaration identity has conflicting types");
     impl_->declarations.emplace(key.symbol, declaration);
   }
-  if (key.kind == K::Box || key.kind == K::Vec || key.kind == K::Array ||
-      key.kind == K::Ref)
+  if (key.kind == TypeKind::Box || key.kind == TypeKind::Vec ||
+      key.kind == TypeKind::Array || key.kind == TypeKind::Ref)
     key.element = value.element().get();
-  if (key.kind == K::Array)
+  if (key.kind == TypeKind::Array)
     key.length = value.length();
-  if (key.kind == K::Ref)
-    key.mutability = value.is_mutable() ? ast::Mutability::Mutable
-                                        : ast::Mutability::Immutable;
+  if (key.kind == TypeKind::Ref && value.is_mutable())
+    key.mutability = ast::Mutability::Mutable;
   if (const auto *builtin = get_if<BuiltinFunctionType>(value)) {
     key.builtin = builtin->builtin;
     key.element = builtin->owner.get();
   }
   if (const auto found = impl_->types.find(key); found != impl_->types.end()) {
-    if ((key.kind == K::Struct || key.kind == K::Function) &&
+    if ((key.kind == TypeKind::Struct || key.kind == TypeKind::Function) &&
         found->second->name() != value.name())
       throw std::invalid_argument("declaration identity has conflicting names");
     return found->second;
@@ -127,23 +128,23 @@ SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
 }
 
 SemanticTypePtr TypeContext::primitive(SemanticType::Kind kind) {
-  using K = SemanticType::Kind;
+  using TypeKind = SemanticType::Kind;
   switch (kind) {
-  case K::Error:
+  case TypeKind::Error:
     return intern(ErrorType{});
-  case K::Never:
+  case TypeKind::Never:
     return intern(NeverType{});
-  case K::Unit:
+  case TypeKind::Unit:
     return intern(UnitType{});
-  case K::Bool:
+  case TypeKind::Bool:
     return intern(BoolType{});
-  case K::I32:
+  case TypeKind::I32:
     return intern(I32Type{});
-  case K::U32:
+  case TypeKind::U32:
     return intern(U32Type{});
-  case K::Isize:
+  case TypeKind::Isize:
     return intern(IsizeType{});
-  case K::Usize:
+  case TypeKind::Usize:
     return intern(UsizeType{});
   default:
     throw std::invalid_argument("primitive factory needs an atomic type");
@@ -172,8 +173,9 @@ SemanticTypePtr TypeContext::builtin(BuiltinId builtin, SemanticTypePtr owner) {
   default:
     throw std::invalid_argument("unknown builtin function identity");
   }
-  return intern(BuiltinFunctionType{builtin, owner ? canonical(std::move(owner))
-                                                   : SemanticTypePtr{}});
+  if (owner)
+    owner = canonical(std::move(owner));
+  return intern(BuiltinFunctionType{builtin, std::move(owner)});
 }
 SemanticTypePtr TypeContext::box(SemanticTypePtr element) {
   return intern(BoxType{canonical(std::move(element))});
@@ -196,25 +198,25 @@ SemanticTypePtr TypeContext::reference(SemanticTypePtr element,
 SemanticTypePtr TypeContext::canonical(SemanticTypePtr value) {
   if (!value)
     throw std::invalid_argument("semantic type elements cannot be null");
-  if (impl_->owned.contains(value.get()))
+  if (impl_->owned.find(value.get()) != impl_->owned.end())
     return value;
-  using K = SemanticType::Kind;
+  using TypeKind = SemanticType::Kind;
   switch (value->kind()) {
-  case K::Struct:
+  case TypeKind::Struct:
     return structure(value->symbol(), value->name());
-  case K::Function:
+  case TypeKind::Function:
     return function(value->symbol(), value->name());
-  case K::BuiltinFunction: {
+  case TypeKind::BuiltinFunction: {
     const auto &payload = *get_if<BuiltinFunctionType>(*value);
     return builtin(payload.builtin, payload.owner);
   }
-  case K::Box:
+  case TypeKind::Box:
     return box(value->element());
-  case K::Vec:
+  case TypeKind::Vec:
     return vector(value->element());
-  case K::Array:
+  case TypeKind::Array:
     return array(value->element(), value->length());
-  case K::Ref:
+  case TypeKind::Ref:
     return reference(value->element(), get_if<RefType>(*value)->mutability);
   default:
     return primitive(value->kind());
