@@ -179,25 +179,31 @@ UnaryLowering SemanticBridge::unary(const ast::Expr &node, const ast::UnaryExpr 
     throw std::invalid_argument("unary payload does not belong to this AST node");
   }
   const auto &resolved = semantic_.expression(node).unary;
-  if (!resolved)
+  if (!resolved) {
     throw std::invalid_argument("unary expression lacks a resolved operation");
-  if (resolved->operation == UnaryOperation::Dereference)
+  }
+  if (resolved->operation == UnaryOperation::Dereference) {
     return {DereferencePlace{resolved->result, layout(resolved->result)},
-            resolved->operand, resolved->result};
+            resolved->operand,
+            resolved->result};
+  }
   const auto type = scalar_type(resolved->operand.effective_type);
-  if (!type || (*type != Type::I1 && *type != Type::I32))
+  if (!type || (*type != Type::I1 && *type != Type::I32)) {
     throw std::invalid_argument("unary operation requires an integer or bool");
+  }
   ScalarUnary operation;
   switch (resolved->operation) {
   case UnaryOperation::Negate:
-    if (*type != Type::I32)
+    if (*type != Type::I32) {
       throw std::invalid_argument("negation requires an integer");
+    }
     operation = {BinaryOp::Sub, *type, 0};
     break;
   case UnaryOperation::Complement: {
-    const auto mask = *type == Type::I1
-                          ? 1
-                          : (std::uint64_t{1} << target_.integer_bits()) - 1;
+    std::uint64_t mask = 1;
+    if (*type != Type::I1) {
+      mask = (std::uint64_t{1} << target_.integer_bits()) - 1;
+    }
     operation = {BinaryOp::Xor, *type, static_cast<std::uint32_t>(mask)};
     break;
   }
@@ -206,4 +212,4 @@ UnaryLowering SemanticBridge::unary(const ast::Expr &node, const ast::UnaryExpr 
   }
   return {operation, resolved->operand, resolved->result};
 }
-} // namespace rx::ir
+}
