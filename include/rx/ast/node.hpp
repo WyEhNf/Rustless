@@ -1,7 +1,6 @@
 #pragma once
 
 #include "rx/diagnostic.hpp"
-#include <compare>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -13,7 +12,13 @@ namespace rx::ast {
 
 template <class Tag> struct Id {
   std::uint32_t value{};
-  auto operator<=>(const Id &) const = default;
+
+  bool operator==(const Id &other) const { return value == other.value; }
+  bool operator!=(const Id &other) const { return value != other.value; }
+  bool operator<(const Id &other) const { return value < other.value; }
+  bool operator<=(const Id &other) const { return value <= other.value; }
+  bool operator>(const Id &other) const { return value > other.value; }
+  bool operator>=(const Id &other) const { return value >= other.value; }
 };
 struct NodeTag;
 using NodeId = Id<NodeTag>;
@@ -26,11 +31,10 @@ struct Node {
   Span span{};
 };
 
-// Required children have exclusive ownership and cannot be constructed empty.
-template <class T> class Box {
+template <class Value> class Box {
 public:
-  explicit Box(std::unique_ptr<T> value)
-      : value_(value.release(), [](T *pointer) { delete pointer; }) {
+  explicit Box(std::unique_ptr<Value> value)
+      : value_(value.release(), [](Value *pointer) { delete pointer; }) {
     if (!value_)
       throw std::invalid_argument("a required AST child cannot be null");
   }
@@ -38,29 +42,30 @@ public:
   Box &operator=(Box &&) noexcept = default;
   Box(const Box &) = delete;
   Box &operator=(const Box &) = delete;
-  T &operator*() { return *value_; }
-  const T &operator*() const { return *value_; }
-  T *operator->() { return value_.get(); }
-  const T *operator->() const { return value_.get(); }
-  T *get() { return value_.get(); }
-  const T *get() const { return value_.get(); }
+  Value &operator*() { return *value_; }
+  const Value &operator*() const { return *value_; }
+  Value *operator->() { return value_.get(); }
+  const Value *operator->() const { return value_.get(); }
+  Value *get() { return value_.get(); }
+  const Value *get() const { return value_.get(); }
 
 private:
-  // The deleter is created where T is complete; public recursive headers
-  // can destroy a Box without including every other node family.
-  std::unique_ptr<T, void (*)(T *)> value_;
+  std::unique_ptr<Value, void (*)(Value *)> value_;
 };
 
-template <class T, class... Args> Box<T> box(Args &&...args) {
-  return Box<T>{std::make_unique<T>(std::forward<Args>(args)...)};
+template <class Value, class... Arguments>
+Box<Value> box(Arguments &&...arguments) {
+  return Box<Value>{
+      std::make_unique<Value>(std::forward<Arguments>(arguments)...)};
 }
 
-template <class... Fs> struct Overloaded : Fs... {
-  using Fs::operator()...;
+template <class... Functions> struct Overloaded : Functions... {
+  using Functions::operator()...;
 };
-template <class... Fs> Overloaded(Fs...) -> Overloaded<Fs...>;
+template <class... Functions>
+Overloaded(Functions...) -> Overloaded<Functions...>;
 
-} // namespace rx::ast
+}
 
 namespace std {
 template <class Tag> struct hash<rx::ast::Id<Tag>> {
@@ -68,4 +73,4 @@ template <class Tag> struct hash<rx::ast::Id<Tag>> {
     return hash<std::uint32_t>{}(id.value);
   }
 };
-} // namespace std
+}
