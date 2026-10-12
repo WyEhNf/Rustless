@@ -1,0 +1,313 @@
+% Front-end tutorial fragment. Source excerpts refer to the Rustless checkout.
+\chapter{同一个程序，为什么需要不同表示}
+\label{chap:front-representations}
+
+\section*{导读}
+阅读程序时，我们会同时关注它的写法、含义和执行过程。编译器也需要这些视角，但它不能像读者一样依靠经验补足缺失的信息：一个名字指向什么声明，一次运算使用什么类型，一条分支通往哪里，都必须有明确的表示。本章从一个简单的计算开始，说明编译器为什么逐步改变程序的表示，以及每次改变应当解决什么问题。后续章节中的 AST、Visitor 和语义类型，都可以放回这条主线来理解。
+
+\section{从一个计算开始}
+考虑下面的 Rustless 函数。Rustless 是本教程讨论的语言子集；它采用若干 Rust 风格的语法，但不具有完整 Rust 的所有语言能力。
+\begin{lstlisting}[language=Rustless]
+fn calculate(a: i32, b: i32, c: i32) -> i32 {
+    a + b * c
+}
+\end{lstlisting}
+源文本按字符从左到右排列。理解这个函数时，我们却不会把这种排列直接当作计算顺序：乘法属于加法的右操作数，整个表达式又是函数体的结果。文本顺序、结构上的包含关系和计算上的依赖关系，已经是三种不同的关系。
+
+如果只保存字符串 \texttt{a + b * c}，每一个使用者都需要重新识别运算符、判断优先级并找到操作数。若编译器首先把乘法与加法的父子关系建立起来，打印器、类型检查器和代码生成器就可以共享这份解释。这是引入程序表示的第一个理由：\emph{已经确定的关系应当成为可以读取的数据，而不应反复隐藏在文本中等待重新解释。}
+
+我们暂时将运算理解为一张依赖图。乘法的结果必须存在，加法才能使用它；参数的名字如何找到声明，则是另一项尚未展开的任务。这样分开观察，可以避免在介绍 AST 时过早讨论寄存器，也避免在讨论机器指令时重新处理括号。
+
+下图呈现前述文字中的计算依赖：树的上方是使用结果的运算，下方是为它提供输入的结构。边表示操作数关系，不表示字符相邻。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,level distance=13mm,
+  every node/.style={draw,rounded corners,font=\small,minimum width=14mm},
+  level 1/.style={sibling distance=39mm},level 2/.style={sibling distance=22mm}]
+\node {加法}
+  child {node {\texttt{a}}}
+  child {node {乘法} child {node {\texttt{b}}} child {node {\texttt{c}}}};
+\end{tikzpicture}
+\caption{表达式的结构明确了计算依赖。}
+\label{fig:front-expression-dependency}
+\end{figure}
+注意，图中的每一条边都有含义。若把两个操作数仅保存为一个没有说明的数组，读者还需要知道第零个元素和第一个元素分别扮演什么角色。稍后采用的 \texttt{left} 与 \texttt{right} 字段，会把这种含义直接写入类型。
+
+\section{词法、语法与语义}
+词法分析首先确定程序由哪些词法单元组成。在上例中，\texttt{fn} 是关键字，\texttt{calculate} 是标识符，\texttt{->} 是标点组合，\texttt{i32} 的拼写可以作为路径中的名字出现。词法单元带有类别和位置，因此下一阶段不必逐个字符重新辨认这些单元。
+
+语法分析确定这些单元如何组成语言允许的结构。它能够判断参数列表是否闭合、函数体是否由大括号界定，以及乘法如何嵌入加法。然而，满足语法规则还没有说明名字是否存在，也没有说明两个操作数是否支持同一个运算。
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let value = 1 + true;
+}
+\end{lstlisting}
+这段代码包含合法的整数、布尔值和加法写法，能够形成一个二元表达式结构。它的问题出现在语义层面：加法需要适合该运算的操作数。类似地，\texttt{unknown + 1} 可以具有清楚的语法结构，但仍需要名字解析来判断 \texttt{unknown} 指向什么。
+
+这里形成了三个逐步增加的判断：字符能否形成词法单元，单元能否形成语法结构，结构能否获得合法的语言含义。将它们分开，使诊断能够指出错误所属的层次，也使某一层的修改不必连带改变所有层。例如，增加一种整数进制主要影响字面量识别与解释；它不应迫使二元表达式改变左右子节点的结构。
+
+真实前端的入口定义位于 \path{E:/RComplier/Rustless/include/rx/frontend.hpp}。下列摘录保留原有接口；阅读时关注返回结果，而不必立即了解 ANTLR 的类。
+\begin{lstlisting}[language=C++]
+struct FrontendResult {
+  std::unique_ptr<const ast::Crate> crate;
+  // False means the generated parser rejected the token stream.
+  bool syntax_ok{};
+};
+
+FrontendResult parse_source(std::string_view source,
+                            DiagnosticEngine &diagnostics);
+\end{lstlisting}
+\texttt{syntax\_ok} 说明解析是否成功；\texttt{crate} 是已建立的语法树。该结果没有把语法成功表述为整个程序已经通过类型检查。后续阶段仍有独立的任务和独立的输入要求。
+
+\section{AST、语义事实、IR 与机器代码}
+抽象语法树，即 AST，按语言概念组织程序。一个函数有签名和函数体，一个二元表达式有运算符和两个操作数，一个条件表达式有条件与分支。AST 的首要目的，是让这些语法关系成为明确的结构。
+
+语义分析在这份结构上确定含义。例如，上例中三个参数的类型都是 \texttt{i32}；\texttt{a} 这一次出现与参数声明之间存在引用关系；乘法和加法得到相应的运算规则。语义事实可以与 AST 分开保存，因为同一棵树的结构没有因类型判断而改变。把事实按节点身份组织起来，也便于下一个阶段直接查询已知的结论。
+
+中间表示，即 IR，进一步显式表达计算、数据流、控制流与内存操作。表达式树中隐含的依赖，在 IR 中通常体现为值被哪条指令定义、又被哪些指令使用。以下是解释依赖的教学记法，并非从当前 Rustless 完整 lowering 得到的输出：
+\begin{lstlisting}
+t1 = multiply(b, c)
+t2 = add(a, t1)
+return t2
+\end{lstlisting}
+一个语法节点不必对应恰好一条 IR 指令。结构体构造可能涉及存储分配与多个字段写入；短路逻辑可能形成多个基本块；方法调用还可能需要接收者转换。机器表示随后继续引入目标平台的寄存器、栈槽和调用约定。因此，要求所有阶段共享一套通用节点，往往会把不同阶段的关系混杂在一起。
+
+下图把同一个函数放入不同表示，箭头说明每次转换新增的明确关系。虚线表示当前 Rustless 尚未完成的完整源程序转换与机器后端。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=9mm,
+  box/.style={draw,rounded corners,text width=95mm,align=center,font=\small}]
+\node[box] (text) {源文本：名字、标点和运算的写法};
+\node[box,below=of text] (ast) {AST：声明、表达式与结构性子节点};
+\node[box,below=of ast] (sem) {语义事实：声明身份、类型与已解析的操作};
+\node[box,below=of sem] (ir) {IR：值定义、控制流、内存与调用};
+\node[box,below=of ir] (machine) {机器表示：寄存器、栈帧与目标指令};
+\draw[->] (text)--node[right,font=\small]{解析与建树}(ast);
+\draw[->] (ast)--node[right,font=\small]{语义分析}(sem);
+\draw[->,dashed] (sem)--node[right,font=\small]{完整 lowering}(ir);
+\draw[->,dashed] (ir)--node[right,font=\small]{后端转换}(machine);
+\end{tikzpicture}
+\caption{逐步改变表示，使不同关系在适合它们的阶段显式出现。}
+\end{figure}
+当前项目已经具有 AST、语义事实以及有类型的 IR 模型、构造与验证接口。完整 lowering 和机器后端仍属于后续设计范围。阅读它们时，应当区分已有的数据结构与尚待完成的转换算法。
+
+\section{阶段之间需要传递什么}
+当语义分析指出右操作数类型错误时，它需要找到相应的源文本；当 lowering 查询一个表达式时，它需要知道正在查询哪一次出现；当调用已经解析时，它需要知道目标是哪一个声明。这三种需求分别引出源码范围、节点身份和声明身份。
+
+源码范围回答“这一结构来自哪里”。节点身份回答“这一条事实属于哪一次语法出现”。声明身份回答“这个名字或调用最终指向哪个声明”。同样的拼写可以出现在不同范围中，也可以因作用域不同而指向不同声明。若把三者都用一个字符串代替，后续阶段便会丢失必要的区分。
+
+类型与转换也需要分开。一段表达式可以本来具有引用类型，却在某个操作数位置被隐式解引用。语义阶段应当记录该使用位置所需要的转换，后端按记录实施，而不必重新猜测语言规则。源码来源则可以继续伴随生成指令，以服务诊断与观察；来源身份与 IR 值身份仍是不同的概念。
+
+下图追踪一个加法表达式的源码范围、语法身份、语义结论与生成值，说明它们彼此关联，却各自回答不同的问题。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=12mm,
+  box/.style={draw,rounded corners,align=center,font=\small,text width=37mm}]
+\node[box] (n) {AST 节点\\\texttt{NodeId} 与 \texttt{Span}};
+\node[box,right=of n] (s) {语义事实\\类型、操作与输入转换};
+\node[box,below=of s] (v) {IR 值\\由指令定义的结果};
+\node[box,below=of n] (src) {源码切片\\\texttt{a + b * c}};
+\draw[->] (n)--node[above,font=\small]{按身份查询}(s);
+\draw[->] (n)--node[left,font=\small]{按范围切片}(src);
+\draw[->,dashed] (s)--node[right,font=\small]{转换}(v);
+\draw[->,dashed] (n)--node[below,font=\small]{来源关系}(v);
+\end{tikzpicture}
+\caption{一项计算中的不同身份与信息关系。}
+\end{figure}
+这些信息不能只留在产生它们的局部函数中。清楚的阶段接口，应当使消费者得到完成任务所需的信息，并且能够说明哪些关系已经检查、哪些仍需要处理。后续的具体载荷和语义结果设计，都是这项原则的应用。
+
+\section{用什么评价一种设计}
+评价一种表示，可以从结构、决定的归属、扩展方向和代价四方面展开。结构方面，询问字段是否直接表达语言概念：\texttt{left} 与 \texttt{right} 是否比没有角色说明的数组更容易阅读。决定的归属方面，询问同一规则是否在多个阶段重复实现：后端是否还在按字符串猜测操作数类型。
+
+扩展有不同方向。增加一种表达式，需要补充它的数据结构及相关处理规则；增加一种分析过程，则需要解释已有节点的新用途。这两种变化不应混为同一个“可扩展性”问题。第七章讨论 Visitor 时，将用节点与过程的矩阵具体说明这一区别。
+
+运行代价同样需要具体观察。逐节点分配会产生分配和指针访问成本；较大的联合会增大某些节点的对象尺寸；模板可以提供静态检查，也可能增加实例化和编译时间。清楚的数据结构使这些成本更容易分析，但不能替代实际测量。教程中的“优雅”因此不是对一种技术的赞美，而是对关系是否明确、责任是否一致、变化是否可追踪的判断。
+
+本章建立了表示之间的主线。接下来先处理所有表示都可能需要的基础信息：源文本如何保存，以及一个结构怎样准确地指回文本中的位置。
+
+\chapter{源文本、词法单元与诊断位置}
+\label{chap:front-source}
+
+\section*{导读}
+编译器不仅需要理解程序，还需要把理解结果解释给编写程序的人。错误位置、运算符位置以及保留的字面量拼写，都依赖可靠的源码表示。本章先讨论文本的寿命，再说明词法类别与非法输入，最后联系字符坐标、字节范围和生成代码。学习本章之后，读者应能够解释一个 AST 节点的范围来自哪里，以及为什么词法识别不能包办字面量的全部含义。
+
+\section{SourceFile 与源码寿命}
+一个源码切片只有在原文本仍然存在时才有意义。当前 \texttt{Crate} 拥有 \texttt{SourceFile}，而 \texttt{SourceFile} 拥有一个 \texttt{std::string}。AST 的范围因而可以在语法分析器对象销毁之后继续用于诊断与打印。
+
+下面是 \path{E:/RComplier/Rustless/include/rx/ast/item.hpp} 的真实摘录：
+\begin{lstlisting}[language=C++]
+struct Crate : Node {
+  explicit Crate(std::string source) : source(std::move(source)) {}
+  SourceFile source;
+  std::vector<Item> items;
+};
+\end{lstlisting}
+这里的拥有关系比“AST 临时借用 parser 输入缓冲区”更容易说明。读者可以沿着 \texttt{Crate} 找到文本所有者；使用者只要维持整棵树的寿命，便可以读取其源码。\texttt{SourceFile::slice} 返回视图，而不是再次复制字节，因此每次诊断切片不需要建立新的字符串。
+
+真实的切片函数位于 \path{E:/RComplier/Rustless/include/rx/ast/source.hpp}：
+\begin{lstlisting}[language=C++]
+std::string_view slice(Span span) const {
+  if (span.begin > span.end || span.end > text.size())
+    throw std::out_of_range("invalid source span");
+  return std::string_view(text).substr(span.begin, span.end - span.begin);
+}
+\end{lstlisting}
+范围检查使越界使用能够被发现。但视图仍然借用 \texttt{text}：销毁拥有它的 \texttt{Crate} 之后，保留这个视图是不安全的。返回视图的低复制成本与寿命约束，是同一个接口的两个方面。
+
+当前设计还保存标识符和整数的独立拼写，构树器与最终 \texttt{Crate} 也会各自建立源码对象。因此，它并非整个过程零复制的设计。将来若处理许多文件，可以由 SourceManager 统一拥有文本，节点仅保存文件身份和范围，并在必要处采用字符串唯一化。这样的扩展首先要明确多文件身份和寿命，再讨论减少复制；单文件实现尚不能被直接描述为完整的多文件源码管理器。
+
+\section{标识符、关键字与字面量}
+观察下面的程序：
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let mut value_1: i32 = 0x2a_i32;
+    let binary = 0b1010u32;
+    let octal = 0o12usize;
+    let decimal = 10isize;
+    let ready = true;
+}
+\end{lstlisting}
+\texttt{value\_1} 是普通标识符。\texttt{fn}、\texttt{let} 与 \texttt{mut} 具有各自的词法类别，不应被混入普通名字。\texttt{true} 和 \texttt{false} 表示布尔字面量。整数的进制前缀、下划线分隔和后缀，则共同组成一个完整词法单元。
+
+\path{E:/RComplier/Rustless/grammar/Lexer.g4} 中使用 ASCII 起始字符与后续字符规则；单独的 \texttt{\_} 有专门类别。由此可见，\texttt{\_} 与 \texttt{\_value} 的角色不同。生命周期名又有前置单引号，例如 \texttt{'a}。它不是字符字面量，也不是一个普通变量名字；AST 使用 \texttt{LifetimeName} 保留这一差别。
+
+词法规则同时保留了一组暂未在子集中实现的保留关键字。例如 \texttt{match} 已被识别为保留词，却没有相应的匹配表达式 grammar。这能防止它被当成普通标识符使用，也提醒我们区分“能识别一种词”与“已经实现对应语法”。
+
+整数识别只回答拼写是否合法。它尚未回答数值是否适合目标位宽、无后缀整数应当采用什么类型，或者一元负号怎样与整数范围共同解释。\texttt{-1} 也不是一个包含负号的整数 token：负号形成单目运算，整数载荷保存幅值的拼写。这样的划分让词法结构、语法结构和数值判断各有归属。
+
+下面是 Lexer 中真实的整数规则摘录。它保留错误的长数字拼写，防止 \texttt{123abc} 被轻易拆成一个整数与一个标识符。
+\begin{lstlisting}
+INTEGER_LITERAL
+    : (DECIMAL | BINARY | OCTAL | HEXADECIMAL) INTEGER_SUFFIX?
+    ;
+INVALID_NUMBER
+    : [0-9] ASCII_CONTINUE*
+    ;
+fragment INTEGER_SUFFIX: 'i32' | 'u32' | 'isize' | 'usize';
+\end{lstlisting}
+这类规则的价值，在于错误输入仍然保有连续的范围与可解释的类别。后续诊断能够指出完整的非法数字，而不必根据偶然产生的多个 token 猜测用户原来的输入。
+
+\section{空白、注释与非法词法单元}
+空白和注释不改变这个程序的主要 AST 形状：
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    // A line comment.
+    let value = 1 /* outer /* inner */ outer */ + 2;
+}
+\end{lstlisting}
+当前 Lexer 将正常空白、单行注释和块注释放在隐藏通道中。token stream 仍能保存它们，parser 读取通常语法通道时则无需把每个空白加入产生式。AST 构造器从范围访问原文，因此即使语法结构不保存每条注释，原始文本也仍然保存在源码对象中。
+
+嵌套块注释需要正确配对内部的开始与结束标记。当前规则通过递归的注释片段表达嵌套，且单独识别未闭合注释。它不能在遇到内部 \texttt{/*} 后，随意把这个开始标记退回成普通注释文本，否则错误的嵌套输入可能被误接受。
+
+下列规则来自同一 Lexer 文件：
+\begin{lstlisting}
+WHITESPACE: SPACE_TEXT -> channel(HIDDEN);
+LINE_COMMENT: LINE_COMMENT_TEXT -> channel(HIDDEN);
+BLOCK_COMMENT: BLOCK_COMMENT_TEXT -> channel(HIDDEN);
+UNTERMINATED_BLOCK_COMMENT: UNTERMINATED_COMMENT_TEXT;
+ERROR_CHAR: .;
+\end{lstlisting}
+非法单元留在正常通道，正常注释进入隐藏通道。二者需要不同的安排：正常注释可以不参与语法判断，非法字符却不能静默消失。\texttt{lex\_source} 还会检查非法生命周期、非法字符字面量、非法数字、未闭合注释和未知字符类别，并产生诊断。
+
+这并不意味着当前前端具有任意错误恢复能力。生成 parser 可以尝试恢复以继续报告错误，但 \texttt{parse\_source} 在存在诊断时停止发布 AST。消费者得到的树来自没有报告解析错误的路径，因此不必把 parser 的临时恢复节点当成可靠语法结构。
+
+\section{FileId、Span 与半开区间}
+范围采用半开区间 $[\mathrm{begin},\mathrm{end})$：包含起点，不包含终点。长度可以直接计算为终点减起点，相邻的两个范围也可以在同一终点和起点处连接。空范围自然表示为起点等于终点，而不必引入特殊负数。
+
+实际定义位于 \path{E:/RComplier/Rustless/include/rx/diagnostic.hpp}：
+\begin{lstlisting}[language=C++]
+struct FileId {
+  std::uint32_t value{};
+  auto operator<=>(const FileId &) const = default;
+};
+struct Span {
+  std::size_t begin{};
+  std::size_t end{};
+  std::size_t line{1};
+  std::size_t column{};
+  FileId file{};
+};
+\end{lstlisting}
+\texttt{FileId} 用于说明范围来自哪个文件。当前单编译单元的 \texttt{SourceFile} 默认使用文件身份一；多文件分配仍需要进一步的管理器。\texttt{line} 从一开始，\texttt{column} 从零开始；打印给读者时可以再转换显示习惯。
+
+字节偏移和字符索引不能普遍互换。ASCII 字符的 UTF-8 编码通常占一个字节，汉字等字符可能占多个字节。ANTLR 输入索引以解码后的字符为单位，AST 的切片则使用拥有的 UTF-8 字节串。\texttt{SourceFile} 为字符起点建立偏移表，并使用该表转换范围。
+
+下图把字符编号与字节偏移放在同一段文本下方，呈现上述转换关系。这个例子只用于源码坐标教学；当前 grammar 不接受这些汉字作为语言源码中的标识符或注释文本。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\small]
+\node[anchor=east] at (0,0) {字符};
+\node[anchor=east] at (0,-0.7) {字符起点};
+\node[anchor=east] at (0,-1.4) {字节起点};
+\foreach \x/\s/\c/\b in {1/中/0/0,2/文/1/3,3/+/2/6,4/1/3/7} {
+  \node[draw,minimum width=14mm,minimum height=8mm] at (\x*1.5,0) {\s};
+  \node at (\x*1.5,-0.7) {\c};
+  \node at (\x*1.5,-1.4) {\b};
+}
+\end{tikzpicture}
+\caption{字符位置通过偏移表映射到 UTF-8 字节位置。}
+\end{figure}
+转换函数的真实摘录如下，来自 \path{E:/RComplier/Rustless/include/rx/ast/source.hpp}：
+\begin{lstlisting}[language=C++]
+Span from_character_span(Span span) const {
+  // ANTLR indexes UTF-32 characters; syntax spans index owned UTF-8 bytes.
+  span.begin = characters.at(span.begin);
+  span.end = characters.at(span.end);
+  span.file = id;
+  return span;
+}
+\end{lstlisting}
+构树后直接使用范围切片，便不需要每次诊断重新扫描 UTF-8。代价是保存偏移表和行起点表。当前实现按输入字节建立这些表；它不是一个独立、完备的 Unicode 验证与归一化系统。扩展语言字符集时，还必须审查非法编码、字符分类与诊断列宽等需求。
+
+\section{整体范围与局部范围}
+考虑一个类型错误：
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let value = 1 + true;
+}
+\end{lstlisting}
+诊断可以标注整个二元表达式，说明组合不合法；也可以标注右操作数，说明需要的类型与得到的类型不同；还可以标注 \texttt{+}，说明该操作没有适合当前类型的规则。这些标注都合理，但所需范围不同。
+
+\texttt{BinaryExpr} 因此具有 \texttt{operator\_span}，外层 \texttt{Expr} 仍具有覆盖整个表达式的 \texttt{span}。名字对象也保存自己的范围。位置不是一份泛泛的“错误行号”，而是结构中可以按需要选择的精确来源。
+
+下图呈现整个表达式、运算符和右操作数的三种范围，说明前述诊断怎样选择不同的标注重点。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,font=\small]
+\node[font=\ttfamily\large] at (3,0) {1 + true};
+\draw[very thick] (0.8,-0.5)--(5.2,-0.5);
+\node[anchor=west] at (5.5,-0.5) {整个 Expr};
+\draw[thick] (2.2,-1)--(2.7,-1);
+\node[anchor=west] at (5.5,-1) {运算符};
+\draw[thick] (3.1,-1.5)--(5.2,-1.5);
+\node[anchor=west] at (5.5,-1.5) {右操作数};
+\end{tikzpicture}
+\caption{一个语法结构可以提供多个有明确用途的源码范围。}
+\end{figure}
+保持局部范围也有维护上的意义。若以后为诊断增加高亮，运算规则不需要重新寻找 \texttt{+} 字符；若重新打印结构，整数拼写与名字范围仍可以被独立观察。源码信息应随着所描述的结构保存，而不是在最后输出错误时临时补造。
+
+\section{生成代码与输入程序}
+ANTLR 是根据语法描述生成词法分析器和语法分析器的工具。\texttt{.g4} 文件描述 token 和产生式，生成器据此建立 C++ 类；运行时库提供输入流、token stream、语法上下文和错误监听等公共机制。
+
+项目的 \path{E:/RComplier/Rustless/CMakeLists.txt} 在构建目录中适配语法名称，再生成 \texttt{RxLexer.cpp}、\texttt{RxParser.cpp} 及相应头文件。名称适配是为了避免 C++ 目标中 \texttt{Lexer} 与 \texttt{Parser} 的保留名称冲突。源目录中的 grammar 仍保持独立描述，不需要为每个测试文件建立一套 grammar。
+
+生成的 \texttt{RxParser} 类包含各种规则的上下文类型。运行时处理不同测试程序时，产生的是这些类的不同对象及不同树形实例。类定义由语法决定，实例内容由输入程序决定。理解这一区别，可以避免把 \texttt{generated} 中的文件误认为某个测试程序的专用 AST。
+
+下图将生成步骤与处理程序的步骤分开，呈现前述“定义类”和“建立实例”的关系。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=13mm,
+  box/.style={draw,rounded corners,font=\small,text width=34mm,align=center}]
+\node[box] (grammar) {\texttt{.g4}\\语法描述};
+\node[box,right=of grammar] (gen) {ANTLR 工具\\生成 C++ 类};
+\node[box,below=of gen] (runtime) {已编译分析器\\与 runtime};
+\node[box,left=of runtime] (program) {某次输入\\Rustless 程序};
+\node[box,right=of runtime] (tree) {该次输入的\\parse tree};
+\draw[->] (grammar)--(gen);
+\draw[->] (gen)--(runtime);
+\draw[->] (program)--(runtime);
+\draw[->] (runtime)--(tree);
+\end{tikzpicture}
+\caption{语法定义决定生成组件，输入程序决定运行时建立的实例。}
+\end{figure}
+生成组件与手写构造器之间仍需清楚的边界。ANTLR 的上下文服务于识别过程，Rustless AST 服务于后续语言分析。下一章将观察二者怎样连接，以及构造器如何把规则层次转成语言概念。
