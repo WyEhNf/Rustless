@@ -665,49 +665,40 @@ private:
       throw std::logic_error("missing assignment target");
     if (!right)
       return std::move(*left);
-    auto op = operator_context->getText();
-    if (op == "=")
-      return make_expr(context,
-                       ast::AssignExpr{std::move(*left), std::move(*right)});
-    return make_expr(
-        context, ast::CompoundAssignExpr{ast::compound_operator(op),
-                                         source_span(operator_context),
-                                         std::move(*left), std::move(*right)});
+    const auto operator_text = operator_context->getText();
+    if (operator_text == "=")
+      return make_expr(context, ast::AssignExpr{std::move(*left), std::move(*right)});
+    return make_expr(context, ast::CompoundAssignExpr{ast::compound_operator(operator_text),
+                                                      source_span(operator_context),
+                                                      std::move(*left), std::move(*right)});
   }
 
   ast::ExprPtr build_expression(ParseContext *context) {
     const auto name = rule(context);
     if (name == "blockExpression")
-      return make_expr(
-          context,
-          ast::BlockExpr{build_block(
-              static_cast<rxgrammar::RxParser::BlockExpressionContext *>(
-                  context))});
+      return make_expr(context,
+                       ast::BlockExpr{build_block(
+                           static_cast<rxgrammar::RxParser::BlockExpressionContext *>(context))});
     if (name == "expressionWithBlock")
       return build_expression_with_block(
-          static_cast<rxgrammar::RxParser::ExpressionWithBlockContext *>(
-              context));
+          static_cast<rxgrammar::RxParser::ExpressionWithBlockContext *>(context));
     if (name == "ifExpression")
-      return build_if(
-          static_cast<rxgrammar::RxParser::IfExpressionContext *>(context));
+      return build_if(static_cast<rxgrammar::RxParser::IfExpressionContext *>(context));
     if (name == "literalExpression")
-      return build_literal(
-          static_cast<rxgrammar::RxParser::LiteralExpressionContext *>(
-              context));
+      return build_literal(static_cast<rxgrammar::RxParser::LiteralExpressionContext *>(context));
     if (name == "arrayExpression")
-      return build_array(
-          static_cast<rxgrammar::RxParser::ArrayExpressionContext *>(context));
-    if (name == "primaryExpression" || name == "nonBlockPrimary" ||
-        name == "conditionPrimary" ||
+      return build_array(static_cast<rxgrammar::RxParser::ArrayExpressionContext *>(context));
+    if (name == "primaryExpression" || name == "nonBlockPrimary" || name == "conditionPrimary" ||
         name == "conditionPrimaryWithoutBareBlock")
       return build_primary(context);
-    if (name == "postfixExpression" || name.contains("PostfixExpression"))
+    if (name == "postfixExpression" || name.find("PostfixExpression") != std::string_view::npos)
       return build_postfix(context);
-    if (name == "unaryExpression" || name.contains("UnaryExpression"))
+    if (name == "unaryExpression" || name.find("UnaryExpression") != std::string_view::npos)
       return build_unary(context);
-    if (name == "castExpression" || name.contains("CastExpression"))
+    if (name == "castExpression" || name.find("CastExpression") != std::string_view::npos)
       return build_cast(context);
-    if (name == "assignmentExpression" || name.contains("AssignmentExpression"))
+    if (name == "assignmentExpression" ||
+        name.find("AssignmentExpression") != std::string_view::npos)
       return build_assignment(context);
     if (is_binary_rule(name))
       return fold_binary(context);
@@ -715,28 +706,29 @@ private:
       if (auto *child_context = as_context(child);
           child_context && is_expression_context(child_context))
         return build_expression(child_context);
-    throw std::logic_error("unsupported expression parse context: " +
-                           std::string(name));
+    throw std::logic_error("unsupported expression parse context: " + std::string(name));
   }
 
   ast::UseTree build_use_tree(rxgrammar::RxParser::UseTreeContext *context) {
     ast::UseTree tree;
     stamp(tree, context);
     tree.prefix.span = source_span(context);
-    tree.prefix.root = context->getStart()->getText() == "::"
-                           ? ast::PathRoot::Absolute
-                           : ast::PathRoot::Relative;
+    tree.prefix.root = ast::PathRoot::Relative;
+    if (context->getStart()->getText() == "::")
+      tree.prefix.root = ast::PathRoot::Absolute;
     if (auto *path = context->usePath()) {
       tree.prefix.span = source_span(path);
       for (auto *segment : path->usePathSegment()) {
-        if (segment->identifier())
+        if (segment->identifier()) {
           tree.prefix.segments.emplace_back(identifier(segment->identifier()));
-        else
-          tree.prefix.segments.emplace_back(
-              ast::UseKeywordName{segment->SELF_VALUE() ? ast::UseKeyword::Self
-                                  : segment->SUPER()    ? ast::UseKeyword::Super
-                                                     : ast::UseKeyword::Crate,
-                                  source_span(segment)});
+        } else {
+          auto keyword = ast::UseKeyword::Crate;
+          if (segment->SELF_VALUE())
+            keyword = ast::UseKeyword::Self;
+          else if (segment->SUPER())
+            keyword = ast::UseKeyword::Super;
+          tree.prefix.segments.emplace_back(ast::UseKeywordName{keyword, source_span(segment)});
+        }
       }
     }
     if (context->STAR())
@@ -751,8 +743,7 @@ private:
       if (context->identifier())
         name.alias.emplace(identifier(context->identifier()));
       else if (context->UNDERSCORE())
-        name.alias.emplace(ast::UnderscoreAlias{
-            token_span(context->UNDERSCORE()->getSymbol())});
+        name.alias.emplace(ast::UnderscoreAlias{token_span(context->UNDERSCORE()->getSymbol())});
       tree.target = std::move(name);
     }
     return tree;
@@ -762,16 +753,13 @@ private:
     stamp(use, context);
     return use;
   }
-  ast::Parameter
-  build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
-    ast::Parameter parameter{{},
-                             binding(context->identifierBinding()),
-                             build_type(context->typeRef())};
+  ast::Parameter build_parameter(rxgrammar::RxParser::FunctionParamContext *context) {
+    ast::Parameter parameter{
+        {}, binding(context->identifierBinding()), build_type(context->typeRef())};
     stamp(parameter, context);
     return parameter;
   }
-  ast::Function
-  build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
+  ast::Function build_function(rxgrammar::RxParser::FunctionDefinitionContext *context) {
     ast::FunctionSignature signature;
     if (auto *parameters = context->functionParameters()) {
       if (auto *self = parameters->selfParam()) {
@@ -781,8 +769,7 @@ private:
           std::optional<ast::LifetimeName> name;
           if (self->lifetime())
             name = lifetime(self->lifetime());
-          receiver.data = ast::ReferenceSelf{mutability(self->MUT() != nullptr),
-                                             std::move(name)};
+          receiver.data = ast::ReferenceSelf{mutability(self->MUT() != nullptr), std::move(name)};
         } else
           receiver.data = ast::ValueSelf{mutability(self->MUT() != nullptr)};
         signature.receiver = std::move(receiver);
@@ -801,8 +788,7 @@ private:
     stamp(function, context);
     return function;
   }
-  ast::Struct
-  build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
+  ast::Struct build_struct(rxgrammar::RxParser::StructDefinitionContext *context) {
     ast::Struct structure{{},
                           identifier(context->identifier()),
                           {},
@@ -813,20 +799,17 @@ private:
     for (auto *attribute : context->outerAttribute()) {
       ast::DeriveAttribute value{source_span(attribute), {}};
       for (auto *name : attribute->deriveName())
-        value.names.push_back(
-            {ast::derive_kind(name->getText()), source_span(name)});
+        value.names.push_back({ast::derive_kind(name->getText()), source_span(name)});
       structure.attributes.push_back(std::move(value));
     }
     for (auto *field : context->structField()) {
-      ast::StructField value{
-          {}, identifier(field->identifier()), build_type(field->typeRef())};
+      ast::StructField value{{}, identifier(field->identifier()), build_type(field->typeRef())};
       stamp(value, field);
       structure.fields.push_back(std::move(value));
     }
     return structure;
   }
-  ast::Constant
-  build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
+  ast::Constant build_constant(rxgrammar::RxParser::ConstantItemContext *context) {
     ast::Constant value{{},
                         identifier(context->identifier()),
                         build_type(context->typeRef()),
@@ -855,7 +838,7 @@ private:
   std::uint32_t next_id_{1};
 };
 
-} // namespace
+}
 
 bool lex_source(std::string_view source, DiagnosticEngine &diagnostics) {
   antlr4::ANTLRInputStream input{std::string(source)};
@@ -870,18 +853,16 @@ bool lex_source(std::string_view source, DiagnosticEngine &diagnostics) {
       continue;
     const auto name = lexer.getVocabulary().getSymbolicName(token->getType());
     if (name == "INVALID_LIFETIME" || name == "INVALID_CHARACTER_LITERAL" ||
-        name == "INVALID_NUMBER" || name == "UNTERMINATED_BLOCK_COMMENT" ||
-        name == "ERROR_CHAR") {
-      diagnostics.error({token->getStartIndex(), token->getStopIndex() + 1,
-                         token->getLine(), token->getCharPositionInLine()},
+        name == "INVALID_NUMBER" || name == "UNTERMINATED_BLOCK_COMMENT" || name == "ERROR_CHAR") {
+      diagnostics.error({token->getStartIndex(), token->getStopIndex() + 1, token->getLine(),
+                         token->getCharPositionInLine()},
                         "invalid token '" + token->getText() + "'");
     }
   }
   return !diagnostics.has_errors();
 }
 
-bool parse_syntax(std::string_view source, std::string_view entry,
-                  DiagnosticEngine &diagnostics) {
+bool parse_syntax(std::string_view source, std::string_view entry, DiagnosticEngine &diagnostics) {
   antlr4::ANTLRInputStream input{std::string(source)};
   rxgrammar::RxLexer lexer(&input);
   SyntaxListener listener(diagnostics);
@@ -907,16 +888,14 @@ bool parse_syntax(std::string_view source, std::string_view entry,
   }
   auto *trailing = parser.getCurrentToken();
   if (trailing && trailing->getType() != antlr4::Token::EOF) {
-    diagnostics.error({trailing->getStartIndex(), trailing->getStopIndex() + 1,
-                       trailing->getLine(), trailing->getCharPositionInLine()},
-                      "unexpected trailing token '" + trailing->getText() +
-                          "'");
+    diagnostics.error({trailing->getStartIndex(), trailing->getStopIndex() + 1, trailing->getLine(),
+                       trailing->getCharPositionInLine()},
+                      "unexpected trailing token '" + trailing->getText() + "'");
   }
   return !diagnostics.has_errors();
 }
 
-FrontendResult parse_source(std::string_view source,
-                            DiagnosticEngine &diagnostics) {
+FrontendResult parse_source(std::string_view source, DiagnosticEngine &diagnostics) {
   antlr4::ANTLRInputStream input{std::string(source)};
   rxgrammar::RxLexer lexer(&input);
   SyntaxListener listener(diagnostics);
@@ -935,4 +914,4 @@ FrontendResult parse_source(std::string_view source,
   return {std::move(crate), true};
 }
 
-} // namespace rx
+}
