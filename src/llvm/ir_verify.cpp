@@ -159,27 +159,36 @@ Dominators dominators(const Function &function, const Blocks &blocks,
   while (!pending.empty()) {
     auto id = pending.back();
     pending.pop_back();
-    if (!reachable.insert(id).second)
+    if (!reachable.insert(id).second) {
       continue;
+    }
     for_each_successor(blocks.at(id)->instructions.back(),
                        [&](BlockId target) { pending.push_back(target); });
   }
   Dominators result;
-  for (const auto &[id, _] : blocks)
-    result[id] =
-        id == entry || !reachable.contains(id) ? std::set{id} : reachable;
+  for (const auto &block_entry : blocks) {
+    const BlockId id = block_entry.first;
+    if (id == entry || reachable.find(id) == reachable.end()) {
+      result[id] = {id};
+    } else {
+      result[id] = reachable;
+    }
+  }
   bool changed = true;
   while (changed) {
     changed = false;
     for (auto id : reachable) {
-      if (id == entry)
+      if (id == entry) {
         continue;
+      }
       auto next = reachable;
       for (auto predecessor : predecessors.at(id)) {
-        if (!reachable.contains(predecessor))
+        if (reachable.find(predecessor) == reachable.end()) {
           continue;
+        }
         std::set<BlockId> intersection;
-        std::set_intersection(next.begin(), next.end(),
+        std::set_intersection(next.begin(),
+                              next.end(),
                               result.at(predecessor).begin(),
                               result.at(predecessor).end(),
                               std::inserter(intersection, intersection.end()));
@@ -194,8 +203,7 @@ Dominators dominators(const Function &function, const Blocks &blocks,
   }
   return result;
 }
-void verify_ssa(const Function &function, const Blocks &blocks,
-                const Predecessors &predecessors,
+void verify_ssa(const Function &function, const Blocks &blocks, const Predecessors &predecessors,
                 std::vector<VerificationError> &errors) {
   struct Definition {
     Type type;
@@ -203,25 +211,30 @@ void verify_ssa(const Function &function, const Blocks &blocks,
     std::size_t position;
   };
   std::map<ValueId, Definition> definitions;
-  auto error = [&](std::optional<BlockId> block, std::optional<Origin> origin,
-                   const char *message) {
-    errors.push_back({function.name, block, origin, message});
-  };
-  auto define = [&](ValueId id, Type type, std::optional<BlockId> block,
-                    std::size_t position) {
-    if (!id.value ||
-        !definitions.emplace(id, Definition{type, block, position}).second)
+  auto error =
+      [&](std::optional<BlockId> block, std::optional<Origin> origin, const char *message) {
+        errors.push_back({function.name, block, origin, message});
+      };
+  auto define = [&](ValueId id, Type type, std::optional<BlockId> block, std::size_t position) {
+    if (!id.value || !definitions.emplace(id, Definition{type, block, position}).second) {
       error(block, {}, "duplicate or zero SSA definition");
+    }
   };
-  for (const auto &parameter : function.parameters)
+  for (const auto &parameter : function.parameters) {
     define(parameter.id, parameter.type, {}, 0);
-  for (const auto &block : function.blocks)
-    for (std::size_t i = 0; i < block.instructions.size(); ++i)
-      if (auto result = definition(block.instructions[i]))
-        define(result->id, result->type, block.id, i);
-  const auto dom = dominators(function, blocks, predecessors);
-  auto use = [&](const Operand &operand, BlockId use_block,
-                 std::size_t position, BlockId report_block,
+  }
+  for (const auto &block : function.blocks) {
+    for (std::size_t index = 0; index < block.instructions.size(); ++index) {
+      if (auto result = definition(block.instructions[index])) {
+        define(result->id, result->type, block.id, index);
+      }
+    }
+  }
+  const auto block_dominators = dominators(function, blocks, predecessors);
+  auto use = [&](const Operand &operand,
+                 BlockId use_block,
+                 std::size_t position,
+                 BlockId report_block,
                  const Instruction &node) {
     if (const auto *local = std::get_if<LocalOperand>(&operand.data)) {
       auto definition = definitions.find(local->id);
@@ -230,40 +243,46 @@ void verify_ssa(const Function &function, const Blocks &blocks,
         return;
       }
       const auto &value = definition->second;
-      if (value.type != operand.type)
-        error(report_block, node.origin,
-              "SSA operand type differs from its definition");
+      if (value.type != operand.type) {
+        error(report_block, node.origin, "SSA operand type differs from its definition");
+      }
       if (value.block) {
-        if (*value.block == use_block && value.position >= position)
-          error(report_block, node.origin,
-                "SSA value is used before its definition");
-        else if (!dom.at(use_block).contains(*value.block))
-          error(report_block, node.origin,
-                "SSA definition does not dominate its use");
+        if (*value.block == use_block && value.position >= position) {
+          error(report_block, node.origin, "SSA value is used before its definition");
+        } else {
+          const auto &use_dominators = block_dominators.at(use_block);
+          if (use_dominators.find(*value.block) == use_dominators.end()) {
+            error(report_block, node.origin, "SSA definition does not dominate its use");
+          }
+        }
       }
     }
   };
-  for (const auto &block : function.blocks)
-    for (std::size_t i = 0; i < block.instructions.size(); ++i) {
-      const auto &node = block.instructions[i];
+  for (const auto &block : function.blocks) {
+    for (std::size_t index = 0; index < block.instructions.size(); ++index) {
+      const auto &node = block.instructions[index];
       if (const auto *phi = std::get_if<Phi>(&node.data)) {
-        for (const auto &incoming : phi->incoming)
-          use(incoming.value, incoming.predecessor,
+        for (const auto &incoming : phi->incoming) {
+          use(incoming.value,
+              incoming.predecessor,
               blocks.at(incoming.predecessor)->instructions.size() - 1,
-              block.id, node);
-      } else
-        for_each_operand(node, [&](const Operand &operand) {
-          use(operand, block.id, i, block.id, node);
-        });
+              block.id,
+              node);
+        }
+      } else {
+        for_each_operand(
+            node, [&](const Operand &operand) { use(operand, block.id, index, block.id, node); });
+      }
     }
+  }
 }
 void verify_function(const Function &function, const Signatures &signatures,
                      std::vector<VerificationError> &errors) {
   const auto initial_errors = errors.size();
-  auto error = [&](std::optional<BlockId> block, std::optional<Origin> origin,
-                   std::string message) {
-    errors.push_back({function.name, block, origin, std::move(message)});
-  };
+  auto error =
+      [&](std::optional<BlockId> block, std::optional<Origin> origin, std::string message) {
+        errors.push_back({function.name, block, origin, std::move(message)});
+      };
   if (function.blocks.empty()) {
     error({}, {}, "function has no entry block");
     return;
@@ -272,26 +291,31 @@ void verify_function(const Function &function, const Signatures &signatures,
   Predecessors predecessors;
   IncomingEdges incoming_edges;
   for (const auto &block : function.blocks) {
-    if (!blocks.emplace(block.id, &block).second)
+    if (!blocks.emplace(block.id, &block).second) {
       error(block.id, {}, "duplicate block identity");
+    }
     predecessors[block.id];
     incoming_edges[block.id];
   }
   for (const auto &block : function.blocks) {
-    bool terminated = false, non_phi = false;
+    bool terminated = false;
+    bool seen_non_phi = false;
     for (const auto &node : block.instructions) {
-      for (auto message : verify_instruction(node))
+      for (auto message : verify_instruction(node)) {
         error(block.id, node.origin, std::move(message));
+      }
       for_each_operand(node, [&](const Operand &operand) {
-        if (const auto *global = std::get_if<GlobalOperand>(&operand.data))
-          if (!signatures.contains(global->symbol))
-            error(block.id, node.origin,
-                  "global operand refers to an undeclared symbol");
+        if (const auto *global = std::get_if<GlobalOperand>(&operand.data)) {
+          if (signatures.find(global->symbol) == signatures.end()) {
+            error(block.id, node.origin, "global operand refers to an undeclared symbol");
+          }
+        }
       });
-      if (terminated)
+      if (terminated) {
         error(block.id, node.origin, "instruction follows a terminator");
-      const bool phi = std::holds_alternative<Phi>(node.data);
-      if (phi && non_phi)
+      }
+      const bool is_phi = std::holds_alternative<Phi>(node.data);
+      if (is_phi && seen_non_phi) {
         error(block.id, node.origin, "phi must precede ordinary instructions");
       non_phi |= !phi;
       terminated = std::holds_alternative<Branch>(node.data) ||
