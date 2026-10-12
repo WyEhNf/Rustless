@@ -336,6 +336,17 @@ void validate_operation(const SemanticIndex &index, const ResolvedBinary &fact,
     require_equivalent(fact.result, fact.left.effective_type);
   }
 }
+bool same_target(const CallTarget &left, const CallTarget &right) {
+  return std::visit(ast::Overloaded{
+      [&](const FunctionTarget &target) {
+        const auto *other = std::get_if<FunctionTarget>(&right);
+        return other && target.symbol == other->symbol;
+      },
+      [&](const BuiltinTarget &target) {
+        const auto *other = std::get_if<BuiltinTarget>(&right);
+        return other && target.builtin == other->builtin;
+      }}, left);
+}
 } // namespace
 void SemanticIndex::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
@@ -535,6 +546,35 @@ void SemanticIndex::validate_shapes() const {
                     std::same_as<P, ast::MethodCallExpr>)
         if (!fact.callable)
           throw std::invalid_argument("checked call has no resolved target");
+      if constexpr (std::same_as<P, ast::CallExpr>) {
+        const auto &callee = expression(*payload.callee);
+        if (!callee.callable || !same_target(*fact.callable, *callee.callable))
+          throw std::invalid_argument("call target does not match callee identity");
+      }
+      if constexpr (std::same_as<P, ast::MethodCallExpr>) {
+        if (const auto *target = std::get_if<FunctionTarget>(&*fact.callable)) {
+          const auto &record = symbol(target->symbol);
+          auto receiver = expression(*payload.receiver).type;
+          while (receiver->kind() == K::Ref || receiver->kind() == K::Box)
+            receiver = receiver->element();
+          if (receiver->kind() != K::Struct ||
+              record.owner != receiver->symbol() ||
+              record.name != receiver->name() + "::" + payload.method.text ||
+              !function(target->symbol).receiver)
+            throw std::invalid_argument("method target does not match receiver");
+        } else {
+          const auto target = std::get<BuiltinTarget>(*fact.callable).builtin;
+          const auto name = payload.method.text;
+          const bool matches =
+              (name == "clone" && target == BuiltinId::Clone) ||
+              (name == "len" && target == BuiltinId::Len) ||
+              (name == "is_empty" && target == BuiltinId::IsEmpty) ||
+              (name == "push" && target == BuiltinId::Push) ||
+              (name == "remove" && target == BuiltinId::Remove);
+          if (!matches)
+            throw std::invalid_argument("builtin method target name mismatch");
+        }
+      }
       if (fact.type->kind() == K::Function) {
         const auto *target = fact.callable
             ? std::get_if<FunctionTarget>(&*fact.callable) : nullptr;
