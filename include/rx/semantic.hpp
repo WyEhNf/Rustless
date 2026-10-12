@@ -3,6 +3,7 @@
 #include "rx/ast.hpp"
 #include "rx/diagnostic.hpp"
 #include "rx/symbol.hpp"
+#include "rx/semantic_type.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -25,33 +26,6 @@ enum class SymbolKind {
   Local
 };
 std::string_view symbol_kind_name(SymbolKind kind);
-
-struct SemanticType;
-using SemanticTypePtr = std::shared_ptr<SemanticType>;
-
-struct SemanticType {
-  // This type is stable input for later lowering passes.
-  enum class Kind {
-    Error,
-    Never,
-    Unit,
-    Bool,
-    I32,
-    U32,
-    Isize,
-    Usize,
-    Struct,
-    Box,
-    Vec,
-    Array,
-    Ref,
-    Function
-  } kind{Kind::Error};
-  std::string name;
-  SemanticTypePtr element;
-  std::uint64_t length{};
-  bool is_mutable{};
-};
 
 struct Adjustment {
   // Implicit operations are stored in execution order.
@@ -122,7 +96,7 @@ struct StructSemantics {
   std::vector<SymbolId> fields;
 };
 
-struct SemanticResult {
+struct SemanticData {
   // Borrowed identity only; clients must keep this crate alive for AST queries.
   const ast::Crate *source_crate{};
   SemanticSummary summary;
@@ -135,6 +109,22 @@ struct SemanticResult {
   std::vector<FunctionSemantics> functions;
   std::vector<StructSemantics> structures;
   bool success{};
+};
+
+// Consumers receive a frozen snapshot only after all facts have been checked.
+class SemanticResult final {
+public:
+  SemanticResult();
+  const SemanticData &data() const { return *data_; }
+  std::shared_ptr<const SemanticData> snapshot() const { return data_; }
+  bool success() const { return data_->success; }
+  static SemanticResult publish(const ast::Crate &crate, SemanticData data);
+  static SemanticResult rejected(const ast::Crate &crate, SemanticData data);
+
+private:
+  explicit SemanticResult(std::shared_ptr<const SemanticData> data)
+      : data_(std::move(data)) {}
+  std::shared_ptr<const SemanticData> data_;
 };
 
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics);
