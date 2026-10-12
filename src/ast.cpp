@@ -323,32 +323,7 @@ void Printer::block(const Block &value, int level) {
       },
   };
   for (const auto &statement : value.statements)
-    visit(*statement,
-          Overloaded{[&](const Stmt &node, const EmptyStmt &) {
-                       heading("EmptyStmt", node, level + 1);
-                     },
-                     [&](const Stmt &node, const LetStmt &p) {
-                       heading("Let " +
-                                   std::string(p.binding.mutability ==
-                                                       Mutability::Mutable
-                                                   ? "mut "
-                                                   : "") +
-                                   p.binding.name.text,
-                               node, level + 1);
-                       if (p.annotation) {
-                         indent(level + 2);
-                         type(*p.annotation);
-                         out_ << '\n';
-                       }
-                       expression(p.initializer, level + 2);
-                     },
-                     [&](const Stmt &node, const ExprStmt &p) {
-                       heading(p.termination == Termination::Semicolon
-                                   ? "ExprStmt"
-                                   : "ExprStmt omitted-semicolon",
-                               node, level + 1);
-                       expression(p.expression, level + 2);
-                     }});
+    visit(*statement, print_statement);
   if (value.tail) {
     indent(level + 1);
     out_ << "TailExpr\n";
@@ -358,13 +333,16 @@ void Printer::block(const Block &value, int level) {
 void Printer::conditional(const IfExpr &value, int level) {
   expression(value.condition, level);
   block(*value.then_block, level);
-  if (value.else_branch)
-    std::visit(Overloaded{[&](const Box<Block> &p) { block(*p, level); },
-                          [&](const Box<IfBranch> &p) {
-                            heading("If", *p, level);
-                            conditional(p->data, level + 1);
-                          }},
-               *value.else_branch);
+  if (value.else_branch) {
+    auto print_else = Overloaded{
+        [&](const Box<Block> &payload) { block(*payload, level); },
+        [&](const Box<IfBranch> &payload) {
+          heading("If", *payload, level);
+          conditional(payload->data, level + 1);
+        },
+    };
+    std::visit(print_else, *value.else_branch);
+  }
 }
 void Printer::expression(const ExprPtr &value, int level) {
   auto label = [&](const Expr &node, std::string text) {
