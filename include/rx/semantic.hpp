@@ -115,6 +115,10 @@ public:
   bool success() const { return data_->success; }
   static SemanticResult publish(const ast::Crate &crate, SemanticData data);
   static SemanticResult rejected(const ast::Crate &crate, SemanticData data);
+  static SemanticResult publish(ast::Crate &&, SemanticData) = delete;
+  static SemanticResult publish(const ast::Crate &&, SemanticData) = delete;
+  static SemanticResult rejected(ast::Crate &&, SemanticData) = delete;
+  static SemanticResult rejected(const ast::Crate &&, SemanticData) = delete;
 
 private:
   explicit SemanticResult(std::shared_ptr<const SemanticData> data)
