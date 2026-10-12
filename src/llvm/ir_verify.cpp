@@ -7,62 +7,67 @@
 namespace rx::ir {
 namespace {
 bool same_operand(const Operand &left, const Operand &right) {
-  if (left.type != right.type || left.data.index() != right.data.index())
+  if (left.type != right.type || left.data.index() != right.data.index()) {
     return false;
-  return visit(
-      left, ast::Overloaded{
-                [&](const Operand &, const ConstantOperand &p) {
-                  return p.bits == std::get<ConstantOperand>(right.data).bits;
-                },
-                [&](const Operand &, const LocalOperand &p) {
-                  return p.id == std::get<LocalOperand>(right.data).id;
-                },
-                [&](const Operand &, const GlobalOperand &p) {
-                  return p.symbol == std::get<GlobalOperand>(right.data).symbol;
-                }});
+  }
+  return visit(left,
+               ast::Overloaded{
+                   [&](const Operand &, const ConstantOperand &payload) {
+                     return payload.bits == std::get<ConstantOperand>(right.data).bits;
+                   },
+                   [&](const Operand &, const LocalOperand &payload) {
+                     return payload.id == std::get<LocalOperand>(right.data).id;
+                   },
+                   [&](const Operand &, const GlobalOperand &payload) {
+                     return payload.symbol == std::get<GlobalOperand>(right.data).symbol;
+                   },
+               });
 }
-} // namespace
+}
 std::vector<std::string> verify_instruction(const Instruction &node) {
   std::vector<std::string> errors;
-  auto require = [&](bool ok, const char *message) {
-    if (!ok)
+  auto require = [&](bool condition, const char *message) {
+    if (!condition) {
       errors.emplace_back(message);
+    }
   };
-  if (node.data.valueless_by_exception())
+  if (node.data.valueless_by_exception()) {
     return {"instruction has no payload"};
+  }
   try {
     (void)opcode(node);
   } catch (const std::exception &) {
     errors.emplace_back("invalid instruction operator");
   }
-  if (auto result = definition(node))
-    require(result->id.value && is_value_type(result->type),
-            "invalid SSA result");
-  if (node.origin)
+  if (auto result = definition(node)) {
+    require(result->id.value && is_value_type(result->type), "invalid SSA result");
+  }
+  if (node.origin) {
     require(node.origin->node.value && node.origin->span.file.value &&
                 node.origin->span.begin <= node.origin->span.end,
             "invalid syntax provenance");
+  }
   for_each_operand(node, [&](const Operand &operand) {
     require(is_value_type(operand.type), "operand has an invalid value type");
     visit(operand,
           ast::Overloaded{
-              [&](const Operand &owner, const ConstantOperand &p) {
-                require((owner.type != Type::I1 || p.bits <= 1) &&
-                            (owner.type != Type::I8 || p.bits <= 255) &&
-                            (owner.type != Type::Ptr || p.bits == 0),
+              [&](const Operand &owner, const ConstantOperand &payload) {
+                require((owner.type != Type::I1 || payload.bits <= 1) &&
+                            (owner.type != Type::I8 || payload.bits <= 255) &&
+                            (owner.type != Type::Ptr || payload.bits == 0),
                         "constant does not fit its type");
               },
-              [&](const Operand &, const LocalOperand &p) {
-                require(p.id.value != 0, "zero SSA operand");
+              [&](const Operand &, const LocalOperand &payload) {
+                require(payload.id.value != 0, "zero SSA operand");
               },
-              [&](const Operand &owner, const GlobalOperand &p) {
-                require(owner.type == Type::Ptr && !p.symbol.empty(),
+              [&](const Operand &owner, const GlobalOperand &payload) {
+                require(owner.type == Type::Ptr && !payload.symbol.empty(),
                         "invalid global operand");
-              }});
+              },
+          });
   });
   auto alignment = [&](std::uint32_t value) {
-    require(value && !(value & (value - 1)),
-            "alignment must be a nonzero power of two");
+    require(value && !(value & (value - 1)), "alignment must be a nonzero power of two");
   };
   visit(
       node,
