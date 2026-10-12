@@ -1803,34 +1803,36 @@ private:
             ast::is_mutable(*function.ast->signature.receiver) &&
             !writable(receiver))
           report(node.span, "method requires a mutable receiver");
-        return finish(
-            check_method_signature(node, method.arguments, function.parameters,
-                                   function.result),
-            key, symbol_for(function.ast->id),
-            ast::by_reference(*function.ast->signature.receiver)
-                ? std::optional<Adjustment::Kind>(
-                      ast::is_mutable(*function.ast->signature.receiver)
-                          ? Adjustment::Kind::BorrowMutable
-                          : Adjustment::Kind::BorrowShared)
-                : std::nullopt);
+        std::optional<Adjustment::Kind> borrow;
+        const auto &declared_receiver = *function.ast->signature.receiver;
+        if (ast::by_reference(declared_receiver)) {
+          borrow = Adjustment::Kind::BorrowShared;
+          if (ast::is_mutable(declared_receiver))
+            borrow = Adjustment::Kind::BorrowMutable;
+        }
+        auto result = check_method_signature(
+            node, method.arguments, function.parameters, function.result);
+        return finish(std::move(result), key, symbol_for(function.ast->id),
+                      borrow);
       }
     }
     report(node.span, "unknown method '" + name + "'");
     return finish({}, name);
   }
 
-  ExprInfo check_method_signature(const ast::Node &node,
-                                  const std::vector<ast::ExprPtr> &arguments,
-                                  const std::vector<TyPtr> &parameters,
-                                  TyPtr result) {
+  ExprInfo check_method_signature(
+      const ast::Node &node, const std::vector<ast::ExprPtr> &arguments,
+      const std::vector<SemanticTypePtr> &parameters, SemanticTypePtr result) {
     const auto count = arguments.size();
     if (count != parameters.size())
       report(node.span, "wrong number of method arguments");
-    for (std::size_t i = 0; i < count; ++i) {
-      auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
-      auto value = check_expr(arguments[i], expected);
+    for (std::size_t index = 0; index < count; ++index) {
+      SemanticTypePtr expected;
+      if (index < parameters.size())
+        expected = parameters[index];
+      auto value = check_expr(arguments[index], expected);
       if (expected && !coercible(value.type, expected))
-        mismatch(arguments[i]->span, value.type, expected);
+        mismatch(arguments[index]->span, value.type, expected);
     }
     return {std::move(result)};
   }
@@ -1839,24 +1841,27 @@ private:
                        const ast::FieldExpr &projection) {
     auto receiver = check_expr(projection.base);
     auto base = receiver.type;
-    bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
+    bool mutable_access = true;
+    if (receiver.is_place)
+      mutable_access = receiver.is_mutable;
     bool locked = receiver.access_locked;
     std::vector<Adjustment> adjustments;
-    while (base->kind() == Ty::Kind::Ref || base->kind() == Ty::Kind::Box) {
-      if (base->kind() == Ty::Kind::Ref) {
+    while (base->kind() == SemanticType::Kind::Ref ||
+           base->kind() == SemanticType::Kind::Box) {
+      if (base->kind() == SemanticType::Kind::Ref) {
         if (!base->is_mutable()) {
           locked = true;
           mutable_access = false;
         } else if (!locked) {
-          // Binding immutability does not remove an &mut referent's rights.
+
           mutable_access = true;
         }
       }
       base = base->element();
       adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
-    if (base->kind() != Ty::Kind::Struct ||
-        !structures_.contains(base->name())) {
+    if (base->kind() != SemanticType::Kind::Struct ||
+        structures_.find(base->name()) == structures_.end()) {
       report(node.span, "field access requires a struct");
       return {};
     }
@@ -1881,16 +1886,21 @@ private:
   ExprInfo check_index(const ast::Expr &node,
                        const ast::IndexExpr &projection) {
     auto base = check_expr(projection.base);
-    auto index = check_expr(projection.index, ty(Ty::Kind::Usize));
-    if (!same(index.type, ty(Ty::Kind::Usize)))
-      mismatch(projection.index->span, index.type, ty(Ty::Kind::Usize));
+    auto index =
+        check_expr(projection.index, primitive_type(SemanticType::Kind::Usize));
+    if (!compatible_types(index.type,
+                          primitive_type(SemanticType::Kind::Usize)))
+      mismatch(projection.index->span, index.type,
+               primitive_type(SemanticType::Kind::Usize));
     auto container = base.type;
-    bool mutable_access = base.is_place ? base.is_mutable : true;
+    bool mutable_access = true;
+    if (base.is_place)
+      mutable_access = base.is_mutable;
     bool locked = base.access_locked;
     std::vector<Adjustment> adjustments;
-    while (container->kind() == Ty::Kind::Ref ||
-           container->kind() == Ty::Kind::Box) {
-      if (container->kind() == Ty::Kind::Ref) {
+    while (container->kind() == SemanticType::Kind::Ref ||
+           container->kind() == SemanticType::Kind::Box) {
+      if (container->kind() == SemanticType::Kind::Ref) {
         if (!container->is_mutable()) {
           locked = true;
           mutable_access = false;
@@ -1901,12 +1911,12 @@ private:
       container = container->element();
       adjustments.push_back({Adjustment::Kind::Dereference, container});
     }
-    if (container->kind() != Ty::Kind::Array &&
-        container->kind() != Ty::Kind::Vec) {
+    if (container->kind() != SemanticType::Kind::Array &&
+        container->kind() != SemanticType::Kind::Vec) {
       report(node.span, "type " + type_name(container) + " cannot be indexed");
       return {};
     }
-    if (container->kind() == Ty::Kind::Vec && !mutable_access)
+    if (container->kind() == SemanticType::Kind::Vec && !mutable_access)
       locked = true;
     ExprInfo result{
         container->element(), true, mutable_access, locked, {}, "index"};
@@ -1915,36 +1925,39 @@ private:
     return result;
   }
 
-  ExprInfo check_break(const ast::Expr &node, const ast::BreakExpr &p) {
+  ExprInfo check_break(const ast::Expr &node, const ast::BreakExpr &payload) {
     if (loops_.empty()) {
       report(node.span, "break is only available inside a loop");
-      return {ty(Ty::Kind::Never)};
+      return {primitive_type(SemanticType::Kind::Never)};
     }
-    auto value = p.value ? check_expr(*p.value, loops_.back().expected)
-                         : ExprInfo{ty(Ty::Kind::Unit)};
+    ExprInfo value{primitive_type(SemanticType::Kind::Unit)};
+    if (payload.value)
+      value = check_expr(*payload.value, loops_.back().expected);
     loops_.back().break_types.push_back(value.type);
-    return {ty(Ty::Kind::Never)};
+    return {primitive_type(SemanticType::Kind::Never)};
   }
 
   ExprInfo check_continue(const ast::Expr &node, const ast::ContinueExpr &) {
     if (loops_.empty())
       report(node.span, "continue is only available inside a loop");
-    return {ty(Ty::Kind::Never)};
+    return {primitive_type(SemanticType::Kind::Never)};
   }
 
-  ExprInfo check_return(const ast::Expr &node, const ast::ReturnExpr &p) {
-    auto expected =
-        current_function_ ? current_function_->result : ty(Ty::Kind::Error);
-    auto value =
-        p.value ? check_expr(*p.value, expected) : ExprInfo{ty(Ty::Kind::Unit)};
+  ExprInfo check_return(const ast::Expr &node, const ast::ReturnExpr &payload) {
+    auto expected = primitive_type(SemanticType::Kind::Error);
+    if (current_function_)
+      expected = current_function_->result;
+    ExprInfo value{primitive_type(SemanticType::Kind::Unit)};
+    if (payload.value)
+      value = check_expr(*payload.value, expected);
     if (!coercible(value.type, expected))
       mismatch(node.span, value.type, expected);
-    return {ty(Ty::Kind::Never)};
+    return {primitive_type(SemanticType::Kind::Never)};
   }
 
   struct LoopInfo {
-    TyPtr expected;
-    std::vector<TyPtr> break_types;
+    SemanticTypePtr expected;
+    std::vector<SemanticTypePtr> break_types;
   };
 
   const ast::Crate &crate_;
@@ -1965,11 +1978,11 @@ private:
   std::map<ast::NodeId, SymbolId> declaration_symbols_;
   std::unordered_set<SymbolId> recorded_symbols_;
   std::map<ast::NodeId, ExpressionSemantics> expression_facts_;
-  std::map<ast::NodeId, TyPtr> resolved_types_;
-  std::map<SymbolId, TyPtr> symbol_types_;
+  std::map<ast::NodeId, SemanticTypePtr> resolved_types_;
+  std::map<SymbolId, SemanticTypePtr> symbol_types_;
 };
 
-} // namespace
+}
 
 std::string_view symbol_kind_name(SymbolKind kind) {
   constexpr std::array names{"struct",
@@ -2004,10 +2017,16 @@ std::string dump_semantic(const SemanticResult &checked) {
   }
   out << "  Expressions\n";
   for (const auto &expression : result.expressions) {
-    out << "    #" << expression.node << " type=" << type_name(expression.type)
-        << (expression.is_place ? " place" : " value");
-    if (expression.is_place)
-      out << (expression.is_mutable ? " mutable" : " immutable");
+    out << "    #" << expression.node << " type=" << type_name(expression.type);
+    if (expression.is_place) {
+      out << " place";
+      if (expression.is_mutable)
+        out << " mutable";
+      else
+        out << " immutable";
+    } else {
+      out << " value";
+    }
     if (expression.access_locked)
       out << " access-locked";
     if (expression.symbol)
@@ -2016,10 +2035,11 @@ std::string dump_semantic(const SemanticResult &checked) {
       out << " target=" << expression.target;
     if (!expression.adjustments.empty()) {
       out << " adjustments=[";
-      for (std::size_t i = 0; i < expression.adjustments.size(); ++i) {
-        if (i)
+      for (std::size_t index = 0; index < expression.adjustments.size();
+           ++index) {
+        if (index)
           out << ", ";
-        const auto &adjustment = expression.adjustments[i];
+        const auto &adjustment = expression.adjustments[index];
         switch (adjustment.kind) {
         case Adjustment::Kind::Dereference:
           out << "deref";
@@ -2047,4 +2067,4 @@ std::string dump_semantic(const SemanticResult &checked) {
   return out.str();
 }
 
-} // namespace rx
+}
