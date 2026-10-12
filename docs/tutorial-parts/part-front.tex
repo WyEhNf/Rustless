@@ -326,14 +326,14 @@ ANTLR 是根据语法描述生成词法分析器和语法分析器的工具。\t
 下图对照 \texttt{1 + 2} 的部分语法规则树与最终 AST，呈现前文所述的层次压缩。为便于阅读，语法规则树只画出与论点有关的层级。
 \begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[>=Latex,node distance=8mm,
+\begin{tikzpicture}[>=Latex,node distance=8mm,scale=.85,transform shape,
   box/.style={draw,rounded corners,font=\small,align=center}]
 \node[box] (pe) {expression};
 \node[box,below=of pe] (pa) {additiveExpression};
-\node[box,below left=10mm and 2mm of pa] (p1) {multiplicativeExpression\\literal 1};
-\node[box,below right=10mm and 2mm of pa] (p2) {multiplicativeExpression\\literal 2};
+\node[box,text width=27mm,font=\footnotesize,below left=10mm and 1mm of pa] (p1) {multiplicative\\Expression\\literal 1};
+\node[box,text width=27mm,font=\footnotesize,below right=10mm and 1mm of pa] (p2) {multiplicative\\Expression\\literal 2};
 \draw[->] (pe)--(pa); \draw[->] (pa)--(p1); \draw[->] (pa)--(p2);
-\node[box,right=44mm of pa] (ae) {Expr\\BinaryExpr: Add};
+\node[box,right=30mm of pa] (ae) {Expr\\BinaryExpr: Add};
 \node[box,below left=10mm and 0mm of ae] (a1) {Expr\\Integer 1};
 \node[box,below right=10mm and 0mm of ae] (a2) {Expr\\Integer 2};
 \draw[->] (ae)--(a1); \draw[->] (ae)--(a2);
@@ -482,7 +482,7 @@ if (context->statementExpression()) {
 
 当前 Lexer 在读取 \texttt{>} 后进入专门模式，用不同 token 类型保留一个最大标点组合中的后续部分。parser 的 \texttt{genericClose} 读取单个闭合部分，\texttt{shiftRight} 与赋值规则则读取相应完整组合。来自两个不同 token 的部分不能仅凭相邻位置重新组成一个运算符。这项细节被限制在 Lexer 与 grammar 中；AST 保存的仍然是 \texttt{BinaryOp::Shr} 或 \texttt{CompoundAssignOp::Shr}。
 
-引用类型中的 \texttt{&&} 也需要展开为两层，而不是一种新的“二重引用”节点。对语法片段 \texttt{\&\&'a mut i32}，外层是不可变引用，生命周期和可变性属于内层。构造器首先建立内层，再用外层包裹它，并调整内层的源码起点。这样，嵌套引用直接复用 ReferenceType，不需要让语义阶段再解释一个特殊旗标。
+引用类型中的 \texttt{\&\&} 也需要展开为两层，而不是一种新的“二重引用”节点。对语法片段 \texttt{\&\&'a mut i32}，外层是不可变引用，生命周期和可变性属于内层。构造器首先建立内层，再用外层包裹它，并调整内层的源码起点。这样，嵌套引用直接复用 ReferenceType，不需要让语义阶段再解释一个特殊旗标。
 
 转换后的 \texttt{<} 同样可能被看作类型参数的开始。写为 \texttt{x as (i32) < y} 时，括号明确界定转换类型；grammar 中的 closed 类型和表达式规则负责表达这类边界。教读者理解这些规则，比让后续阶段看到“含糊的转换字符串”后再猜测意图更清晰。
 
@@ -626,10 +626,10 @@ fn main() {
 \begin{tikzpicture}[>=Latex,node distance=12mm,font=\small,
  box/.style={draw,rounded corners,align=center}]
 \node[box] (c) {CallExpr};
-\node[box,below left=13mm and 10mm of c] (cal) {callee：必需 Expr};
-\node[box,below right=13mm and 10mm of c] (args) {arguments：有序 Expr 序列};
-\node[box,right=34mm of c] (r) {ReturnExpr};
-\node[box,below=of r] (rv) {value：可选 Expr};
+\node[box,text width=24mm,below left=13mm and 2mm of c] (cal) {callee\\必需 Expr};
+\node[box,text width=30mm,below right=13mm and 2mm of c] (args) {arguments\\有序 Expr 序列};
+\node[box,right=57mm of c] (r) {ReturnExpr};
+\node[box,text width=26mm,below=25mm of r] (rv) {value\\可选 Expr};
 \draw[->,thick] (c)--(cal); \draw[->,double] (c)--(args);
 \draw[->,dashed] (r)--(rv);
 \end{tikzpicture}
@@ -1115,7 +1115,7 @@ fn main() {
 \end{lstlisting}
 CastExpr 以 value 和 target\_type 保存转换。转换目标是类型语法，不能与另一个表达式孩子混在同一个操作数数组中。\texttt{as} 的合法性和具体转换规则仍需 semantic 决定。
 
-\path{E:/RComplier/Rustless/include/rx/ast/operators.hpp} 将文字解析限制在 parser 边界，提供 binary\_operator、unary\_operator 和 compound\_operator。后续过程读取枚举，就不必每次比较 \texttt{"+"}、\texttt{"+="} 或 \texttt{"&&"}。这减少了字符串判定的重复，也使未知操作不能悄悄退入某个默认解释。
+\path{E:/RComplier/Rustless/include/rx/ast/operators.hpp} 将文字解析限制在 parser 边界，提供 binary\_operator、unary\_operator 和 compound\_operator。后续过程读取枚举，就不必每次比较 \texttt{"+"}、\texttt{"+="} 或 \texttt{"\&\&"}。这减少了字符串判定的重复，也使未知操作不能悄悄退入某个默认解释。
 
 \section{数组与结构体构造}
 \begin{lstlisting}[language=Rustless]
@@ -1339,6 +1339,723 @@ struct Expr : Node {
 \end{lstlisting}
 这一列表不是一份保证所有载荷使用相同字段的声明，而是一份封闭的形状集合。前文每个语法家族都能在列表中找到准确位置，Stmt 的三种形状也有独立联合。查看集合即可知道完整处理需要面对哪些分支。
 
-结构性孩子通常按源码顺序枚举，便于确定的打印和观察。但树遍历不是程序执行：\texttt{false && expensive()} 的右孩子仍存在于 AST 中，却不会在短路执行中总被计算；while 的 body 是一个孩子，运行时可以进入多次或零次。Visitor 负责选择处理规则，控制流则需要语义和 IR 的进一步表示。
+结构性孩子通常按源码顺序枚举，便于确定的打印和观察。但树遍历不是程序执行：\texttt{false \&\& expensive()} 的右孩子仍存在于 AST 中，却不会在短路执行中总被计算；while 的 body 是一个孩子，运行时可以进入多次或零次。Visitor 负责选择处理规则，控制流则需要语义和 IR 的进一步表示。
 
 下一章将使用这份完整节点集合，讨论同一棵树怎样服务于打印、类型检查和其他过程。专属载荷提供清楚的数据，Visitor 再提供按具体数据选择规则的方法。
+
+\chapter{Visitor 与 variant：按具体结构选择处理规则}
+\label{chap:front-visitor}
+
+\section*{导读}
+表达式 \texttt{1 + 2} 可以被打印，可以被检查类型，也可以被求出常量值或转换成 IR。它的语法结构不会随这些任务改变，而每种任务又需要区别整数、二元运算和其他节点。本章研究怎样让稳定的结构服务于不同处理过程。首先明确节点种类与处理过程这两个扩展方向，再阅读当前项目的 variant 分派，最后与经典虚函数 Visitor 作准确比较。理解这些关系以后，就能判断一种设计在新增语言结构、新增分析和发现遗漏时分别提供什么帮助。
+
+\section{两条扩展方向}
+考虑下面这个完整程序：
+\begin{lstlisting}[language=Rustless]
+fn sum() -> i32 {
+    1 + 2
+}
+\end{lstlisting}
+建树之后，整数载荷保存字面量，二元载荷保存 Add、左孩子与右孩子。打印过程需要输出这些结构；类型检查需要判断操作数与运算是否合法；常量求值需要对允许求值的操作计算结果。三者面对相同数据，却回答不同问题。
+
+这自然形成两个方向：一个方向列出语言中的结构种类，另一个方向列出作用于结构的处理过程。增加一种节点，例如增加独立的重复数组表达式，会要求相关处理过程说明如何处理新结构。增加一种过程，例如增加只统计节点的观察器，则会要求它说明如何对待现有结构。
+
+下图把节点种类与处理过程放在两个方向，呈现新增一行和新增一列各自需要补充的规则。图中的“常量”仅表示一种可能的处理任务，并未声称所有表达式均可进行常量求值。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\small,>=Latex,
+ cell/.style={draw,minimum width=24mm,minimum height=9mm,align=center}]
+\node[cell] (a00) at (0,0) {节点种类};
+\node[cell] at (2.4,0) {打印};
+\node[cell] at (4.8,0) {类型检查};
+\node[cell] at (7.2,0) {常量求值};
+\node[cell] at (0,-.9) {IntegerExpr};
+\node[cell] at (2.4,-.9) {原拼写};
+\node[cell] at (4.8,-.9) {整数类型};
+\node[cell] at (7.2,-.9) {字面值};
+\node[cell] at (0,-1.8) {BinaryExpr};
+\node[cell] at (2.4,-1.8) {运算与孩子};
+\node[cell] at (4.8,-1.8) {运算规则};
+\node[cell] at (7.2,-1.8) {计算结果};
+\node[cell] at (0,-2.7) {CallExpr};
+\node[cell] at (2.4,-2.7) {callee 与参数};
+\node[cell] at (4.8,-2.7) {调用规则};
+\node[cell] at (7.2,-2.7) {允许性检查};
+\draw[->,thick] (-1.7,-.2)--(-1.7,-2.6)
+ node[midway,left,align=center] {增加\\节点};
+\draw[->,thick] (2.1,.9)--(7.6,.9)
+ node[midway,above] {增加处理过程};
+\end{tikzpicture}
+\caption{每个处理过程对每种节点需要一条清楚的规则。}
+\end{figure}
+这里的规则可以是“读取这个字段”“按语言规则检查”，也可以是明确的“该过程不关心此节点”。关键在于选择应当可见。把所有未知结构默默交给一个默认结果，虽然容易让代码继续编译，却可能使新增节点后的分析漏掉重要含义。
+
+Visitor 的目的，是把这种按具体结构选择规则的过程组织起来。它既不是一份固定的数据结构，也不自动承诺遍历整棵树。不同实现方式会把矩阵中的规则放到不同位置，并在不同时间检查完整性。
+
+\section{当前实现的继承用于什么}
+上一章的 Expr 继承 Node，因此每个表达式共有身份与源码范围。但 BinaryExpr、CallExpr 和 IntegerExpr 没有继承 Expr。它们是 Expr::Data 的可选载荷，而 Expr 是拥有该载荷的外层节点。
+
+来自 \path{E:/RComplier/Rustless/include/rx/ast/expr.hpp} 的真实摘录能直接说明这一关系：
+\begin{lstlisting}[language=C++]
+struct BinaryExpr {
+  BinaryOp op;
+  Span operator_span;
+  ExprPtr left;
+  ExprPtr right;
+};
+struct CallExpr {
+  ExprPtr callee;
+  std::vector<ExprPtr> arguments;
+};
+\end{lstlisting}
+两种载荷都没有虚析构函数，也没有虚 accept 函数。项目中的继承用于共享 Node 信息，不用于让具体表达式对象通过虚函数动态选择行为。读取一个 \texttt{const Node\&} 可以得到公共身份，却不能仅凭该引用恢复全部语法形状；具体形状仍由有类型的 owner 与活动载荷确定。
+
+因此，当前实现应当称为基于 variant 的类型安全分派。它具有 Visitor 的组织作用，但不应被称为经典虚函数双分派。分派是怎样实现的，必须通过实际调用路径判断，不能仅因代码出现继承、重载或名为 Visitor 的类就作结论。
+
+这一区分对于维护很重要。若误以为 BinaryExpr 是 Expr 的派生类，使用者可能尝试以 \texttt{dynamic\_cast} 找到它，或者把载荷当成独立拥有 NodeId 的节点。实际接口让使用者同时接收 owner 和 payload，避免这两种误读。
+
+\section{variant、活动分支与重载}
+先看一个仅供理解 C++ 机制的教学示例。它不替代项目的完整 AST：
+\begin{lstlisting}[language=C++]
+struct IntegerValue { int value; };
+struct BooleanValue { bool value; };
+using Value = std::variant<IntegerValue, BooleanValue>;
+
+Value value = IntegerValue{3};
+auto result = std::visit(
+    rx::ast::Overloaded{
+        [](const IntegerValue &p) { return p.value; },
+        [](const BooleanValue &p) { return p.value ? 1 : 0; }},
+    value);
+\end{lstlisting}
+Value 列明允许保存的两种形状。当前对象的活动分支是 IntegerValue，因此此次访问调用整数重载。另一个对象可以活动于 BooleanValue，而使用同一份处理规则。
+
+variant 管理活动对象的构造和析构。它不是让两个对象同时共用一片未经管理的原始内存，也不是以字符串猜测当前对象是哪一种形状。普通使用时它保存一个活动分支；标准还允许某些抛异常的更换操作使其进入没有活动值的状态。当前 AST 的正常使用方式是构造完整树后通过 const 路径发布和读取，访问期间不更换节点的活动载荷。
+
+运行时与编译期在这里承担不同任务。运行时需要查看当前对象的活动分支；编译期需要验证传入处理器能否处理 variant 列出的各类载荷。对整数对象调用整数重载，并不表示其他重载可以随意缺失，因为下一次访问可能遇到布尔对象。
+
+若处理过程只想询问某一种形状，可以使用 \texttt{get\_if}。项目在 expr.hpp 中提供以下真实接口：
+\begin{lstlisting}[language=C++]
+template <class T> const T *get_if(const Expr &expr) {
+  return std::get_if<T>(&expr.data);
+}
+\end{lstlisting}
+返回非空指针表示当前载荷恰是 T；返回空指针表示不是。以下是使用该接口的教学代码：
+\begin{lstlisting}[language=C++]
+if (const auto *call = rx::ast::get_if<rx::ast::CallExpr>(expression)) {
+  auto argument_count = call->arguments.size();
+  // Use argument_count for this local query.
+}
+\end{lstlisting}
+这种局部查询适合“此处是否为调用”一类问题。若一个过程本来需要处理每种表达式，连续写许多独立 get\_if，再为未匹配情况返回默认结果，就削弱了完整性检查。查询和完整处理需要不同接口，各自说明自己的用途。
+
+\section{owner 与 payload 同时参与访问}
+项目的处理函数接收两个只读参数。例如二元表达式处理器的形状是：
+\begin{lstlisting}[language=C++]
+Result operator()(const rx::ast::Expr &owner,
+                  const rx::ast::BinaryExpr &payload);
+\end{lstlisting}
+这是接口形状的教学示意，其中 Result 由处理任务自行定义。owner 提供这一次表达式出现的 NodeId 和 Span；payload 提供操作符、左右孩子和运算符位置。二者指向同一个语法结构的不同职责，不是两份互不相关的节点。
+
+以 \texttt{1 + 2} 为例，打印器可以从 payload 读取 Add，再从 owner 输出整个表达式范围；类型检查可以从 payload 读取操作数，再使用 owner 的范围报告运算错误；身份关联表可以按 owner.id 保存检查结果。载荷不必重复保存公共字段，处理过程也不必向外猜测它所属节点。
+
+\path{E:/RComplier/Rustless/include/rx/ast/dispatch.hpp} 首先为不同 owner 找到载荷。以下是真实删节摘录，省去其他具有相同形式的重载：
+\begin{lstlisting}[language=C++]
+template <std::derived_from<Node> T> const T &payload(const T &node) {
+  return node;
+}
+inline const auto &payload(const Expr &node) { return node.data; }
+inline const auto &payload(const TypeSyntax &node) { return node.data; }
+inline const auto &payload(const Stmt &node) { return node.data; }
+inline const auto &payload(const UseTree &node) { return node.target; }
+\end{lstlisting}
+Expr、TypeSyntax、Stmt 和 UseTree 的 owner 内部有分支联合。Function、Struct、Block 等结构则本身就是具体形状，所以 payload 可以是 owner 自身。访问一个 Function 时，处理器接收 \texttt{(const Function\&, const Function\&)}；两个参数在这种情况引用同一个对象，公共访问协议保持一致。
+
+真正的分派由以下真实实现完成：
+\begin{lstlisting}[language=C++]
+template <class T, class V>
+  requires detail::SyntaxOwners::contains<T> && ExhaustiveVisitor<V, T>
+decltype(auto) visit(const T &node, V &&visitor) {
+  const auto &value = detail::payload(node);
+  if constexpr (requires {
+                  std::variant_size<
+                      std::remove_cvref_t<decltype(value)>>::value;
+                }) {
+    return std::visit(
+        [&](const auto &p) -> decltype(auto) {
+          return std::invoke(visitor, node, p);
+        },
+        value);
+  } else {
+    return std::invoke(visitor, node, value);
+  }
+}
+\end{lstlisting}
+有 variant 载荷时，先选择活动分支；没有 variant 载荷时，直接调用具体结构处理函数。\texttt{if constexpr} 的判断发生在模板实例化时，编译器不会为每个已知具体类型保留两条待运行时猜测的路径。
+
+Item 又处在另一个层次。Item 是 Use、Function、Struct、Constant、Impl 这些具有身份的具体 owner 之间的联合；ImplMember 是 Function 与 Constant 之间的联合。联合自身不额外增加一层 NodeId。dispatch.hpp 的真实实现先选出其中的 owner，再复用前述协议：
+\begin{lstlisting}[language=C++]
+template <class... Ts, class V>
+  requires ExhaustiveVisitor<V, std::variant<Ts...>>
+decltype(auto) visit(const std::variant<Ts...> &nodes, V &&visitor) {
+  return std::visit(
+      [&](const auto &node) -> decltype(auto) { return visit(node, visitor); },
+      nodes);
+}
+\end{lstlisting}
+这使声明联合、表达式联合与普通结构拥有一致入口，同时仍保留准确的具体 owner 类型。统一入口并未把所有数据压成一个失去结构的 Node 指针。
+
+\section{穷尽性与统一返回类型}
+完整处理首先要求每个可能分支都能够被调用。项目把这一要求写成 ExhaustiveVisitor concept，而不是依靠运行时到达某个未知分支后再报错。
+
+在 dispatch.hpp 中，以下真实模板检查 variant 的全部载荷及返回类型：
+\begin{lstlisting}[language=C++]
+template <class V, class Owner, class... Ps>
+struct VisitorCoverage<V, Owner, std::variant<Ps...>> {
+  static consteval bool compatible() {
+    if constexpr ((std::is_invocable_v<V &, const Owner &, const Ps &> &&
+                   ...)) {
+      using First = std::variant_alternative_t<0, std::variant<Ps...>>;
+      using Result = std::invoke_result_t<V &, const Owner &, const First &>;
+      return (
+          std::same_as<Result,
+                       std::invoke_result_t<V &, const Owner &, const Ps &>> &&
+          ...);
+    }
+    return false;
+  }
+  static constexpr bool value = compatible();
+};
+\end{lstlisting}
+折叠表达式逐一检查“以 const owner 和 const payload 调用是否成立”。只有全部成立，才检查所有调用结果是否与第一个分支完全相同。只接受可变载荷的函数不满足只读协议；缺少一个分支的函数不满足完整覆盖；某些分支返回 int、另一些返回 void 的函数不满足统一结果。
+
+使用 \texttt{std::same\_as} 意味着这里要求准确的同一返回类型，而非仅仅能够转换到某个共同类型。这使调用者知道访问的结果究竟是什么。打印器可以统一返回 void，身份查询可以统一返回 NodeId，表达式检查可以统一返回自己的 ExprInfo。需要多种结果形状时，应由处理任务明确设计自己的结果 variant，而非让每个节点悄然决定不一致的返回类型。
+
+下图归纳 Expr 的全部载荷家族，并在右侧呈现三种接口错误。它说明的是编译期能够检查的调用协议，尚未保证每条规则的语义判断都正确。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,font=\small,
+ box/.style={draw,rounded corners,align=left,text width=57mm,inner sep=3mm}]
+\node[box] (all) {需要覆盖的载荷：\\
+ 原子、路径、括号\\
+ 数组、重复数组、结构体、块\\
+ if、loop、while\\
+ 单目、借用、二元、赋值、转换\\
+ 调用、方法、字段、下标\\
+ break、continue、return};
+\node[box,right=12mm of all,text width=42mm] (rules) {三个拒绝原因：\\
+ 少一个处理分支\\
+ 只接受可变 payload\\
+ 分支返回类型不一致};
+\node[draw,rounded corners,below=12mm of all,
+ align=center,text width=104mm,xshift=30mm] (ok)
+ {全部 const 调用成立，且返回类型一致\\才能使用完整分派接口};
+\draw[->] (all.south)--(ok.north west);
+\draw[->] (rules.south)--(ok.north east);
+\end{tikzpicture}
+\caption{穷尽性把遗漏和接口不一致提前到编译期发现。}
+\end{figure}
+\path{E:/RComplier/Rustless/tests/ast_visitor.cpp} 使用编译期断言验证这些边界。以下为真实断言摘录，省去其他断言：
+\begin{lstlisting}[language=C++]
+static_assert(!ast::ExhaustiveVisitor<OnlyBinary, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<DifferentReturns, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<MutablePayload, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<WrongOwner, ast::Expr>);
+\end{lstlisting}
+测试中的 OnlyBinary 仅处理 BinaryExpr；DifferentReturns 对一般分支返回 int、对 BinaryExpr 返回 void；MutablePayload 只接受可变载荷；WrongOwner 要求 TypeSyntax，却被用于 Expr。它们代表四个不同的错误，不应都被泛泛解释为“Visitor 不完整”。
+
+\texttt{decltype(auto)} 还有一项意义：它保留实际返回值的引用属性。若身份观察器返回 \texttt{const NodeId\&}，访问结果也保持该引用类型，而不是无意复制成值。该引用依然受被访问节点寿命约束；保留类型不能延长对象寿命。
+
+\section{经典 Visitor 的双分派}
+另一种标准做法是建立多态节点层次。每种具体节点继承共同基类，并实现 accept；处理过程继承 Visitor 接口，并实现每种节点的 visit。下面是解释调用机制的教学替代方案，不属于 Rustless 当前实现：
+\begin{lstlisting}[language=C++]
+struct IntegerNode;
+struct BinaryNode;
+
+struct ExprVisitor {
+  virtual ~ExprVisitor() = default;
+  virtual void visit(const IntegerNode &) = 0;
+  virtual void visit(const BinaryNode &) = 0;
+};
+struct ExprNode {
+  virtual ~ExprNode() = default;
+  virtual void accept(ExprVisitor &) const = 0;
+};
+struct IntegerNode final : ExprNode {
+  int value;
+  void accept(ExprVisitor &visitor) const override {
+    visitor.visit(*this);
+  }
+};
+struct BinaryNode final : ExprNode {
+  void accept(ExprVisitor &visitor) const override {
+    visitor.visit(*this);
+  }
+};
+\end{lstlisting}
+当调用者持有 \texttt{const ExprNode\&} 与 \texttt{ExprVisitor\&} 时，第一次虚调用 accept 根据节点对象的动态类型进入 IntegerNode 或 BinaryNode 的实现。在 BinaryNode::accept 内，\texttt{*this} 的静态类型已经是 BinaryNode，因此重载解析选中 \texttt{visit(const BinaryNode\&)}。该 visit 又是虚函数，第二次动态选择根据 Visitor 对象的具体类型进入打印器、检查器等实现。
+
+这里有两次动态选择，也有一次静态重载解析。经典双分派的效果是让节点种类与处理过程的动态类型共同确定行为。若只在 ExprNode 上放一个虚 print，则只有节点方向的动态选择；若只是给普通函数写几个重载，调用者静态持有 ExprNode 引用时，也不会自动根据真实派生类型选择 BinaryNode 重载。
+
+下图对照当前 variant 路径与经典 Visitor 路径，呈现二者都能按具体结构选择规则，但使用不同机制。箭头上的“动态”指运行时选择，并不单独断言其成本大小。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=7mm,font=\small,
+ box/.style={draw,rounded corners,align=center,text width=48mm}]
+\node[box] (v1) {当前 AST\\Expr 的活动 variant 分支};
+\node[box,below=of v1] (v2) {std::visit 选择 BinaryExpr};
+\node[box,below=of v2] (v3) {调用确定的处理器\\operator()(Expr, BinaryExpr)};
+\node[box,right=17mm of v1] (o1) {经典节点层次\\ExprNode 引用};
+\node[box,below=of o1] (o2) {虚 accept\\选择 BinaryNode 实现};
+\node[box,below=of o2] (o3) {虚 visit(BinaryNode)\\选择具体 Visitor 实现};
+\draw[->] (v1)--(v2) node[midway,left,font=\footnotesize] {动态};
+\draw[->] (v2)--(v3);
+\draw[->] (o1)--(o2) node[midway,right,font=\footnotesize] {动态一};
+\draw[->] (o2)--(o3) node[midway,right,font=\footnotesize] {动态二};
+\end{tikzpicture}
+\caption{variant 分派与经典虚函数双分派的调用路径不同。}
+\end{figure}
+在经典形式中，增加一种处理过程可以新增一个 Visitor 派生类，不必把 print、check、lower 等所有行为放进节点本身。纯虚 visit 接口也可以要求每个具体 Visitor 实现全部节点处理；它同样具有编译期完整性要求。类型安全并非 variant 独有，准确的比较应当落到具体接口及它维护的不变量上。
+
+\section{两种方案的具体取舍}
+对于 Rustless 这种由一个 grammar 明确界定的语言子集，节点集合天然有边界。读者可以在 Expr::Data 中查看全体表达式；修改该集合会让严格处理器重新接受编译检查。variant 很适合表达这样的封闭集合。
+
+虚函数派生让节点对象可以通过共同基类保存，单个对象只需包含自身具体字段与多态支持信息。它提供开放类层次的基础，但经典 Visitor 接口列明所有节点种类，因此“新增派生类很方便”和“所有既有 Visitor 无需改动”不能同时作为经典方案的无条件结论。新增节点通常仍要增加 visit 重载，并更新需要完整处理的 Visitor。
+
+两种方式均能方便地把新处理过程写在节点定义之外。当前 variant 形式允许不同处理过程自然返回各自类型：打印返回 void，查询返回 NodeId，检查返回 ExprInfo。经典的单一虚接口必须确定虚函数签名；若不同过程需要不同结果，可以设计不同 Visitor 接口、通过 Visitor 状态取回结果，或采用其他抽象。各种方案都可成立，但需要明确额外结构的代价。
+
+对象尺寸方面，variant 必须为最大载荷保留足够空间，并保存活动分支信息；派生对象通常按各自字段确定尺寸，但还涉及多态表示及分配方式。当前 AST 的子节点通过 Box 间接存储，所以不能从“使用 variant”推导出“全树连续存储”或“没有堆分配”。父子间接访问、分配数量和遍历局部性仍值得单独观察。
+
+调用成本方面，std::visit 需要依据活动分支选择处理规则，具体实现可以使用条件、跳转表或其他策略。虚调用通常经由间接目标，优化器在已知动态类型时也可能消除间接调用。处理函数可否内联、节点分布、缓存行为以及优化选项都会影响结果。没有以相同工作负载测量，就不能断言 variant 恒定更快，或双分派必然构成可观瓶颈。
+
+模板提供了很强的静态约束，但也使编译器为各种访问器和节点组合实例化代码。严格覆盖会增加编译期检查，错误信息的可读性依赖 concept 与接口组织；二进制体积和编译时间也需要实际评估。虚接口减少部分模板展开，却可能需要更多固定接口和适配状态。优雅的设计应当用合适代价获得明确责任，而不是把某个 C++ 机制本身当作目标。
+
+最后，\texttt{dynamic\_cast} 是带运行时检查的多态转换，并不是未经检查的强制类型转换。对开放层次中的局部查询，它可以合理使用。若一个完整分析反复尝试几十种转换，并在未匹配时默默继续，问题在于规则覆盖没有清楚表达；把 dynamic\_cast 一概称为不安全，并不能指出真实设计缺陷。
+
+\section{严格处理与显式兜底}
+ExhaustiveVisitor 检查的是所有分支能否调用。因此，一个接受任意 payload 的泛型函数也满足调用覆盖。以下是真实测试中的身份观察器：
+\begin{lstlisting}[language=C++]
+struct IdentityVisitor {
+  template <class T>
+  ast::NodeId operator()(const ast::Node &node, const T &) const {
+    return node.id;
+  }
+};
+\end{lstlisting}
+它有充分理由忽略具体载荷：每个有身份的 owner 都继承 Node，查询只需要公共 id。新增节点以后，取身份的规则仍成立。在这里，泛型兜底是有语义依据的明确选择。
+
+若任务是运算类型检查，情况不同。新增一种运算节点后，返回“默认 i32”虽然使所有调用成立，却没有解释新结构的合法性。严格处理应当为各具体形状写规则，或者显式写出某个家族为何共享同一规则。概念约束能防止漏掉调用，但不能判断一个泛型兜底是否符合语言含义。
+
+当前打印器的类型打印在 \path{E:/RComplier/Rustless/src/ast.cpp} 中列出 UnitType、PathType、ReferenceType、ArrayType 和 ParenType 五种分支。例如下面的真实摘录专门处理引用：
+\begin{lstlisting}[language=C++]
+[&](const TypeSyntax &, const ReferenceType &value) {
+  out_ << '&';
+  if (value.lifetime)
+    out_ << value.lifetime->text << ' ';
+  if (value.mutability == Mutability::Mutable)
+    out_ << "mut ";
+  type(value.referent);
+}
+\end{lstlisting}
+这是一份完整重载集合中的单个分支，并不能独自作为完整 TypeSyntax Visitor 使用。它展示了打印过程读取生命周期与可变性，再按自己的输出次序递归处理 referent。
+
+语义过程也使用同样的分派协议，但返回自己的分析结果。\path{E:/RComplier/Rustless/src/semantic.cpp} 中以下两个真实分支，分别为布尔与单元表达式返回 ExprInfo：
+\begin{lstlisting}[language=C++]
+[&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
+  return {ty(Ty::Kind::Bool)};
+},
+[&](const ast::Expr &, const ast::UnitExpr &) -> ExprInfo {
+  return {ty(Ty::Kind::Unit)};
+}
+\end{lstlisting}
+这里的类型创建与 ExprInfo 内容将在语义章节解释。当前论点是：同一份 AST 接口允许打印和分析返回不同任务结果，而不必在 Expr 中加入 \texttt{print()}、\texttt{check()} 或后端专属方法。
+
+对于节点统计、位置收集、身份搜索等观察任务，显式的默认行为很有帮助。下一章将给出 DefaultVisitor，它要求使用者明确继承默认规则，再覆盖自己关心的部分。完整语言处理与选择性观察因而各有清楚的接口；二者不会仅因都使用 visit 就被误认为承担相同责任。
+
+至此，访问一个节点已经能够获得正确形状、公共身份和统一结果。但是，访问 BinaryExpr 不会自动访问它的 left 与 right。处理规则、子节点关系与递归策略仍是三个不同问题，这正是下一章的主题。
+
+\chapter{子节点枚举、遍历策略与头文件边界}
+\label{chap:front-traversal}
+
+\section*{导读}
+选择一个节点的处理函数，与决定是否访问它的孩子，是两个不同问题。一个打印器可能按固定格式递归，一个观察器希望访问每个节点，一个类型检查器则要在进入某些孩子之前建立作用域或传入预期类型。本章把分派、子节点枚举和整树遍历分别讲解，再阅读它们在头文件中的对应关系。重点是理解通用工具承诺了什么，使用者还需决定什么，以及新增结构时哪些规则应当重新检查。
+
+\section{dispatch、children 与 traversal}
+对下面的函数，建树得到的二元根、左整数和右整数是三个表达式节点：
+\begin{lstlisting}[language=Rustless]
+fn sum() -> i32 {
+    1 + 2
+}
+\end{lstlisting}
+调用 ast::visit 访问根，只会选择 BinaryExpr 的处理函数。它不会自动进入 left，也不会自动进入 right。若该处理函数什么也不做，孩子仍未被访问；若处理函数自行访问 left 两次，则左孩子会被处理两次。visit 的承诺是单节点分派，而非遍历策略。
+
+\texttt{for\_each\_child} 提供另一项承诺：按结构规则枚举当前节点的直接、有身份的孩子。对于二元根，它提供左表达式与右表达式；对于整数，它不提供孩子。此接口也不自行递归。调用者可以打印孩子身份，也可以将每个孩子继续交给遍历器。
+
+walk 再组合这两层，提供深度优先的 enter、leave 和控制规则。对于通常的整树观察，它调用 enter，按顺序递归孩子，然后调用 leave。于是三层可以分别回答“这是什么结构”“这个结构有哪些直接孩子”“此次访问怎样沿孩子前进”。
+
+下图分别呈现三层的职责及组合关系，说明遍历策略如何使用子节点枚举，而枚举又如何依据具体载荷确定边。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=9mm,font=\small,
+ box/.style={draw,rounded corners,text width=96mm,align=center,inner sep=3mm}]
+\node[box] (w) {traversal：控制进入、离开、跳过与停止\\决定如何沿结构前进};
+\node[box,below=of w] (c) {children：枚举直接的有身份子节点\\声明 BinaryExpr 的 left 与 right 等结构边};
+\node[box,below=of c] (d) {dispatch：按具体 payload 选择处理函数\\传入只读 owner 与只读 payload};
+\draw[->] (w)--(c) node[midway,right] {使用};
+\draw[->] (c)--(d) node[midway,right] {使用};
+\end{tikzpicture}
+\caption{单节点规则、结构边和递归策略各有独立契约。}
+\end{figure}
+这种分离减少了重复。多个整树观察器不必各自重写二元表达式左右递归、数组元素递归、函数参数递归；它们可以共用一份结构边声明。与此同时，语义分析不必为了满足统一 DFS 顺序而放弃自己的上下文控制。
+
+\section{直接子节点与普通记录}
+AST 中包含很多不具有独立身份的记录。Identifier 保存文字和范围，PathSegment 保存名字与可选类型实参，DeriveAttribute 保存属性位置与派生项。它们各自具有语法意义，但不一定需要作为整树访问器的独立入口。
+
+这是一项明确的模型选择：NodeId 分配给需要按身份观察或关联事实的 owner，而不是分配给每一个 C++ 字段。访问 Struct 时，可以直接从其属性记录读取 derive 信息；访问 PathExpr 时，可以从 payload.path 读取各段名。通用 walk 不会为每个 Identifier 再调用一次 enter。
+
+不过，没有独立身份的记录仍可能包含有身份的节点。下面的路径含有一个类型实参：
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let values = Vec::<i32>::new();
+}
+\end{lstlisting}
+PathExpr 内的路径段本身是普通记录；其中 GenericArguments 包含一个指向 TypeSyntax 的类型实参。该 TypeSyntax 有身份，所以子节点枚举穿过路径记录，继续提供 i32 的类型节点。普通记录不是阻断遍历的黑箱，而是可由结构规则展开的组合。
+
+children.hpp 的以下真实实现说明了这一点：
+\begin{lstlisting}[language=C++]
+void arguments(const std::optional<GenericArguments> &value) {
+  if (value)
+    for (const auto &argument : value->values)
+      std::visit(Overloaded{[&](const TypePtr &p) { recurse_(*p); },
+                            [&](const LifetimeName &) {}},
+                 argument);
+}
+void path(const Path &value) {
+  for (const auto &segment : value.segments)
+    arguments(segment.arguments);
+}
+\end{lstlisting}
+类型实参成为节点边；生命周期名保持普通值，不伪造一个独立 TypeSyntax。类似地，泛型生命周期参数本身具有身份，会被枚举；参数携带的名字与边界名字则由该参数的 payload 读取。
+
+数组类型提供另一个有用例子：
+\begin{lstlisting}[language=Rustless]
+const SIZE: usize = 3;
+fn first(values: [i32; SIZE]) -> i32 {
+    values[0]
+}
+\end{lstlisting}
+ArrayType 的 element 是 TypeSyntax，length 是 Expr。它们虽属于不同节点家族，却同样是当前类型节点的结构孩子。整树观察可以访问二者；语义分析则分别解释元素类型和长度常量，不能因为二者都是孩子就以同一规则处理。
+
+\section{子结构集中声明}
+\path{E:/RComplier/Rustless/include/rx/ast/children.hpp} 用 ChildEnumerator 为每种载荷显式声明孩子。以下是真实删节摘录，保留四种不同的结构形式：
+\begin{lstlisting}[language=C++]
+void operator()(const BinaryExpr &p) {
+  recurse_(*p.left);
+  recurse_(*p.right);
+}
+void operator()(const ArrayType &p) {
+  recurse_(*p.element);
+  recurse_(*p.length);
+}
+void operator()(const Block &p) {
+  for (const auto &statement : p.statements)
+    recurse_(*statement);
+  if (p.tail)
+    recurse_(**p.tail);
+}
+void operator()(const IntegerExpr &) {}
+\end{lstlisting}
+BinaryExpr 有两个必需孩子；ArrayType 跨越类型和表达式家族；Block 有语句序列与可选尾表达式；IntegerExpr 没有有身份的孩子。空重载是一条明确的结构规则，而不是未匹配到任何规则后的偶然结果。
+
+ChildEnumerator 没有接受任意未知载荷的 catch-all 重载。新增载荷时，如果尚未声明它的孩子，完整访问会发现该载荷无法调用。这有助于避免一种常见遗漏：打印器已识别新节点，但节点统计或身份搜索仍悄悄跳过其所有后代。
+
+声明联合也保持真实顺序。Crate 按 items 的顺序选出具体 owner；Impl 按 members 顺序访问 Function 或 Constant。Function 则先枚举泛型生命周期参数，再枚举 receiver、普通参数、返回注解、where 约束与函数体。语义需要不同顺序时仍可自己控制，结构枚举首先提供确定的源码结构次序。
+
+对结构体构造而言，这一次序尤其不能与布局混淆：
+\begin{lstlisting}[language=Rustless]
+struct Pair { left: i32, right: i32 }
+fn make() -> Pair {
+    Pair { right: 2, left: 1 }
+}
+\end{lstlisting}
+StructExpr 的 FieldInit 按 right、left 的源顺序保留和枚举。布局依据声明中的 left、right 决定字段位置。保留初始化顺序让源码观察具有确定性，也为以后明确求值次序提供必要输入；直接按偏移重排孩子，会混合两个不同职责。
+
+公开接口把载荷分派与枚举连接起来，实际代码如下：
+\begin{lstlisting}[language=C++]
+template <SyntaxRoot T, class Recurse>
+void for_each_child(const T &node, Recurse &&recurse) {
+  detail::ChildEnumerator<std::remove_reference_t<Recurse>> children(recurse);
+  visit(node, [&](const auto &, const auto &p) { children(p); });
+}
+\end{lstlisting}
+其中 recurse 的名字表示调用者可以用它继续递归，并不意味着该接口已经替调用者递归。对每个直接孩子只调用回调，是接口边界；递归、过滤和统计属于调用者策略。
+
+\section{enter、leave 与深度优先遍历}
+深度优先遍历先进入一个节点，再完整处理其孩子，最后离开该节点。enter 适合记录开始、设置观察状态或决定跳过；leave 适合记录完成或汇总后代结果。
+
+当前接口定义三种控制和两种结果：
+\begin{lstlisting}[language=C++]
+enum class WalkControl { Continue, SkipChildren, Stop };
+enum class WalkResult { Completed, Stopped };
+\end{lstlisting}
+Continue 继续当前节点的孩子；SkipChildren 不进入当前节点的孩子，但随后可以继续其他子树；Stop 使整次遍历停止进入新的节点。停止并不删除 AST，也不等价于源程序中的 break。WalkControl 是观察算法的控制，BreakExpr 是被观察语言的结构。
+
+下面的源码含有嵌套分支和块：
+\begin{lstlisting}[language=Rustless]
+fn choose(flag: bool) -> i32 {
+    if flag {
+        { 1 + 2 }
+    } else {
+        3
+    }
+}
+\end{lstlisting}
+访问 IfExpr 时，普通 DFS 会依次遍历条件、then 块和 else 块。两个块都会被观察；这不表示程序运行时会执行两条分支。进入 then 中二元表达式时，访问器还会依次进入两个整数，然后离开二元表达式和所在块。
+
+下图将二元根记为 A，左整数记为 B，右整数记为 C，比较三种控制的事件次序。它呈现的是已进入节点如何在受控跳过或停止后成对离开。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\small,>=Latex,
+ row/.style={draw,rounded corners,text width=112mm,align=left,inner sep=3mm}]
+\node[row] (r1) {全部 Continue：\\
+ enter A $\to$ enter B $\to$ leave B $\to$ enter C $\to$ leave C $\to$ leave A};
+\node[row,below=8mm of r1] (r2) {在 A 返回 SkipChildren：\\
+ enter A $\to$ leave A；B、C 都未进入，其他子树仍可继续};
+\node[row,below=8mm of r2] (r3) {在 B 返回 Stop：\\
+ enter A $\to$ enter B $\to$ leave B $\to$ leave A；C 未进入};
+\end{tikzpicture}
+\caption{SkipChildren 与 Stop 都保留正常控制路径上的 enter/leave 配对。}
+\end{figure}
+实现来自 \path{E:/RComplier/Rustless/include/rx/ast/traversal.hpp}，以下是 walk 成员函数的真实摘录：
+\begin{lstlisting}[language=C++]
+template <SyntaxRoot T> WalkResult walk(const T &node) {
+  if (stopped_)
+    return WalkResult::Stopped;
+  auto control = visit(node, detail::EnterAdapter<V>{visitor_});
+  if (control == WalkControl::Stop)
+    stopped_ = true;
+  else if (control == WalkControl::Continue)
+    for_each_child(node, [&](const auto &child) { walk(child); });
+  // Balance every successful enter, including skip and stop, on unwinding.
+  visit(node, detail::LeaveAdapter<V>{visitor_});
+  return stopped_ ? WalkResult::Stopped : WalkResult::Completed;
+}
+\end{lstlisting}
+stopped\_ 状态使后续孩子调用立即返回，因此不会产生新的 enter 事件；已有递归层仍会执行 leave。这种受控展开很适合搜索：找到目标之后，已经打开的观察上下文可以正常关闭。
+
+该保证限定于正常返回的控制路径。若 enter、枚举回调或 leave 抛出异常，当前实现没有以 RAII 守卫保证每个已进入节点执行 leave。因此，需要异常安全恢复的分析不能把 leave 当作无条件的析构机制；它应另外设计状态守卫或明确异常策略。把正常 Stop 和 C++ 异常展开混为一谈，会夸大遍历器实际提供的契约。
+
+整树 Visitor 还必须在所有已注册 owner 及载荷上同时提供合法的 enter 和 leave。enter 准确返回 WalkControl，leave 准确返回 void。即使从某个较小子树开始，当前概念仍要求完整的整树协议，从而使该访问器可以在其他合法根上复用，而不随偶然选择的根改变处理能力。
+
+\section{DefaultVisitor 与选择性观察}
+对于只统计二元表达式的任务，逐一写出其他所有节点“继续、不记录”很冗长。当前实现提供一份明确可继承的默认规则：
+\begin{lstlisting}[language=C++]
+struct DefaultVisitor {
+  template <class P> WalkControl enter(const Node &, const P &) {
+    return WalkControl::Continue;
+  }
+  template <class P> void leave(const Node &, const P &) {}
+};
+\end{lstlisting}
+它不在每个 Visitor 背后自动存在。使用者必须显式继承，表示选择“不关心的结构继续遍历且不作额外处理”。关键处理器可以不继承默认规则，使新增载荷导致覆盖检查重新失败。
+
+\path{E:/RComplier/Rustless/tests/ast_visitor.cpp} 中的 BinaryObserver 是完整可核对的实际例子：
+\begin{lstlisting}[language=C++]
+struct BinaryObserver : ast::DefaultVisitor {
+  using DefaultVisitor::enter;
+  int count{};
+  ast::WalkControl enter(const ast::Expr &owner, const ast::BinaryExpr &p) {
+    assert(owner.id.value && p.left->id != p.right->id);
+    ++count;
+    return ast::WalkControl::Continue;
+  }
+};
+\end{lstlisting}
+\texttt{using DefaultVisitor::enter} 把基类的 enter 重载引入可见集合。否则，派生类声明一个同名 enter 会隐藏基类同名成员，而不是自动与其全部模板重载组成希望得到的集合。这里的 using 是 C++ 名字查找规则所要求的设计细节。
+
+在如下程序上，该观察器会计数两次：
+\begin{lstlisting}[language=Rustless]
+fn total() -> i32 {
+    (1 + 2) * 3
+}
+\end{lstlisting}
+括号是 ParenExpr，不增加二元计数；括号中的 Add 与外面的 Mul 各有一个 BinaryExpr。观察器没有手写两个孩子的递归，递归由 walk 与 ChildEnumerator 提供。
+
+若只需要搜索身份，可以使用一个接受所有载荷的回调。以下为教学用法，其中 wanted 是已知 NodeId：
+\begin{lstlisting}[language=C++]
+auto result = rx::ast::walk(
+    crate, [&](const rx::ast::Node &owner, const auto &) {
+      return owner.id == wanted ? rx::ast::WalkControl::Stop
+                                : rx::ast::WalkControl::Continue;
+    });
+\end{lstlisting}
+回调重载是前序观察的简便形式，允许回调统一返回 void 或 WalkControl；前者表示处理后继续。它仍要求回调能接受整树协议中的每种 owner 和 payload。只写一个 BinaryExpr 回调、没有默认规则，不能因为使用 walk 就偷偷跳过其余结构。
+
+相应边界由真实测试检查：
+\begin{lstlisting}[language=C++]
+static_assert(ast::TraversalVisitor<BinaryObserver>);
+static_assert(!ast::TraversalVisitor<MissingBinary>);
+static_assert(!ast::TraversalVisitor<MissingLeave>);
+static_assert(!ast::TraversalVisitor<WrongControl>);
+static_assert(!ast::TraversalCallback<OnlyBinary>);
+static_assert(!ast::SyntaxRoot<ast::BinaryExpr>);
+\end{lstlisting}
+最后一项特别说明载荷不是独立遍历根。BinaryExpr 没有自己的 NodeId，接口要求从 Expr owner 访问它。只把载荷交给遍历器，会失去刚刚解释过的 owner 与 payload 配对关系。
+
+\section{为什么语义检查自行递归}
+通用 DFS 能告诉观察器访问顺序，却不能凭结构自动确定所有语义上下文。下面两个相同拼写的整数处于不同预期类型中：
+\begin{lstlisting}[language=Rustless]
+fn receive(value: u32) -> u32 { value }
+fn main() {
+    let signed: i32 = 1;
+    let unsigned: u32 = receive(1);
+}
+\end{lstlisting}
+第一处初始化可从注解取得 i32 预期类型；调用中的整数可从被调用参数取得 u32 预期类型。单纯进入 IntegerExpr，只知道它的拼写和位置。分析需要在递归调用中把相应预期类型传进去，再决定后缀、默认类型和相容性。
+
+当前 semantic.cpp 的以下真实分支说明了这种显式递归，而完整分析将在下一篇讲解：
+\begin{lstlisting}[language=C++]
+[&](const ast::Expr &node, const ast::ArrayExpr &array) {
+  return check_array(node, array, expected);
+},
+[&](const ast::Expr &, const ast::BlockExpr &p) {
+  return check_block(*p.block, expected);
+},
+[&](const ast::Expr &node, const ast::IfExpr &p) {
+  return check_if(node, p, expected);
+}
+\end{lstlisting}
+数组检查可以把预期元素类型传入每个元素；块检查需要依次处理声明与语句，并把预期结果用于尾表达式；分支检查需要得到两条分支结果，再按规则合并。它们都使用 ast::visit 选择当前结构，却自行决定怎样检查孩子和怎样组合结果。
+
+作用域也有同样要求：
+\begin{lstlisting}[language=Rustless]
+fn scoped() -> i32 {
+    let x = 1;
+    { let x = 2; x } + x
+}
+\end{lstlisting}
+进入内层块需要开启局部作用域；内层 let 是否覆盖外层名字、名字在初始化时是否已可见、离开块后查找恢复到何处，都是语言规则。通用 DFS 可以借 enter/leave 辅助维护某种栈，但不会自动给出这些规则，也不会决定应先登记绑定还是先检查初始化。
+
+循环需要维护可 break 的目标以及循环结果信息；return 需要知道正在检查哪个函数和预期返回类型；函数调用需要解析可调用身份并按形参逐个检查参数。这些过程需要上下文和中间结果，显式递归能在调用边界表达输入与输出，比把所有逻辑隐藏在一个巨大观察状态对象中更容易阅读。
+
+因此，通用 walk 很适合结构观察、统计、身份搜索和结构不变量检查。上下文敏感分析仍可使用它，但必须另外设计状态与协议；不能因存在 walk 就认定所有语义分析都应机械改写为 DFS 回调。良好的复用边界，是共享确定的分派与结构事实，同时允许分析表达自己的推导顺序。
+
+\section{hpp 的依赖与入口}
+头文件的划分应当对应概念的依赖。基础身份与拥有关系供所有语法家族使用，表达式和类型语法组成彼此相关的结构，声明把这些家族组织为 Crate，访问工具再依赖已完整定义的节点集合。
+
+以下表格列出当前公开头文件的直接项目内依赖。表中的路径相对 \path{E:/RComplier/Rustless/include/rx/}；标准库头文件不列入这一概念表。
+\begin{longtable}{@{}p{.21\textwidth}p{.35\textwidth}p{.35\textwidth}@{}}
+\caption{AST 定义与访问框架的直接头文件依赖。}\\
+\toprule
+头文件 & 直接项目内依赖 & 主要职责\\
+\midrule
+\endfirsthead
+\toprule
+头文件 & 直接项目内依赖 & 主要职责\\
+\midrule
+\endhead
+\path{ast/node.hpp} & \path{diagnostic.hpp} & NodeId、Node、Box 与重载组合\\
+\path{ast/names.hpp} & \path{ast/node.hpp} & 标识符、生命周期名与绑定\\
+\path{ast/path.hpp} & \path{ast/names.hpp} & 路径段与泛型实参\\
+\path{ast/type.hpp} & \path{ast/path.hpp} & 类型语法专属载荷\\
+\path{ast/operators.hpp} & 无 & 运算符枚举及文字对应\\
+\path{ast/literal.hpp} & \path{ast/operators.hpp} & 整数字面量与后缀\\
+\path{ast/expr.hpp} & \path{ast/literal.hpp}、\path{ast/type.hpp} & 表达式载荷及 Expr owner\\
+\path{ast/stmt.hpp} & \path{ast/expr.hpp} & 语句载荷与 Block\\
+\path{ast/source.hpp} & \path{ast/node.hpp} & 源文本及字符、字节位置转换\\
+\path{ast/generics.hpp} & \path{ast/path.hpp} & 生命周期参数与 where 约束\\
+\path{ast/use.hpp} & \path{ast/names.hpp} & 导入路径及 UseTree\\
+\path{ast/item.hpp} & \path{ast/generics.hpp}、\path{ast/source.hpp}、\path{ast/stmt.hpp}、\path{ast/use.hpp} & 声明、接收者、参数及 Crate\\
+\path{ast/dispatch.hpp} & \path{ast/item.hpp} & owner 登记、覆盖检查与 visit\\
+\path{ast/children.hpp} & \path{ast/dispatch.hpp} & 直接结构孩子的完整枚举\\
+\path{ast/traversal.hpp} & \path{ast/children.hpp} & enter/leave、walk 与遍历控制\\
+\path{ast/visitor.hpp} & \path{ast/traversal.hpp} & 整树访问工具入口\\
+\path{ast.hpp} & \path{ast/dispatch.hpp} & AST 定义与单节点分派入口\\
+\bottomrule
+\end{longtable}
+其中 path.hpp 使用向前声明的 TypeSyntax 与 Box 表达类型实参，type.hpp 又依赖路径。这种安排通过间接拥有和向前声明解决定义次序，而不是让两个头文件相互 include。此前 Box 的删除器和递归类型设计，也正服务于这样的边界。
+
+下图用箭头表示“起点头文件直接包含终点头文件”，呈现表中的项目内依赖。纵向的访问框架位于完整语法定义之上；侧面的 ast.hpp 是单节点入口。
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[>=Latex,font=\footnotesize,
+ box/.style={draw,rounded corners,align=center,text width=22mm,
+             minimum height=7mm,inner sep=1.4mm}]
+\node[box] (visitor) at (1.5,0) {visitor.hpp};
+\node[box] (traversal) at (1.5,-1) {traversal.hpp};
+\node[box] (children) at (1.5,-2) {children.hpp};
+\node[box] (dispatch) at (1.5,-3) {dispatch.hpp};
+\node[box] (item) at (1.5,-4) {item.hpp};
+\node[box] (entry) at (-3,-3) {ast.hpp};
+\node[box] (generics) at (-3,-5.2) {generics.hpp};
+\node[box] (source) at (0,-5.2) {source.hpp};
+\node[box] (stmt) at (3,-5.2) {stmt.hpp};
+\node[box] (use) at (6,-5.2) {use.hpp};
+\node[box] (expr) at (3,-6.4) {expr.hpp};
+\node[box] (literal) at (1,-7.6) {literal.hpp};
+\node[box] (operators) at (-1.8,-7.6) {operators.hpp};
+\node[box] (type) at (4.6,-7.6) {type.hpp};
+\node[box] (path) at (3,-8.8) {path.hpp};
+\node[box] (names) at (3,-10) {names.hpp};
+\node[box] (node) at (0,-11.2) {node.hpp};
+\node[box] (diagnostic) at (0,-12.4) {diagnostic.hpp};
+\draw[->] (visitor)--(traversal); \draw[->] (traversal)--(children);
+\draw[->] (children)--(dispatch); \draw[->] (dispatch)--(item);
+\draw[->] (entry)--(dispatch);
+\draw[->] (item)--(generics); \draw[->] (item)--(source);
+\draw[->] (item)--(stmt); \draw[->] (item)--(use);
+\draw[->] (stmt)--(expr); \draw[->] (expr)--(literal);
+\draw[->] (expr)--(type); \draw[->] (literal)--(operators);
+\draw[->] (type)--(path); \draw[->] (path)--(names);
+\draw[->] (names)--(node); \draw[->] (node)--(diagnostic);
+\draw[->] (generics.south)--(-3,-8.8)--(path.west);
+\draw[->] (use.south)--(6,-10)--(names.east);
+\draw[->] (source.south)--(node.north);
+\end{tikzpicture}
+\caption{定义层与访问层形成清楚的依赖次序。}
+\end{figure}
+两个入口的实际内容都很小。\path{E:/RComplier/Rustless/include/rx/ast.hpp} 为：
+\begin{lstlisting}[language=C++]
+#pragma once
+#include "rx/ast/dispatch.hpp"
+\end{lstlisting}
+\path{E:/RComplier/Rustless/include/rx/ast/visitor.hpp} 为：
+\begin{lstlisting}[language=C++]
+#pragma once
+#include "rx/ast/traversal.hpp"
+\end{lstlisting}
+只读取结构或自行递归分析的过程，可以引入 ast.hpp；需要整树 walk 的观察器，可以引入 ast/visitor.hpp 或直接引入 traversal.hpp。定义层不反向依赖打印器、语义检查器和 IR，这使语法结构无需知道哪些具体分析过程正在使用它。
+
+这种划分并不保证只引入 ast.hpp 就能获得最小编译时间，因为 dispatch 已包含完整 item 定义，进而引入多种语法家族。它首先提供的是清楚的职责边界和可理解的依赖。若以后需要优化构建时间，可以在保持公开概念一致的前提下测量并调整，而不应把头文件数量本身当作性能证据。
+
+\section{增加一个节点会影响哪些过程}
+可以用已存在的重复数组反向做一次设计练习。设想一个只支持列表数组的较早版本，准备增加以下语法：
+\begin{lstlisting}[language=Rustless]
+fn zeros() -> [i32; 3] {
+    [0; 3]
+}
+\end{lstlisting}
+这是当前 Rustless 已支持的语法；以下练习只是追踪若将它作为新结构加入，需要在哪些边界明确作决定，不修改现有代码。
+
+第一步是界定形状。重复数组拥有 element 与 count，而列表数组拥有 elements 序列。因此新增 RepeatArrayExpr 比让 ArrayExpr 使用一个含义随 flag 改变的 vector 更清楚。count 是表达式语法，不应在构树时强行压成一个已验证的整数。
+
+第二步是构造与身份。grammar 必须识别分号分隔的两部分，构造器为它们建立孩子，并为外层 Expr 赋予身份和范围。此时只承诺语法形状成立；长度是否为合适常量、元素是否允许重复，仍由语言规则决定。
+
+第三步是封闭集合与访问。Expr::Data 加入新载荷，所有不带 catch-all 的完整处理器重新进行覆盖检查。owner 注册通常无需为新的表达式载荷再登记一个独立 owner，因为它仍由 Expr 拥有；只有增加新的有身份 owner 家族时，才需要调整 SyntaxOwners。
+
+第四步是声明结构边。当前 children.hpp 为它给出真实规则：
+\begin{lstlisting}[language=C++]
+void operator()(const RepeatArrayExpr &p) {
+  recurse_(*p.element);
+  recurse_(*p.count);
+}
+\end{lstlisting}
+有了该规则，共用 walk 的统计器和身份搜索器立即能够进入两个孩子。若元素自身是一个复杂表达式，它的后代也由各自规则继续展开。
+
+第五步是解释具体含义。打印器应能区别列表与重复形式；语义分析应检查元素类型、计数及相关要求；常量求值如果支持此结构，应明确可求值条件。编译期确认“有一个处理函数”，不能代替对这些规则的正确性检查。
+
+第六步是未来的 lowering 与执行表示。AST 的 count 仍是源码表达式，而 IR 或布局阶段可能需要经过验证的长度以及元素初始化方案。类型、求值次数、复制或重复的语言语义都必须在跨阶段边界中明确。当前教程后续将讨论 IR 设计及 lowering 的方向，不能仅凭 AST 已支持重复数组便声称后端完整实现了它。
+
+这个练习说明，新增语法会触及多个相关过程，但触及的位置具有可解释性：grammar 负责识别，构造器负责形状，variant 负责合法结构集合，children 负责结构边，分析负责含义，lowering 负责转成执行所需的表示。边界清楚以后，修改清单不是任意散落的补丁，而是每项语言含义在相应阶段的一次明确表达。
+
+前两篇至此建立了可读、可定位、可拥有和可访问的 AST。它能忠实呈现名字、类型语法与表达式，却尚未独自回答一个名字指向哪个声明、一次运算允许哪些类型、一个块为何具有某种结果。下一篇将从这些问题出发，进入符号身份、语义类型和分析事实的设计。
