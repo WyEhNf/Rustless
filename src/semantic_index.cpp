@@ -365,6 +365,55 @@ void SemanticIndex::validate_shapes() const {
     using P = std::remove_cvref_t<decltype(payload)>;
     if constexpr (std::same_as<Owner, ast::TypePredicate>)
       return ast::WalkControl::SkipChildren;
+    if constexpr (std::same_as<Owner, ast::TypeSyntax>) {
+      const auto &resolved = type(node);
+      if constexpr (std::same_as<P, ast::UnitType>)
+        expect(resolved, K::Unit);
+      if constexpr (std::same_as<P, ast::ParenType>)
+        require_equivalent(resolved, type(*payload.inner));
+      if constexpr (std::same_as<P, ast::ReferenceType>) {
+        expect(resolved, K::Ref);
+        if (resolved->is_mutable() !=
+            (payload.mutability == ast::Mutability::Mutable))
+          throw std::invalid_argument("reference type mutability mismatch");
+        require_equivalent(resolved->element(), type(*payload.referent));
+      }
+      if constexpr (std::same_as<P, ast::ArrayType>) {
+        expect(resolved, K::Array);
+        require_equivalent(resolved->element(), type(*payload.element));
+        expect(expression(*payload.length).type, K::Usize);
+      }
+      if constexpr (std::same_as<P, ast::PathType>) {
+        if (payload.path.segments.empty())
+          throw std::invalid_argument("checked type path is empty");
+        const auto name = ast::name_text(payload.path.segments.back().name);
+        const std::unordered_map<std::string_view, K> primitives{
+            {"bool", K::Bool}, {"i32", K::I32}, {"u32", K::U32},
+            {"isize", K::Isize}, {"usize", K::Usize}};
+        std::vector<const ast::TypeSyntax *> arguments;
+        for (const auto &segment : payload.path.segments)
+          if (segment.arguments)
+            for (const auto &argument : segment.arguments->values)
+              if (const auto *syntax = std::get_if<ast::TypePtr>(&argument))
+                arguments.push_back(syntax->get());
+        if (auto found = primitives.find(name); found != primitives.end()) {
+          expect(resolved, found->second);
+          if (!arguments.empty())
+            throw std::invalid_argument("primitive has unexpected type arguments");
+        } else if (name == "Box" || name == "Vec") {
+          expect(resolved, name == "Box" ? K::Box : K::Vec);
+          if (arguments.size() != 1)
+            throw std::invalid_argument("container type argument count mismatch");
+          require_equivalent(resolved->element(), type(*arguments.front()));
+        } else {
+          expect(resolved, K::Struct);
+          if (name != "Self" && resolved->name() != name)
+            throw std::invalid_argument("type path resolves to wrong declaration");
+          if (!arguments.empty())
+            throw std::invalid_argument("struct has unexpected type arguments");
+        }
+      }
+    }
     if constexpr (std::same_as<Owner, ast::Expr>) {
       const auto &fact = expression(node);
       if constexpr (std::same_as<P, ast::IntegerExpr>) {
