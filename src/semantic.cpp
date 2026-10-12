@@ -1572,11 +1572,12 @@ private:
       result.symbol = symbol;
       if (symbol) result.callable = FunctionTarget{*symbol};
       else if (builtin) result.callable = BuiltinTarget{*builtin};
-      result.adjustments = receiver_adjustments;
+      result.receiver = OperandSemantics{method.receiver->id, base, receiver_adjustments};
       if (borrow) {
         const bool mutable_borrow = *borrow == Adjustment::Kind::BorrowMutable;
-        result.adjustments.push_back(
-            {*borrow, compound(Ty::Kind::Ref, base, mutable_borrow)});
+        auto borrowed = compound(Ty::Kind::Ref, base, mutable_borrow);
+        result.receiver->adjustments.push_back({*borrow, borrowed});
+        result.receiver->effective_type = borrowed;
       }
       return result;
     };
@@ -1700,13 +1701,11 @@ private:
       report(node.span, "unknown field '" + projection.field.text + "'");
       return {};
     }
-    return {field->second,
-            true,
-            mutable_access,
-            locked,
-            structures_.at(base->name()).field_symbols.at(projection.field.text),
-            base->name() + "::" + projection.field.text,
-            std::move(adjustments)};
+    ExprInfo result{field->second, true, mutable_access, locked,
+                    structures_.at(base->name()).field_symbols.at(projection.field.text),
+                    base->name() + "::" + projection.field.text};
+    result.receiver = OperandSemantics{projection.base->id, base, std::move(adjustments)};
+    return result;
   }
 
   ExprInfo check_index(const ast::Expr &node,
