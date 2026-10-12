@@ -201,7 +201,7 @@ fn main() {
   assert(abi.result.passing == ir::Passing::Indirect);
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
-  auto foreign = rx::parse_source(parsed.crate->source.text(), diagnostics);
+  auto foreign = rx::parse_source(parsed.crate->source.text, diagnostics);
   const auto &foreign_function = std::get<ast::Function>(foreign.crate->items[2]);
   assert(foreign_function.id == take.id);
   bool foreign_rejected = false;
