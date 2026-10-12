@@ -52,6 +52,8 @@ dereference use-site regression. The following checks passed:
 The manifest report is `build/design-review/frontend-alignment-final.json`.
 The final semantic corpus was rerun after the lifetime and dereference fixes.
 Generated reports and compiler fixtures remain under ignored `build/`.
+The later bridge guard against const temporary indexes was rebuilt and its
+`ir_semantic` compile-time and runtime checks passed (1/1 focused CTest).
 
 The focused tests cover immutable type shape and identity, illegal operator
 domains, ordered adjustments, alias calls, frozen snapshot lifetime, altered

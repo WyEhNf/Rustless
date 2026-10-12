@@ -48,7 +48,9 @@ IR alignment must not replace those responsibilities with a generic tree walk.
 
 ## Consumer interfaces
 
-Keep the AST, result and index alive and unchanged while consuming semantic facts:
+Keep the AST alive and unchanged, and keep the index alive while the bridge
+borrows it. The index owns a frozen snapshot, so the result wrapper may be
+destroyed after index construction:
 
 ```cpp
 auto parsed = rx::parse_source(source, diagnostics);
@@ -78,11 +80,16 @@ Associated functions use their resolved names such as `Packet::get`; LLVM names
 are quoted and escaped when necessary.
 
 `binary(owner, payload)` and `compound(owner, payload)` consume concrete AST
-payloads and checked operand types. Signed division/remainder/right-shift and
+payloads and resolved semantic operations with input adjustments. Signed division/remainder/right-shift and
 ordering select signed IR operators; unsigned operands select unsigned operators.
 Logical operators produce `ShortCircuit` descriptors so callers must build control
 flow. Aggregate equality needs a future aggregate lowering path. These descriptors
 do not emit loads, adjustments or instructions on their own.
+
+The later review adds immutable semantic types, validated frozen snapshots,
+separate receiver and result conversions, target policy and resolved call plans.
+See [the 2026-10-12 review](semantic-ir-design-review.md) for those contracts and
+the current 14-test verification record.
 
 ## Instruction construction
 
