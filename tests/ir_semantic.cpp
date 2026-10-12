@@ -5,9 +5,16 @@
 #undef NDEBUG
 #include <cassert>
 #include <iostream>
+#include <type_traits>
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
+static_assert(std::is_constructible_v<ir::SemanticBridge,
+                                      const rx::SemanticIndex &>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge,
+                                       rx::SemanticIndex &&>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge,
+                                       const rx::SemanticIndex &&>);
 namespace {
 void check_unary_lowering() {
   rx::DiagnosticEngine diagnostics;

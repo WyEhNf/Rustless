@@ -103,6 +103,8 @@ public:
                           TargetLayout target = TargetLayout::rv32());
   SemanticBridge(SemanticIndex &&,
                  TargetLayout = TargetLayout::rv32()) = delete;
+  SemanticBridge(const SemanticIndex &&,
+                 TargetLayout = TargetLayout::rv32()) = delete;
   const TargetLayout &target() const { return target_; }
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
