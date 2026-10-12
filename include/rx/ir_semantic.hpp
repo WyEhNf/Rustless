@@ -36,6 +36,14 @@ struct FunctionAbi {
   std::optional<AbiParameter> receiver;
   std::vector<AbiParameter> parameters;
 };
+struct FunctionCall { FunctionAbi signature; };
+struct BuiltinCall { BuiltinId builtin; };
+struct CallLowering {
+  std::variant<FunctionCall, BuiltinCall> target;
+  std::optional<OperandSemantics> receiver;
+  std::vector<OperandSemantics> arguments;
+  SemanticTypePtr result;
+};
 enum class ShortCircuit { And, Or };
 struct ScalarArithmetic {
   BinaryOp op;
@@ -98,12 +106,16 @@ public:
     return layouts_.at(symbol);
   }
   FunctionAbi function(const ast::Function &node) const;
+  FunctionAbi function(SymbolId symbol) const;
   Declaration declaration(const ast::Function &node) const;
   std::vector<Declaration> declarations() const;
   BinaryLowering binary(const ast::Expr &node,
                         const ast::BinaryExpr &payload) const;
   CompoundLowering compound(const ast::Expr &node,
                             const ast::CompoundAssignExpr &payload) const;
+  CallLowering call(const ast::Expr &node, const ast::CallExpr &payload) const;
+  CallLowering call(const ast::Expr &node,
+                    const ast::MethodCallExpr &payload) const;
   UnaryLowering unary(const ast::Expr &node,
                       const ast::UnaryExpr &payload) const;
 
@@ -112,6 +124,8 @@ private:
   Layout compute_layout(const SemanticTypePtr &type);
   AbiValue abi(const SemanticTypePtr &type) const;
   BinaryLowering lower_binary(const ResolvedBinary &resolved) const;
+  CallLowering lower_call(const ast::Expr &node,
+                          const std::vector<ast::ExprPtr> &arguments) const;
   const SemanticIndex &semantic_;
   const TargetLayout target_;
   std::map<SymbolId, StructLayout> layouts_;

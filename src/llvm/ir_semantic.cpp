@@ -130,7 +130,9 @@ AbiValue SemanticBridge::abi(const SemanticTypePtr &type) const {
           scalar ? Passing::Direct : Passing::Indirect, layout(type)};
 }
 FunctionAbi SemanticBridge::function(const ast::Function &node) const {
-  auto symbol = semantic_.declaration(node).id;
+  return function(semantic_.declaration(node).id);
+}
+FunctionAbi SemanticBridge::function(SymbolId symbol) const {
   const auto &signature = semantic_.function(symbol);
   FunctionAbi result{
       symbol, semantic_.symbol(symbol).name, abi(signature.result), {}, {}};

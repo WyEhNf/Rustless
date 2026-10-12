@@ -65,6 +65,7 @@ add_library(rustless_frontend STATIC
   src/llvm/ir_builder.cpp
   src/llvm/ir_semantic.cpp
   src/llvm/ir_operators.cpp
+  src/llvm/ir_call.cpp
   src/semantic.cpp
   src/semantic_type.cpp
   src/semantic_operation.cpp
