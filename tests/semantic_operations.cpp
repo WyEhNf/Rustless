@@ -321,6 +321,35 @@ fn main() {
   assert(explicit_fact.type->kind() == K::I32 && explicit_fact.is_place);
 }
 
+void dereference_result_coercion() {
+  Program program(R"(
+fn read(value: &i32) -> i32 { *value }
+fn main() {
+  let mut value = 1;
+  let mutable = &mut value;
+  let outer = &mutable;
+  let shared: &i32 = *outer;
+  let answer = read(*outer);
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  unsigned checked = 0;
+  ast::walk(*program.parsed.crate, [&](const auto &node, const auto &payload) {
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>, ast::UnaryExpr>) {
+      if (program.parsed.crate->source.slice(node.span) != "*outer") return;
+      const auto &fact = index.expression(node);
+      assert(fact.unary->operand.adjustments.empty());
+      assert(fact.type->kind() == K::Ref && fact.type->is_mutable());
+      assert(fact.adjustments.size() == 1);
+      assert(fact.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
+      assert(!fact.adjustments[0].target->is_mutable());
+      ++checked;
+    }
+  });
+  assert(checked == 2);
+}
+
 void parenthesized_operand_coercion() {
   Program program(R"(
 fn main() {
@@ -371,6 +400,7 @@ fn main() {
 }
 
 int main() {
+  dereference_result_coercion();
   language_boundaries();
   boolean_assignments();
   reference_operand_adjustments();
