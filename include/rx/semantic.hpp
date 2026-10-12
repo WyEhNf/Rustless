@@ -14,7 +14,6 @@
 
 namespace rx {
 
-// Syntax and semantic identities are distinct, even when numerically related.
 enum class SymbolKind {
   Struct,
   Function,
@@ -37,7 +36,7 @@ struct SymbolRecord {
 };
 
 struct ExpressionSemantics {
-  // Adjustments here convert this expression's result at its use site.
+
   ast::NodeId node{};
   SemanticTypePtr type;
   bool is_place{};
@@ -50,12 +49,12 @@ struct ExpressionSemantics {
   std::optional<ResolvedBinary> binary;
   std::optional<ResolvedBinary> compound;
   std::optional<ResolvedUnary> unary;
-  // Projections and methods convert their input, separately from their result.
+
   std::optional<OperandSemantics> receiver;
 };
 
 struct SemanticSummary {
-  // Counts describe declarations accepted for this compilation unit.
+
   std::size_t functions{};
   std::size_t structures{};
   std::size_t constants{};
@@ -87,17 +86,17 @@ struct FunctionSemantics {
 };
 struct StructSemantics {
   SymbolId symbol;
-  // Preserve declaration order for aggregate layout, not hash-table order.
+
   std::vector<SymbolId> fields;
 };
 
 struct SemanticData {
-  // Borrowed identity only; clients must keep this crate alive for AST queries.
+
   const ast::Crate *source_crate{};
   SemanticSummary summary;
   std::vector<SymbolRecord> symbols;
   std::vector<ExpressionSemantics> expressions;
-  // Lowering consumes checked declarations instead of resolving them again.
+
   std::vector<TypeResolution> resolved_types;
   std::vector<ConstantValue> constants;
   std::vector<SymbolType> symbol_types;
@@ -106,7 +105,6 @@ struct SemanticData {
   bool success{};
 };
 
-// Consumers receive a frozen snapshot only after all facts have been checked.
 class SemanticResult final {
 public:
   SemanticResult();
@@ -129,4 +127,4 @@ private:
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics);
 std::string dump_semantic(const SemanticResult &result);
 
-} // namespace rx
+}
