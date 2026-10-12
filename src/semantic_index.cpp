@@ -691,9 +691,10 @@ void SemanticIndex::validate_shapes() const {
         if (const auto *target = std::get_if<FunctionTarget>(&*fact.callable)) {
           const auto &record = symbol(target->symbol);
           auto receiver = expression(*payload.receiver).type;
-          while (receiver->kind() == K::Ref || receiver->kind() == K::Box)
+          while (receiver->kind() == TypeKind::Ref ||
+                 receiver->kind() == TypeKind::Box)
             receiver = receiver->element();
-          if (receiver->kind() != K::Struct ||
+          if (receiver->kind() != TypeKind::Struct ||
               record.owner != receiver->symbol() ||
               record.name != receiver->name() + "::" + payload.method.text ||
               !function(target->symbol).receiver)
@@ -715,80 +716,81 @@ void SemanticIndex::validate_shapes() const {
             throw std::invalid_argument("builtin method target name mismatch");
         }
       }
-      if (fact.type->kind() == K::Function) {
-        const auto *target = fact.callable
-                                 ? std::get_if<FunctionTarget>(&*fact.callable)
-                                 : nullptr;
+      if (fact.type->kind() == TypeKind::Function) {
+        const FunctionTarget *target = nullptr;
+        if (fact.callable)
+          target = std::get_if<FunctionTarget>(&*fact.callable);
         if (!target || target->symbol != fact.type->symbol())
           throw std::invalid_argument(
               "function expression target identity mismatch");
       }
-      if (fact.type->kind() == K::BuiltinFunction) {
-        const auto *target = fact.callable
-                                 ? std::get_if<BuiltinTarget>(&*fact.callable)
-                                 : nullptr;
+      if (fact.type->kind() == TypeKind::BuiltinFunction) {
+        const BuiltinTarget *target = nullptr;
+        if (fact.callable)
+          target = std::get_if<BuiltinTarget>(&*fact.callable);
         const auto &builtin = *get_if<BuiltinFunctionType>(*fact.type);
         if (!target || target->builtin != builtin.builtin)
           throw std::invalid_argument(
               "builtin expression target identity mismatch");
       }
-      if constexpr (std::same_as<P, ast::IntegerExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::IntegerExpr>) {
         const auto kind = fact.type->kind();
-        if (kind != K::I32 && kind != K::U32 && kind != K::Isize &&
-            kind != K::Usize)
+        if (kind != TypeKind::I32 && kind != TypeKind::U32 &&
+            kind != TypeKind::Isize && kind != TypeKind::Usize)
           throw std::invalid_argument(
               "integer expression has non-integer type");
       }
-      if constexpr (std::same_as<P, ast::BooleanExpr>)
-        expect(fact.type, K::Bool);
-      if constexpr (std::same_as<P, ast::UnitExpr> ||
-                    std::same_as<P, ast::AssignExpr> ||
-                    std::same_as<P, ast::CompoundAssignExpr> ||
-                    std::same_as<P, ast::WhileExpr>)
-        expect(fact.type, K::Unit);
-      if constexpr (std::same_as<P, ast::BreakExpr> ||
-                    std::same_as<P, ast::ContinueExpr> ||
-                    std::same_as<P, ast::ReturnExpr>)
-        expect(fact.type, K::Never);
-      if constexpr (std::same_as<P, ast::BorrowExpr>) {
-        expect(fact.type, K::Ref);
+      if constexpr (std::is_same_v<Payload, ast::BooleanExpr>)
+        expect(fact.type, TypeKind::Bool);
+      if constexpr (std::is_same_v<Payload, ast::UnitExpr> ||
+                    std::is_same_v<Payload, ast::AssignExpr> ||
+                    std::is_same_v<Payload, ast::CompoundAssignExpr> ||
+                    std::is_same_v<Payload, ast::WhileExpr>)
+        expect(fact.type, TypeKind::Unit);
+      if constexpr (std::is_same_v<Payload, ast::BreakExpr> ||
+                    std::is_same_v<Payload, ast::ContinueExpr> ||
+                    std::is_same_v<Payload, ast::ReturnExpr>)
+        expect(fact.type, TypeKind::Never);
+      if constexpr (std::is_same_v<Payload, ast::BorrowExpr>) {
+        expect(fact.type, TypeKind::Ref);
         if (fact.type->is_mutable() !=
             (payload.mutability == ast::Mutability::Mutable))
           throw std::invalid_argument("borrow mutability fact mismatch");
         require_equivalent(fact.type->element(),
                            expression(*payload.operand).type);
       }
-      if constexpr (std::same_as<P, ast::CastExpr>)
+      if constexpr (std::is_same_v<Payload, ast::CastExpr>)
         require_equivalent(fact.type, type(*payload.target_type));
-      if constexpr (std::same_as<P, ast::FieldExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::FieldExpr>) {
         if (!fact.symbol || symbol(*fact.symbol).kind != SymbolKind::Field)
           throw std::invalid_argument("field expression has no field symbol");
         require_equivalent(fact.type, symbol_type(*fact.symbol));
         if (fact.receiver->node != payload.base->id ||
-            fact.receiver->effective_type->kind() != K::Struct ||
+            fact.receiver->effective_type->kind() != TypeKind::Struct ||
             symbol(*fact.symbol).owner !=
                 fact.receiver->effective_type->symbol())
           throw std::invalid_argument("field receiver use identity mismatch");
       }
-      if constexpr (std::same_as<P, ast::IndexExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::IndexExpr>) {
         if (fact.receiver->node != payload.base->id)
           throw std::invalid_argument(
               "index receiver use points to wrong AST node");
         const auto &container = fact.receiver->effective_type;
-        if (container->kind() != K::Array && container->kind() != K::Vec)
+        if (container->kind() != TypeKind::Array &&
+            container->kind() != TypeKind::Vec)
           throw std::invalid_argument("index receiver use is not a container");
         require_equivalent(fact.type, container->element());
-        expect(expression(*payload.index).type, K::Usize);
+        expect(expression(*payload.index).type, TypeKind::Usize);
       }
-      if constexpr (std::same_as<P, ast::ArrayExpr>) {
-        expect(fact.type, K::Array);
+      if constexpr (std::is_same_v<Payload, ast::ArrayExpr>) {
+        expect(fact.type, TypeKind::Array);
         if (fact.type->length() != payload.elements.size())
           throw std::invalid_argument("array expression length fact mismatch");
       }
-      if constexpr (std::same_as<P, ast::RepeatArrayExpr>)
-        expect(fact.type, K::Array);
-      if constexpr (std::same_as<P, ast::StructExpr>) {
-        expect(fact.type, K::Struct);
+      if constexpr (std::is_same_v<Payload, ast::RepeatArrayExpr>)
+        expect(fact.type, TypeKind::Array);
+      if constexpr (std::is_same_v<Payload, ast::StructExpr>) {
+        expect(fact.type, TypeKind::Struct);
         if (fact.symbol != fact.type->symbol())
           throw std::invalid_argument("struct expression identity mismatch");
       }
@@ -796,4 +798,4 @@ void SemanticIndex::validate_shapes() const {
     return ast::WalkControl::Continue;
   });
 }
-} // namespace rx
+}
