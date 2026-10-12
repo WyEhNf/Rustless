@@ -73,5 +73,5 @@ fn main() {
   assert(independent_id);
   for (const auto &fact : facts.expressions)
     if (fact.symbol)
-      assert(symbols.contains(*fact.symbol));
+      assert(symbols.find(*fact.symbol) != symbols.end());
 }
