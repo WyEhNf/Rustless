@@ -729,3 +729,443 @@ Never 描述没有正常完成的表达式，例如 return、continue 或不退�
 源语义检查可能继续访问后续语法，以发现未定义名字或错误类型；lowering 则不为不存在的正常路径生成执行步骤。两个阶段遍历同一 AST，却有不同目标，这也说明通用树 walk 不能代替每个阶段的上下文算法。
 
 至此，标量计算、位置投影和控制转移已经有清楚的转换方向。下一章把聚合构造、内容语义和调用放回这一框架，并讨论它们怎样连接到运行时。
+
+\chapter{聚合值、调用与运行时操作的转换}
+\label{chap:aggregate-calls}
+\section*{本章导读}
+数组和结构体包含多个组成部分，Box 与 Vec 又把对象分布到不同存储位置。理解这些值时，需要同时回答两个问题：对象放在哪里，以及语言规定对其内容做什么。本章先从初始化推导存储操作，再讨论复制、相等和调用。读者将看到，地址可以帮助实现一个值，却不能代替这个值的语义。
+
+本章使用的布局、内部 ABI、运算描述和调用描述已经存在于 Rustless。由这些描述生成完整函数体、容器操作及运行时调用，仍属于后续设计推导。以下执行步骤用来说明应当如何实现，不能视为当前编译器已经生成的可执行程序。
+
+\section{在目标位置构造聚合值}
+\begin{lstlisting}[language=Rustless,caption={聚合初始化与聚合返回共用的构造问题}]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pair { left: i32, right: i32 }
+fn pair(x: i32) -> Pair {
+    Pair { left: x, right: x + 1 }
+}
+fn main() {
+    let p = pair(10);
+    printInt(p.right);
+}
+\end{lstlisting}
+最直接的转换方案先为结构体表达式分配临时存储，把两个字段写入其中，然后复制到返回缓冲区。调用者接着把返回缓冲区复制到局部变量 p。这条路线容易说明，但中间存储及复制可能多于语言语义所需。
+
+另一种方案让聚合转换函数接收一个目标 Place。当 pair 构造其结果时，直接把字段写入调用者提供的返回缓冲区；当局部变量初始化时，也可以直接使用该变量的存储。第十七章所建议的值、位置与控制流接口因此可以补充一个“写入目标”的操作，而不必要求所有聚合表达式先返回一个独立临时地址。
+
+这种做法常称为面向目标的构造。它的正确性依赖目标空间尚未包含需要保留的旧值、目标不与仍需读取的输入发生有害重叠，以及字段求值顺序保持不变。例如把一个对象赋值给它自己的某个组成部分，不能简单套用初始化规则。借用检查、移动规则和存储寿命以后若变得更完整，这些条件也需要更精确的表达。
+
+下图对照临时对象复制与直接写入目标位置，呈现减少复制所需要保留的字段求值和目标存储关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 10mm]
+\node[irbox] (e1) {字段表达式\\按规定求值};
+\node[irbox,right=of e1] (t) {临时 Pair};
+\node[irbox,right=of t] (d1) {结果目标};
+\draw[irarrow] (e1)--(t); \draw[irarrow] (t)--node[above,font=\small]{复制}(d1);
+\node[irbox,below=of e1] (e2) {同一字段表达式\\同一求值顺序};
+\node[irbox,below=of d1] (d2) {结果目标};
+\draw[irarrow] (e2)--node[above,font=\small]{直接构造}(d2);
+\end{tikzpicture}
+\caption{聚合构造的两条存储路径}
+\end{figure}
+
+优雅的接口让“构造一个新对象”和“修改一个已存在对象”分别有准确的前置条件。这样既有利于消除复制，也能防止优化掩盖寿命与别名问题。不能仅以指令数量较少来判断第二条路线总是可用。
+
+\section{列表数组与重复数组：复制不是重复求值}
+\begin{lstlisting}[language=Rustless,caption={三种数组初始化形成不同的执行要求}]
+fn next() -> i32 { getInt() }
+fn main() {
+    let listed = [next(), next(), next()];
+    let repeated = [next(); 3];
+    let empty: [i32; 0] = [next(); 0];
+}
+\end{lstlisting}
+列表数组包含三个不同的元素表达式，应按数组元素的源码顺序分别求值。重复数组只有一个元素表达式和一个次数表达式。次数在语义阶段确定为常量长度，元素先求值，再把所得值用于每个数组位置。因此 repeated 的含义不能通过展开成三个 next 调用来实现。
+
+当前语义实现 \texttt{check\_repeat\_array} 在长度大于一时要求元素支持 Copy；长度为一不需要重复复制。它先检查元素表达式，再确定数组类型。语义检查本身并不执行函数，因此零长度例子的输入行为必须由后续 lowering 明确规定并检验。参考 Rx-Compiler 的数组转换会先求值元素，再执行长度次写入；沿用这条路线时，empty 仍会调用一次 next。若语言规范另作规定，应先统一语义和测试预期，再选择转换算法。
+
+对于已有数组类型，元素地址由“数组基址加索引乘 stride”得到。静态长度较小时可以逐项展开，长度较大时可以生成循环；两者必须实现相同的求值次数和复制含义。零长度需要避免实际元素读写，也需要保留元素表达式中规定发生的行为。对象字节数为零并不意味着整个初始化表达式没有行为。
+
+下面是当前重复数组检查中决定能力要求的真实片段，来自 \texttt{src/semantic.cpp} 的 \texttt{check\_repeat\_array}。它说明 Copy 是语言条件，而不是由 \texttt{memcpy} 的可用性推出的条件。
+\begin{lstlisting}[language=C++,caption={当前重复数组的能力条件}]
+auto result = types_.array(first.type, length.value_or(0));
+if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
+  report(node.span, "array repetition requires Copy");
+\end{lstlisting}
+
+\section{字段初始化：求值顺序与布局顺序}
+\begin{lstlisting}[language=Rustless,caption={源码字段顺序与声明字段顺序可以不同}]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pair { left: i32, right: i32 }
+fn main() {
+    let p = Pair { right: getInt(), left: getInt() };
+    printInt(p.left);
+}
+\end{lstlisting}
+声明顺序决定当前内部布局中的字段偏移；初始化顺序决定上述两个输入调用的先后。转换器应先找到 right 的字段身份及偏移，再把第一次输入写到对应位置，然后处理 left。把初始化列表按偏移排序再求值，会改变程序读取输入的顺序。
+
+这里有三种不能合并的顺序：源码初始化顺序、声明字段顺序和机器访存指令顺序。前两种是输入信息，第三种可以在满足语言规则和内存约束的条件下调整。当前 AST 用有序 FieldInit 保存第一种顺序，语义事实把每个初始化关联到声明字段，布局按 SymbolId 提供第二种顺序对应的偏移。三个阶段共同完成一项明确的关系，而不是各自重新按字符串猜测字段。
+
+缺失字段、重复字段与不相容类型应在语义阶段拒绝。lowering 只消费已经确认完整的初始化，并检查查询接口的完整性。若缺失字段偷偷被零填充，程序虽然可能形成某种字节序列，却违背前端已经规定的语言。
+
+\section{Copy、Clone 与内容相等}
+Copy 表示语言允许复制值；Clone 表示一种显式的复制操作；内容相等则产生布尔结果。三者都可能递归访问组成部分，但它们的结果、资源要求和控制流不同。为一个整数执行 Copy 可以只是复制位；为 Box 执行 clone 通常需要新对象，并递归克隆内容。当前语义能力规则不会把 Box 自动判定为 Copy。
+
+\begin{lstlisting}[language=Rustless,caption={标量成员的结构体可以组合复制与相等能力}]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pair { left: i32, right: i32 }
+fn main() {
+    let p = Pair { left: 1, right: 2 };
+    let q = p.clone();
+    let same = p == q;
+    printInt(if same { 1 } else { 0 });
+}
+\end{lstlisting}
+对于 Pair，克隆可以按字段复制，比较可以先比较 left，只有需要时再比较 right。对于含有 Box 的结构体，按字段克隆需要调用对应元素的克隆规则；复制结构体所占的字节会复制指针，却不会产生新的 Box 内容对象。因此字节复制只能作为实现某种已确认语义的工具。
+
+第十六章 Packet 的填充字节进一步说明这个区别。两个对象的所有字段相等，填充字节仍可能不同。直接用整个对象的字节比较代替字段比较，可能把语义相等的值判为不相等，也可能读取未经初始化的填充。应当根据字段类型比较有效内容；只有在确实证明表示没有这些差异时，才可引入整块比较优化。
+
+维护上的收益来自把能力分析和操作实现连接起来：前端说明该类型是否具备 Clone 或 Eq，转换阶段根据同一类型描述选择字段算法，目标布局只回答字节位置。任一层都不需要把另两层的信息硬编码成特例。
+
+\section{Box 与 Vec：对象表示和资源行为}
+Box 的直接表示可以是一个指针，但构造操作还需要知道被装入值的大小、对齐和初始化方式。\texttt{Box::<Pair>::new(p)} 的设计步骤是请求适当存储，再按 Pair 的值语义把 p 放到其中。分配失败怎样处理、零大小对象是否需要独特地址、何时释放，都应成为运行时契约的组成部分。
+
+Vec 的当前 RV32 布局是数据指针、长度、容量三个字段，偏移由 \texttt{TargetLayout::vector()} 提供。长度是已经初始化的元素数量，容量是可容纳的元素数量，二者不能混为一个计数。Vec::new 可以形成零长度、零容量和空数据指针，但 push 需要检查空间、必要时扩容，并在正确的元素位置构造新值。
+
+\begin{lstlisting}[language=Rustless,caption={Vec 操作既访问描述符，也访问元素存储}]
+fn main() {
+    let mut values = Vec::<i32>::new();
+    values.push(10);
+    values.push(20);
+    let first = values.remove(0);
+    printInt(first);
+    printInt(values.len() as i32);
+}
+\end{lstlisting}
+remove 既返回被移除元素，又使后续元素前移并减少长度。移动区域可能重叠，因此若选择运行时的字节移动操作，要使用支持重叠的契约；不能把一般 \texttt{memcpy} 当成同样的操作。对于复杂元素，字节移动是否符合语言的移动规则，也需要由元素能力和所有权规则决定。
+
+未来若提供释放与析构，Vec 只销毁长度范围内已初始化的元素，然后释放容量对应的存储。当前前端和布局基础尚未建立完整资源管理执行流程，因此本节将这些要求作为运行时设计边界。清楚记录这条边界，有助于防止“有一个指针表示”被误读为“生命周期已经实现”。
+
+\section{用 Box 相等检验表示边界}
+\begin{lstlisting}[language=Rustless,caption={地址不同不能推出 Box 的内容不同}]
+fn main() {
+    let a = Box::<i32>::new(1);
+    let b = Box::<i32>::new(1);
+    let same = a == b;
+    printInt(if same { 1 } else { 0 });
+}
+\end{lstlisting}
+此处要比较的是两个 Box 中的整数内容。一个裸指针 Eq 只回答两个地址是否相同，不能实现这一操作。即使两个 Box 都在 IR 中表示为 Ptr，源类型和已解析的运算仍需告诉转换器采用内容比较。
+
+下图画出不同地址上的相同整数，呈现“对象位置”和“内容相等”之间的区别。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 25mm]
+\node[irbox] (a) {a：地址 A};
+\node[irbox,right=of a] (b) {b：地址 B};
+\node[irbox,below=of a] (one) {内容：1};
+\node[irbox,below=of b] (two) {内容：1};
+\draw[irarrow] (a)--(one); \draw[irarrow] (b)--(two);
+\draw[irarrow,<->] (one)--node[above,font=\small]{按 i32 比较}(two);
+\node[irnote,below=8mm of one.south east,anchor=north west] {A 与 B 不同\\两个内容仍相等};
+\end{tikzpicture}
+\caption{Box 的表示与内容语义}
+\end{figure}
+
+当前桥接已经把这项区别落实为类型。\texttt{include/rx/ir\_semantic.hpp} 的下列定义让结构相等携带待比较的完整语义类型；标量比较则携带机器类型和谓词。
+\begin{lstlisting}[language=C++,caption={当前内容比较描述与标量比较分离}]
+struct ScalarComparison {
+  Predicate predicate;
+  Type operand_type;
+  bool operator==(const ScalarComparison &) const = default;
+};
+struct StructuralEquality {
+  SemanticTypePtr compared_type;
+  bool negated;
+  bool operator==(const StructuralEquality &other) const {
+    return negated == other.negated &&
+           same_type(compared_type, other.compared_type);
+  }
+};
+using LoweredOperation = std::variant<ScalarArithmetic, ScalarComparison,
+                                      ShortCircuit, StructuralEquality>;
+\end{lstlisting}
+
+\texttt{ir\_operators.cpp} 从已解析的结构相等事实产生这个描述，保留左右操作数的有效类型及调整。由此，运算桥接不会仅因机器表示是 Ptr 就选择指针比较。不过，这仍是一份转换计划；读取 Box 内容、递归比较数组和结构体、生成短路比较函数，尚需后续执行转换实现。
+
+\section{辅助函数的生成与复用}
+给每个表达式展开一份完整结构比较，会在大类型上造成重复代码。另一条路线为具体类型生成辅助函数，例如 \texttt{eq\_Pair}、\texttt{clone\_Pair}，所有相关使用共享它们。缓存的键应包含具体语义类型和操作种类；仅使用类型显示名字，会把不同声明身份混在一起。
+
+下面是 Rx-Compiler 参考实现 \texttt{src/llvm/lower.cpp} 中辅助函数体生成的真实循环。该实现只作为算法参照，其旧表示无需原样保留。
+\begin{lstlisting}[language=C++,caption={参考实现允许构造辅助函数时登记新的依赖}]
+// Recursive concrete helpers are registered before their bodies are built.
+for (std::size_t i = 0; i < helpers.size(); ++i) {
+  auto h = helpers[i];
+  FunctionBuilder b(*this, h.name,
+                    h.kind == Helper::Kind::Equal ? Type::I1 : Type::Void);
+  b.helper(h);
+  module.functions.push_back(std::move(b.function));
+}
+\end{lstlisting}
+
+先登记函数身份，再生成函数体，是处理递归依赖的关键。如果 \texttt{Link} 通过 Box 间接包含另一个 Link，比较 Link 时会需要比较 Box<Link>，后者又需要 Link 比较。若每次遇到类型都立即递归生成新函数体，就会无限展开；若查询到已登记身份便生成调用，则依赖可以有限地表示。
+
+下图呈现结构体比较如何依赖字段比较，并用返回既有函数身份的边说明递归依赖如何停止代码生成展开。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\node[irbox] (pair) at (0,0) {登记 eq\_Pair\\再生成函数体};
+\node[irbox,text width=24mm] (left) at (-1.8,-2) {left：i32 比较};
+\node[irbox,text width=24mm] (right) at (1.8,-2) {right：i32 比较};
+\draw[irarrow] (pair)--(left); \draw[irarrow] (pair)--(right);
+\node[irbox] (link) at (7.2,0) {登记 eq\_Link};
+\node[irbox] (box) at (7.2,-2) {eq\_Box<Link>};
+\draw[irarrow] (link)--(box);
+\draw[irarrow,bend right=55] (box) to node[right,font=\small]{调用已登记身份}(link);
+\end{tikzpicture}
+\caption{辅助函数的共享与递归依赖}
+\end{figure}
+
+这项机制解决函数生成的递归，不自动解决运行对象的循环引用。内容比较在怎样的对象图上终止，是另一项语义与运行时问题。当前可构造值和所有权规则所允许的形状，应先有明确边界，之后才考虑循环图比较所需的访问记录。
+
+\section{从已解析调用到 ABI 参数}
+\begin{lstlisting}[language=Rustless,caption={函数别名和方法调用必须使用已解析目标}]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Pair { left: i32, right: i32 }
+impl Pair { fn first(&self) -> i32 { self.left } }
+fn copy_pair(value: Pair) -> Pair { value }
+fn main() {
+    let p = Pair { left: 3, right: 4 };
+    let alias = copy_pair;
+    let q = alias(p);
+    printInt(q.first());
+}
+\end{lstlisting}
+alias 是使用处的名字，实际调用目标仍是 copy\_pair 的声明身份。桥接必须消费语义检查已经解析出的 FunctionTarget，不能用字符串 alias 再查找一个函数。方法的 receiver 同样已有调整序列，例如为 q.first() 形成共享借用；转换器不应另行猜测要自动解引用多少层。
+
+当前 \texttt{include/rx/ir\_semantic.hpp} 提供以下调用描述。
+\begin{lstlisting}[language=C++,caption={已经实现的调用转换计划}]
+struct FunctionCall { FunctionAbi signature; };
+struct BuiltinCall { BuiltinId builtin; };
+struct CallLowering {
+  std::variant<FunctionCall, BuiltinCall> target;
+  std::optional<OperandSemantics> receiver;
+  std::vector<OperandSemantics> arguments;
+  SemanticTypePtr result;
+};
+\end{lstlisting}
+普通调用携带内部 ABI，内建调用携带专门身份。receiver 与普通参数分离，参数 vector 保持源码次序。对于上述 copy\_pair，内部参数和结果都是间接聚合：后续转换需要准备参数副本和结果缓冲区，再发出调用；对于 first，receiver 的借用可以映射为对象地址，返回整数则直接映射为标量结果。
+
+下面摘自 \texttt{src/llvm/ir\_call.cpp} 的 \texttt{lower\_call}；目标分派与 receiver 取值展示了它消费事实的方式。
+\begin{lstlisting}[language=C++,caption={当前调用桥接依据具体身份选择目标}]
+const auto &fact = semantic_.expression(node);
+if (!fact.callable)
+  throw std::invalid_argument("call expression lacks a resolved target");
+auto target = std::visit(
+    ast::Overloaded{
+        [&](const FunctionTarget &value) -> decltype(CallLowering::target) {
+          return FunctionCall{function(value.symbol)};
+        },
+        [](const BuiltinTarget &value) -> decltype(CallLowering::target) {
+          return BuiltinCall{value.builtin};
+        }},
+    *fact.callable);
+CallLowering result{std::move(target), fact.receiver, {}, fact.type};
+\end{lstlisting}
+
+参数的有效类型由其检查结果及最后一个 adjustment 的目标确定，全部有序 adjustments 仍被保留。当前描述没有生成参数存储、实际借用指令或调用指令；这些是此后 lowering 的职责。使用函数对象和载荷对象的桥接入口还检查它们确实属于同一个 AST owner，以阻止从别的节点借来一个形状相同的载荷。
+
+下图把语义目标、转换计划和执行步骤连接起来，呈现前两项已有接口与最后一项后续实现之间的信息关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 8mm]
+\node[irbox] (facts) {已解析事实\\目标 / 调整 / 类型};
+\node[irbox,right=of facts] (plan) {CallLowering\\ABI 或 BuiltinId};
+\node[irbox,right=of plan] (emit) {后续执行转换\\副本 / 地址 / call};
+\draw[irarrow] (facts)--(plan); \draw[irarrow] (plan)--(emit);
+\node[irbox,below=of emit] (runtime) {声明一致的\\普通或运行时符号};
+\draw[irarrow] (emit)--(runtime);
+\end{tikzpicture}
+\caption{调用计划承接语义，并约束未来执行转换}
+\end{figure}
+
+\section{内建操作需要一致的身份和契约}
+内建函数可以拥有多种源拼写，例如已有输入输出别名。拼写适合诊断，BuiltinId 适合后续分派。当前 \texttt{include/rx/builtin.hpp} 的独立枚举覆盖输入输出、Box::new、Vec::new、clone、len、is\_empty、push 和 remove；它们不是用户声明的 SymbolId，也不应伪造用户函数身份。
+
+这项集中身份已经实现，但身份表并不等于完整运行时说明。后续可以为每个 BuiltinId 建立一致描述：语义参数规则、receiver 能力、返回规则、内存效果、实现符号以及机器 ABI。有些操作通过普通运行时函数实现，有些要按具体元素类型生成辅助函数，还有些可以直接生成少量 IR。表中应表达这些区别，而不是强迫所有内建都使用同一个字符串调用方案。
+
+\begin{lstlisting}[language=C++,caption={教学建议：将运行时效果作为明确契约}]
+// Proposed interface, not an existing Rustless definition.
+struct RuntimeEffect {
+  bool reads_memory;
+  bool writes_memory;
+  bool performs_io;
+  bool may_fail;
+};
+struct RuntimeDeclaration {
+  std::string symbol;
+  ir::Declaration signature;
+  RuntimeEffect effect;
+};
+\end{lstlisting}
+独立声明使 verifier 能检查参数和结果类型，也使优化器有依据判断调用能否移动或删除。能力与资源行为变化时，维护者可以沿着 BuiltinId 找到相关规则，减少分散字符串约定带来的遗漏。
+
+\section{何时需要另一层有类型的中间表示}
+本章的构造、借用、聚合复制和容器操作若全部直接展开为 load/store/call，机器 IR 将很快失去“这是一次结构体克隆”的概念。若后续分析需要反复回答这个问题，可以先保留一个较高层的有类型表示，再统一展开到当前 IR。
+
+例如教学上的中层操作可以包括聚合构造、Place 投影、显式调整、内容比较和已解析调用。它们的操作数已指向具体声明和具体语义类型，摆脱语法细节，同时尚未抹去语言关系。\href{https://rustc-dev-guide.rust-lang.org/mir/index.html}{rustc 的 MIR 介绍}展示了以基本块及位置为中心的中间表示，这为“让值与存储关系明确”提供一种经典参照。
+
+新增层次也带来成本：每个操作需要定义不变量、来源、访问接口、验证器和转换路径。若当前目标只是把一个较小的已检查 AST 转成机器 IR，直接消费 SemanticIndex 与桥接描述可以更简洁。只有明确分析或优化需要反复使用某项被展开后丢失的信息，才有充分理由增加表示层。
+
+现在，语法树中的聚合和调用已经可以被分解成明确的计算、位置及运行时要求。下一章研究怎样调整这些计算，同时保持它们所规定的行为。
+
+\chapter{优化为何正确：行为、分析与变换}
+\label{chap:optimization}
+\section*{本章导读}
+一条指令的结果没有被使用，并不说明这条指令可以删除；两条指令看起来互不相关，也不说明可以交换顺序。本章从可观察行为出发，讨论简单优化的证明依据，再介绍分析信息与变换之间的关系。读者不必先实现大型优化器，也可以学会为每一次改写提出准确的理由。
+
+当前 Rustless 提供 IR、操作数和后继枚举、效果的基本分类及 verifier；本章的优化算法与 pass 接口属于后续设计。教程中的“变换之后”是推导结果，不代表当前项目已具备所示优化流程。
+
+\section{可观察行为规定优化的边界}
+\begin{lstlisting}[language=Rustless,caption={没有使用的结果与必须发生的输入行为}]
+fn main() {
+    let x = getInt();
+    let y = x * 0;
+    printInt(7);
+}
+\end{lstlisting}
+y 从未被使用，所以乘法可能删除；getInt 则会读取输入，删除它会改变程序消费输入的行为。即使本例最后仍打印 7，外部交互已不同。对于函数，返回结果、内存中仍能被观察的变化、输入输出，以及语言规定的失败行为，共同形成优化必须保持的对象。
+
+等价不要求两份程序执行相同数量的步骤，也不要求临时地址相同。它要求在语言允许的输入和环境下，规定的可观察行为保持一致。这个定义应当由语言语义及运行时契约建立，不能由优化器为了方便而临时缩小。
+
+下图对照删除纯计算与删除输入调用，呈现结果未被使用时仍需要区分的两种行为。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm and 12mm]
+\node[irbox] (input) {getInt\\读取输入};
+\node[irbox,right=of input] (mul) {x * 0\\结果未用};
+\node[irbox,right=of mul] (print) {printInt(7)\\输出};
+\draw[irarrow] (input)--(mul); \draw[irarrow] (mul)--(print);
+\node[irbox,below=of input] (keep) {保留输入行为};
+\node[irbox,below=of print] (out) {同一输出};
+\draw[irarrow] (keep)--node[above,font=\small]{可省去乘法}(out);
+\draw[irarrow,dashed] (input)--(keep); \draw[irarrow,dashed] (print)--(out);
+\end{tikzpicture}
+\caption{删除无用计算需要保留外部行为}
+\end{figure}
+
+\section{源运算与 IR 运算的语义必须衔接}
+\begin{lstlisting}[language=Rustless,caption={边界值需要由语言规则解释}]
+fn main() {
+    let shifted = 1u32 << 32;
+    let quotient = 20i32 / getInt();
+    printInt(shifted as i32);
+    printInt(quotient);
+}
+\end{lstlisting}
+第十七章已经解释当前移位描述中的低五位掩码。计数 32 必须先转换为 0，再发出适当移位；优化器若直接把未掩码的 LLVM shift 当成源运算，就会使用错误的前提。类似地，除数为零、有符号最小值除以负一、整数溢出等情况，都需要逐项确定语言边界行为。
+
+LLVM 的 poison 是一种特殊值传播规则，与立即未定义行为不同。给整数运算添加无溢出标志，或者把某个分支上的潜在错误提前执行，可能引入原程序没有的限制。\href{https://llvm.org/docs/UndefinedBehavior.html}{LLVM 的未定义行为说明}明确区分这些情况；在本项目中，应先以语言要求为准，再选择能准确表达它的 IR 操作和必要检查。
+
+不要用宿主 C++ 的带符号溢出或移位表达式直接计算常量折叠结果。教学实现可以使用明确位宽的无符号位模式、单独处理有符号比较和除法边界，并检查所有目标类型的范围。常量折叠是运行运算规则的另一个实现，必须与正常执行具有同样的结果及失败条件。
+
+\section{先选择能够说明清楚的优化}
+\begin{lstlisting}[language=Rustless,caption={常量折叠、分支简化与无用值删除可以相互配合}]
+fn main() {
+    let x = 1 + 2;
+    let unused = x + 10;
+    if x == 3 { printInt(x); }
+    else { printInt(0); }
+}
+\end{lstlisting}
+常量折叠把 1+2 替换为 3；使用替换使比较也成为常量；分支简化只保留确定会进入的路径；不可达块删除移除另一分支；无用值删除移除 unused 的计算。各步骤的依据不同，适合分别实现为小变换，再按需要重复执行至没有变化。
+
+无用值删除需要定义与使用关系。若一个指令定义的结果没有使用，而且该操作可以安全删除，才可删除它。删除后，其输入也可能变得无用，因此可以使用工作表传播，而不必每次扫描整份模块。
+
+冗余复制消除同样需要精确条件。对纯标量的相同值转交可能只需替换使用；对聚合的字节复制则需要证明目标没有被观察、源和目标的别名关系允许改写、复制不含资源语义。把两种情况放在同一个“move”字符串之下，会让证明条件变得含混。
+
+选择少量优化有助于学习，因为每一项都有可手算的前后表示和反例。先处理常量与清楚的控制流，再讨论内存变换，可以让复杂性逐步来自真实需求。
+
+\section{内存效果、别名与可能失败的操作}
+当前 \texttt{src/llvm/ir.cpp} 的基本效果分类如下。
+\begin{lstlisting}[language=C++,caption={当前效果查询适合保守的基本分类}]
+bool has_side_effects(const Instruction &instruction) {
+  auto op = opcode(instruction);
+  return op == Op::Store || op == Op::Call || is_terminator(op);
+}
+\end{lstlisting}
+这段代码说明 store、调用和控制转移不能被当作普通无用算术删除，但它不是任意代码移动的完整依据。load 会读内存，不能跨越可能改写同一位置的 store；除法可能遇到错误条件；一个未被执行分支上的内存访问也不能无条件提到分支之前。
+
+别名分析回答两个地址是否可能指向重叠存储。没有证明不重叠时，优化器应保持可能相关的读写顺序。Place 投影及已知对象身份可以为这种分析提供信息，但当前扁平 Ptr IR 不会自动保留全部来源关系。如果内存优化成为主要目标，就需要选择保留来源、建立分析或使用既有框架中的哪一条路线。
+
+效果至少可以从读内存、写内存、输入输出、可能失败以及是否可投机执行几个方面描述。后者表示操作能否在原本不执行的路径上提前执行；它不能仅从“没有写内存”推出。更准确的效果模型使删除、移动和公共子表达式消除分别使用正确条件，也让未来运行时声明具备可供优化使用的意义。
+
+\section{分析信息与变换分别负责什么}
+def/use 回答值在哪里定义、在哪里使用；CFG 回答块之间的后继关系；支配关系回答某个定义是否必然先于使用；活跃性则回答值是否还会在某条未来路径被需要。这些信息可以被多个变换共享，没有必要让每个变换重新隐式计算一套。
+
+\texttt{ir\_visit.hpp} 的 \texttt{for\_each\_operand} 与后继枚举已经把基础关系集中起来。分析器应通过这些接口读取图，而不是在各个算法中分别维护指令类别列表。新增指令时，关系枚举的穷尽性检查帮助发现遗漏；算法还需为新的内存或控制语义补充相应规则。
+
+下图展示删除控制流边后依赖于旧图的分析怎样失效，呈现变换需要声明或触发重算的原因。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 16mm]
+\node[irbox] (change) {分支简化\\删除一条边};
+\node[irbox,right=of change] (cfg) {CFG 已改变};
+\node[irbox,below left=of cfg] (dom) {支配关系\\需要更新};
+\node[irbox,below right=of cfg] (live) {活跃性\\需要更新};
+\draw[irarrow] (change)--(cfg); \draw[irarrow] (cfg)--(dom);
+\draw[irarrow] (cfg)--(live);
+\node[irnote,below=10mm of dom] {值的使用被删除时\\def/use 也要更新};
+\end{tikzpicture}
+\caption{分析结论以特定版本的表示为前提}
+\end{figure}
+
+教学上的小型 pass 可以返回“是否改写了指令、是否改写了控制流”的结果。调度者据此保守地重算分析；以后确实观察到重算代价较高，再引入更细粒度的保留说明和增量更新。过早宣称某分析仍有效，会导致难以定位的旧信息使用错误。
+
+\begin{lstlisting}[language=C++,caption={教学建议：小型变换接口明确报告变化}]
+// Proposed interface, not an existing Rustless definition.
+struct ChangeSummary {
+  bool instructions_changed{};
+  bool control_flow_changed{};
+};
+ChangeSummary fold_constants(ir::Function &function);
+ChangeSummary simplify_branches(ir::Function &function);
+\end{lstlisting}
+
+\section{从栈槽提升到 SSA}
+\begin{lstlisting}[language=Rustless,caption={一个可由值版本替代存储的局部变量}]
+fn choose(flag: bool) -> i32 {
+    let mut value = 0;
+    if flag { value = 10; } else { value = 20; }
+    value
+}
+\end{lstlisting}
+清楚的初始转换可以为 value 分配一个局部栈槽，让赋值成为 store，最后的读取成为 load。若地址没有逃逸，且所有使用都能由分析理解，就可以把该槽的读写提升为 SSA 值：两个分支分别产生 10 和 20，合流处产生 Phi，返回 Phi 结果。
+
+下图将分支中的存储操作转换为值版本与 Phi，呈现提升如何利用合流关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\node[irbox,text width=24mm] (s1) at (0,0) {then\\store 10 到槽};
+\node[irbox,text width=24mm] (s2) at (3.2,0) {else\\store 20 到槽};
+\node[irbox,text width=24mm] (load) at (1.6,-2) {join\\load 槽};
+\draw[irarrow] (s1)--(load); \draw[irarrow] (s2)--(load);
+\node[irbox,text width=24mm] (v1) at (8.2,0) {then\\值 10};
+\node[irbox,text width=24mm] (v2) at (11.4,0) {else\\值 20};
+\node[irbox,text width=24mm] (phi) at (9.8,-2) {join\\Phi(10,20)};
+\draw[irarrow] (v1)--(phi); \draw[irarrow] (v2)--(phi);
+\end{tikzpicture}
+\caption{局部存储提升保持分支选择的值}
+\end{figure}
+
+借用会改变适用条件。如果把 \texttt{\&mut value} 传给一个可能写入的调用，地址与存储已形成语言关系，不能随意删除槽。即使地址没有逃逸，复杂索引或部分聚合写入也需要比标量槽更强的分析。
+
+直接构造 SSA 可以避免初始 load/store，但需要在每次分支、循环及未完成前驱处维护值版本，算法复杂度更早进入 lowering。先生成简单存储，再借助 \href{https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl07.html}{LLVM 关于可变局部变量的教程}所示提升路线，是一种经典选择。两条路线都可以优雅，关键在于构造算法和不变量是否匹配学习目标。
+
+\section{变换还必须保持表示不变量}
+分支简化若删除一条到达 join 的边，就必须同步删除每个 Phi 中对应的 incoming。对多重边，还需要按边的重数处理，不能只按唯一前驱集合删除一次。块合并、拆边和重定向同样影响 Phi 的前驱身份。
+
+删除值定义之前需要替换或删除所有使用；新使用需要满足类型和支配条件。当前 verifier 能发现许多这类错误，因此优化前后都进行验证，有助于把问题定位到引入错误的变换。验证通过只能说明结构合法，不能证明行为等价；独立输入输出对照或解释执行仍然需要。
+
+对短路表达式的变换尤其有教育意义：把 RHS 从条件块移入入口块，可能仍有合法类型和 SSA，却使原本不会发生的 printInt 执行。结构验证与语义预期各自检查不同承诺，不能让其中一项替代另一项。
+
+\section{根据学习目标决定优化范围}
+若主要目标是理解数据流，可以实现常量传播、基本无用值删除和栈槽提升，逐项推导并保留反例。若主要目标是学习语言前端，就可以优先产生正确 LLVM IR，把更广泛的目标优化交给 LLVM。使用成熟框架仍要求输入 IR 精确表达源语义；框架无法猜出遗漏的移位掩码或 Box 内容规则。
+
+一个优化器的价值可以从正确性条件、可观察改进和维护成本共同评价。算法数量、框架层数和遍历抽象数量并不直接说明设计更好。当前 IR 的明确指令形状、统一关系枚举和验证边界，为小规模优化提供了合适起点；更复杂的分析应随真实需求增长。
+
+下一章把这种仍可拥有任意多个值的表示，放到有限寄存器和具体机器指令之中。
