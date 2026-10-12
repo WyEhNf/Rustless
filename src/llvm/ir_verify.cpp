@@ -69,81 +69,76 @@ std::vector<std::string> verify_instruction(const Instruction &node) {
   auto alignment = [&](std::uint32_t value) {
     require(value && !(value & (value - 1)), "alignment must be a nonzero power of two");
   };
-  visit(
-      node,
-      ast::Overloaded{
-          [&](const Instruction &, const Alloca &p) { alignment(p.alignment); },
-          [&](const Instruction &, const Load &p) {
-            alignment(p.alignment);
-            require(p.address.type == Type::Ptr, "load address must be ptr");
-          },
-          [&](const Instruction &, const Store &p) {
-            alignment(p.alignment);
-            require(p.address.type == Type::Ptr, "store address must be ptr");
-          },
-          [&](const Instruction &, const Gep &p) {
-            require(p.base.type == Type::Ptr && p.offset.type == Type::I32,
-                    "GEP requires ptr and i32 byte offset");
-          },
-          [&](const Instruction &, const Binary &p) {
-            require(integer_width(p.result.type) &&
-                        p.left.type == p.result.type &&
-                        p.right.type == p.result.type,
-                    "binary operands and result must share an integer type");
-          },
-          [&](const Instruction &, const Compare &p) {
-            require(p.left.type == p.right.type,
-                    "comparison operand types differ");
-            require(static_cast<unsigned>(p.predicate) <=
-                        static_cast<unsigned>(Predicate::UGe),
-                    "invalid comparison predicate");
-            require(p.left.type != Type::Ptr || p.predicate == Predicate::Eq ||
-                        p.predicate == Predicate::Ne,
-                    "pointer comparisons require eq or ne");
-          },
-          [&](const Instruction &, const Cast &p) {
-            auto from = integer_width(p.operand.type),
-                 to = integer_width(p.result.type);
-            switch (p.op) {
-            case CastOp::ZExt:
-              require(from && to && from < to, "invalid zero extension");
-              break;
-            case CastOp::Trunc:
-              require(from && to && from > to, "invalid truncation");
-              break;
-            case CastOp::PtrToInt:
-              require(p.operand.type == Type::Ptr && p.result.type == Type::I32,
-                      "invalid RV32 pointer-to-int cast");
-              break;
-            case CastOp::IntToPtr:
-              require(p.operand.type == Type::I32 && p.result.type == Type::Ptr,
-                      "invalid RV32 int-to-pointer cast");
-              break;
-            }
-          },
-          [&](const Instruction &, const Call &p) {
-            require(!p.callee.empty(), "call requires a target");
-          },
-          [&](const Instruction &, const Phi &p) {
-            require(!p.incoming.empty(), "phi requires incoming values");
-            std::map<BlockId, const Operand *> values;
-            for (const auto &incoming : p.incoming) {
-              require(incoming.value.type == p.result.type,
-                      "phi incoming type mismatch");
-              auto [position, inserted] =
-                  values.emplace(incoming.predecessor, &incoming.value);
-              require(inserted ||
-                          same_operand(*position->second, incoming.value),
-                      "parallel phi edges must carry the same value");
-            }
-          },
-          [&](const Instruction &, const Branch &) {},
-          [&](const Instruction &, const CondBranch &p) {
-            require(p.condition.type == Type::I1,
-                    "branch condition must be i1");
-          },
-          [&](const Instruction &, const Return &) {},
-          [&](const Instruction &, const Unreachable &) {}});
+  auto check_payload = ast::Overloaded{
+      [&](const Instruction &, const Alloca &payload) { alignment(payload.alignment); },
+      [&](const Instruction &, const Load &payload) {
+        alignment(payload.alignment);
+        require(payload.address.type == Type::Ptr, "load address must be ptr");
+      },
+      [&](const Instruction &, const Store &payload) {
+        alignment(payload.alignment);
+        require(payload.address.type == Type::Ptr, "store address must be ptr");
+      },
+      [&](const Instruction &, const Gep &payload) {
+        require(payload.base.type == Type::Ptr && payload.offset.type == Type::I32,
+                "GEP requires ptr and i32 byte offset");
+      },
+      [&](const Instruction &, const Binary &payload) {
+        require(integer_width(payload.result.type) && payload.left.type == payload.result.type &&
+                    payload.right.type == payload.result.type,
+                "binary operands and result must share an integer type");
+      },
+      [&](const Instruction &, const Compare &payload) {
+        require(payload.left.type == payload.right.type, "comparison operand types differ");
+        require(static_cast<unsigned>(payload.predicate) <= static_cast<unsigned>(Predicate::UGe),
+                "invalid comparison predicate");
+        require(payload.left.type != Type::Ptr || payload.predicate == Predicate::Eq ||
+                    payload.predicate == Predicate::Ne,
+                "pointer comparisons require eq or ne");
+      },
+      [&](const Instruction &, const Cast &payload) {
+        const auto source_width = integer_width(payload.operand.type);
+        const auto target_width = integer_width(payload.result.type);
+        switch (payload.op) {
+        case CastOp::ZExt:
+          require(source_width && target_width && source_width < target_width,
+                  "invalid zero extension");
+          break;
+        case CastOp::Trunc:
+          require(source_width && target_width && source_width > target_width,
+                  "invalid truncation");
+          break;
+        case CastOp::PtrToInt:
+          require(payload.operand.type == Type::Ptr && payload.result.type == Type::I32,
+                  "invalid RV32 pointer-to-int cast");
+          break;
+        case CastOp::IntToPtr:
+          require(payload.operand.type == Type::I32 && payload.result.type == Type::Ptr,
+                  "invalid RV32 int-to-pointer cast");
+          break;
+        }
+      },
+      [&](const Instruction &, const Call &payload) {
+        require(!payload.callee.empty(), "call requires a target");
+      },
+      [&](const Instruction &, const Phi &payload) {
+        require(!payload.incoming.empty(), "phi requires incoming values");
+        std::map<BlockId, const Operand *> values;
+        for (const auto &incoming : payload.incoming) {
+          require(incoming.value.type == payload.result.type, "phi incoming type mismatch");
+          auto [position, inserted] = values.emplace(incoming.predecessor, &incoming.value);
+          require(inserted || same_operand(*position->second, incoming.value),
+                  "parallel phi edges must carry the same value");
+        }
+      },
+      [&](const Instruction &, const Branch &) {},
+      [&](const Instruction &, const CondBranch &payload) {
+        require(payload.condition.type == Type::I1, "branch condition must be i1");
+      },
+      [&](const Instruction &, const Return &) {},
+      [&](const Instruction &, const Unreachable &) {},
+  };
+  visit(node, check_payload);
   return errors;
 }
 namespace {
