@@ -52,6 +52,10 @@ struct ScalarComparison {
 struct StructuralEquality {
   SemanticTypePtr compared_type;
   bool negated;
+  bool operator==(const StructuralEquality &other) const {
+    return negated == other.negated &&
+           same_type(compared_type, other.compared_type);
+  }
 };
 using LoweredOperation =
     std::variant<ScalarArithmetic, ScalarComparison, ShortCircuit,

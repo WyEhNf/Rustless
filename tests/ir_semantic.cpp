@@ -86,13 +86,15 @@ fn main() {
   assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") !=
          std::string::npos);
   std::vector<decltype(ir::BinaryLowering::operation)> operations;
-  std::vector<ir::BinaryOp> assignments;
+  std::vector<ir::ScalarArithmetic> assignments;
   const ast::Expr *first_binary = nullptr;
   ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
     using P = std::remove_cvref_t<decltype(payload)>;
     if constexpr (std::same_as<P, ast::BinaryExpr>) {
       auto lowered = bridge.binary(owner, payload);
       operations.push_back(lowered.operation);
+      assert(lowered.left.node == payload.left->id);
+      assert(lowered.right.node == payload.right->id);
       if (!first_binary)
         first_binary = &owner;
       if (payload.op == ast::BinaryOp::Lt ||
@@ -102,16 +104,27 @@ fn main() {
       else
         assert(lowered.result_type == ir::Type::I32);
     }
-    if constexpr (std::same_as<P, ast::CompoundAssignExpr>)
-      assignments.push_back(bridge.compound(owner, payload));
+    if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+      auto lowered = bridge.compound(owner, payload);
+      assignments.push_back(lowered.operation);
+      assert(lowered.target.node == payload.target->id);
+      assert(lowered.value.node == payload.value->id);
+      assert(index.expression(owner).type->kind() == rx::SemanticType::Kind::Unit);
+    }
   });
   using Operation = decltype(ir::BinaryLowering::operation);
   const std::vector<Operation> expected{
-      ir::BinaryOp::SDiv,    ir::BinaryOp::UDiv,  ir::BinaryOp::AShr,
-      ir::BinaryOp::LShr,    ir::Predicate::SLt,  ir::Predicate::ULt,
+      ir::ScalarArithmetic{ir::BinaryOp::SDiv, ir::Type::I32, {}},
+      ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}},
+      ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
+      ir::ScalarArithmetic{ir::BinaryOp::LShr, ir::Type::I32, 31},
+      ir::ScalarComparison{ir::Predicate::SLt, ir::Type::I32},
+      ir::ScalarComparison{ir::Predicate::ULt, ir::Type::I32},
       ir::ShortCircuit::And, ir::ShortCircuit::Or};
   assert(operations == expected);
-  assert(assignments == (std::vector{ir::BinaryOp::AShr, ir::BinaryOp::UDiv}));
+  assert(assignments ==
+         (std::vector{ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
+                      ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}}}));
   auto alien = rx::parse_source("fn main() { let x = 1 + 2; }", diagnostics);
   bool rejected = false;
   ast::walk(*alien.crate, [&](const auto &, const auto &payload) {
