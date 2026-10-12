@@ -1487,12 +1487,13 @@ private:
       if ((left_type->kind() == SemanticType::Kind::Ref) !=
           (right_type->kind() == SemanticType::Kind::Ref))
         report(node.span, "ordering requires matching scalar operands");
-      while (l->kind() == Ty::Kind::Ref && r->kind() == Ty::Kind::Ref) {
-        if (l->is_mutable() && !r->is_mutable())
+      while (left_type->kind() == SemanticType::Kind::Ref &&
+             right_type->kind() == SemanticType::Kind::Ref) {
+        if (left_type->is_mutable() && !right_type->is_mutable())
           report(node.span, "ordering cannot coerce a mutable left reference "
                             "to a shared right reference");
-        l = l->element();
-        r = r->element();
+        left_type = left_type->element();
+        right_type = right_type->element();
       }
     }
     auto operation =
@@ -1510,7 +1511,10 @@ private:
     const bool boolean =
         std::holds_alternative<ScalarComparison>(*operation) ||
         std::holds_alternative<StructuralEquality>(*operation) || logical;
-    ExprInfo result{boolean ? ty(Ty::Kind::Bool) : lhs.effective_type};
+    auto result_type = lhs.effective_type;
+    if (boolean)
+      result_type = primitive_type(SemanticType::Kind::Bool);
+    ExprInfo result{result_type};
     result.binary =
         ResolvedBinary{*operation, std::move(lhs), std::move(rhs), result.type};
     return result;
@@ -1523,7 +1527,7 @@ private:
     check_assignment_target(assignment.target, destination);
     if (!coercible(source.type, destination.type))
       mismatch(assignment.value->span, source.type, destination.type);
-    return {ty(Ty::Kind::Unit)};
+    return {primitive_type(SemanticType::Kind::Unit)};
   }
   void check_assignment_target(const ast::ExprPtr &target,
                                const ExprInfo &destination) {
@@ -1547,9 +1551,9 @@ private:
              "compound operator " + std::string(ast::spelling(assignment.op)) +
                  " is not defined for " + type_name(lhs.effective_type) +
                  " and " + type_name(rhs.effective_type));
-      return {ty(Ty::Kind::Unit)};
+      return {primitive_type(SemanticType::Kind::Unit)};
     }
-    ExprInfo result{ty(Ty::Kind::Unit)};
+    ExprInfo result{primitive_type(SemanticType::Kind::Unit)};
     result.compound = ResolvedBinary{*operation, std::move(lhs), std::move(rhs),
                                      destination.type};
     return result;
@@ -1557,11 +1561,10 @@ private:
 
   ExprInfo check_cast(const ast::Expr &node, const ast::CastExpr &cast) {
     auto source = check_expr(cast.value);
-    auto destination = resolve_type(
-        cast.target_type, current_function_ ? current_function_->owner : "");
-    const bool valid =
-        (integer(source.type) && integer(destination)) ||
-        (source.type->kind() == Ty::Kind::Bool && integer(destination));
+    auto destination = resolve_type(cast.target_type, current_owner());
+    const bool valid = (integer(source.type) && integer(destination)) ||
+                       (source.type->kind() == SemanticType::Kind::Bool &&
+                        integer(destination));
     if (!valid)
       report(node.span, "unsupported cast from " + type_name(source.type) +
                             " to " + type_name(destination));
@@ -1588,7 +1591,7 @@ private:
       if (info.ast->signature.receiver) {
         auto self = structure_type(info.owner);
         if (ast::by_reference(*info.ast->signature.receiver))
-          self = compound(Ty::Kind::Ref, self,
+          self = compound(SemanticType::Kind::Ref, self,
                           ast::is_mutable(*info.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
@@ -1608,11 +1611,13 @@ private:
                               const BuiltinFunctionType &builtin) {
     switch (builtin.builtin) {
     case BuiltinId::GetInt:
-      return check_signature(node, arguments, {}, ty(Ty::Kind::I32));
+      return check_signature(node, arguments, {},
+                             primitive_type(SemanticType::Kind::I32));
     case BuiltinId::PrintInt:
     case BuiltinId::PrintlnInt:
-      return check_signature(node, arguments, {ty(Ty::Kind::I32)},
-                             ty(Ty::Kind::Unit));
+      return check_signature(node, arguments,
+                             {primitive_type(SemanticType::Kind::I32)},
+                             primitive_type(SemanticType::Kind::Unit));
     default:
       break;
     }
@@ -1633,23 +1638,28 @@ private:
       if (!supports(container, "Clone", "", {}))
         report(node.span, "clone is not available for " + type_name(container));
       return check_signature(node, arguments,
-                             {compound(Ty::Kind::Ref, container)}, container);
+                             {compound(SemanticType::Kind::Ref, container)},
+                             container);
     case BuiltinId::Push:
       return check_signature(
           node, arguments,
-          {compound(Ty::Kind::Ref, container, true), container->element()},
-          ty(Ty::Kind::Unit));
+          {compound(SemanticType::Kind::Ref, container, true),
+           container->element()},
+          primitive_type(SemanticType::Kind::Unit));
     case BuiltinId::Remove:
       return check_signature(
           node, arguments,
-          {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
+          {compound(SemanticType::Kind::Ref, container, true),
+           primitive_type(SemanticType::Kind::Usize)},
           container->element());
     case BuiltinId::Len:
+      return check_signature(node, arguments,
+                             {compound(SemanticType::Kind::Ref, container)},
+                             primitive_type(SemanticType::Kind::Usize));
     case BuiltinId::IsEmpty:
-      return check_signature(
-          node, arguments, {compound(Ty::Kind::Ref, container)},
-          builtin.builtin == BuiltinId::Len ? ty(Ty::Kind::Usize)
-                                            : ty(Ty::Kind::Bool));
+      return check_signature(node, arguments,
+                             {compound(SemanticType::Kind::Ref, container)},
+                             primitive_type(SemanticType::Kind::Bool));
     case BuiltinId::GetInt:
     case BuiltinId::PrintInt:
     case BuiltinId::PrintlnInt:
@@ -1660,18 +1670,21 @@ private:
 
   ExprInfo check_signature(const ast::Node &node,
                            const std::vector<ast::ExprPtr> &arguments,
-                           const std::vector<TyPtr> &parameters, TyPtr result) {
+                           const std::vector<SemanticTypePtr> &parameters,
+                           SemanticTypePtr result) {
     const auto count = arguments.size();
     if (count != parameters.size())
       report(node.span, "wrong number of function arguments");
-    for (std::size_t i = 0; i < count; ++i) {
-      auto expected = i < parameters.size() ? parameters[i] : TyPtr{};
-      auto argument = check_expr(arguments[i], expected);
+    for (std::size_t index = 0; index < count; ++index) {
+      SemanticTypePtr expected;
+      if (index < parameters.size())
+        expected = parameters[index];
+      auto argument = check_expr(arguments[index], expected);
       if (expected && !coercible(argument.type, expected))
-        mismatch(arguments[i]->span, argument.type, expected);
-      if (expected && expected->kind() == Ty::Kind::Ref &&
+        mismatch(arguments[index]->span, argument.type, expected);
+      if (expected && expected->kind() == SemanticType::Kind::Ref &&
           expected->is_mutable() && argument.access_locked)
-        report(arguments[i]->span,
+        report(arguments[index]->span,
                "mutable reference argument requires mutable container access");
     }
     return {std::move(result)};
@@ -1682,9 +1695,10 @@ private:
     if (!type_arguments(method.generic_args).empty())
       report(node.span, "method segments have no type parameters");
     auto receiver = check_expr(method.receiver);
-    TyPtr base = receiver.type;
+    SemanticTypePtr base = receiver.type;
     std::vector<Adjustment> receiver_adjustments;
-    while (base->kind() == Ty::Kind::Ref || base->kind() == Ty::Kind::Box) {
+    while (base->kind() == SemanticType::Kind::Ref ||
+           base->kind() == SemanticType::Kind::Box) {
       base = base->element();
       receiver_adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
@@ -1713,7 +1727,7 @@ private:
           OperandSemantics{method.receiver->id, base, receiver_adjustments};
       if (borrow) {
         const bool mutable_borrow = *borrow == Adjustment::Kind::BorrowMutable;
-        auto borrowed = compound(Ty::Kind::Ref, base, mutable_borrow);
+        auto borrowed = compound(SemanticType::Kind::Ref, base, mutable_borrow);
         result.receiver->adjustments.push_back({*borrow, borrowed});
         result.receiver->effective_type = borrowed;
       }
@@ -1721,22 +1735,25 @@ private:
     };
     const auto &name = method.method.text;
     if (name == "len" || name == "is_empty") {
-      if (receiver.type->kind() != Ty::Kind::Vec &&
-          receiver.type->kind() != Ty::Kind::Array &&
-          !(receiver.type->kind() == Ty::Kind::Ref &&
-            (receiver.type->element()->kind() == Ty::Kind::Vec ||
-             receiver.type->element()->kind() == Ty::Kind::Array)))
+      if (receiver.type->kind() != SemanticType::Kind::Vec &&
+          receiver.type->kind() != SemanticType::Kind::Array &&
+          !(receiver.type->kind() == SemanticType::Kind::Ref &&
+            (receiver.type->element()->kind() == SemanticType::Kind::Vec ||
+             receiver.type->element()->kind() == SemanticType::Kind::Array)))
         report(node.span, name + " is only available on arrays and Vec");
-      return finish(check_method_signature(node, method.arguments, {},
-                                           name == "len" ? ty(Ty::Kind::Usize)
-                                                         : ty(Ty::Kind::Bool)),
-                    "builtin::" + name, {}, Adjustment::Kind::BorrowShared);
+      auto result_type = primitive_type(SemanticType::Kind::Bool);
+      if (name == "len")
+        result_type = primitive_type(SemanticType::Kind::Usize);
+      auto result =
+          check_method_signature(node, method.arguments, {}, result_type);
+      return finish(std::move(result), "builtin::" + name, {},
+                    Adjustment::Kind::BorrowShared);
     }
     if (name == "push" || name == "remove") {
-      TyPtr vector = receiver.type;
-      if (vector->kind() == Ty::Kind::Ref)
+      SemanticTypePtr vector = receiver.type;
+      if (vector->kind() == SemanticType::Kind::Ref)
         vector = vector->element();
-      if (vector->kind() != Ty::Kind::Vec) {
+      if (vector->kind() != SemanticType::Kind::Vec) {
         report(node.span, name + " is only available on Vec");
         return finish({}, "builtin::Vec::" + name);
       }
@@ -1745,23 +1762,24 @@ private:
       if (name == "push")
         return finish(
             check_method_signature(node, method.arguments, {vector->element()},
-                                   ty(Ty::Kind::Unit)),
+                                   primitive_type(SemanticType::Kind::Unit)),
             "builtin::Vec::push", {}, Adjustment::Kind::BorrowMutable);
       return finish(
-          check_method_signature(node, method.arguments, {ty(Ty::Kind::Usize)},
+          check_method_signature(node, method.arguments,
+                                 {primitive_type(SemanticType::Kind::Usize)},
                                  vector->element()),
           "builtin::Vec::remove", {}, Adjustment::Kind::BorrowMutable);
     }
     if (name == "clone") {
       auto cloned = receiver.type;
-      if (cloned->kind() == Ty::Kind::Ref &&
-          (cloned->element()->kind() == Ty::Kind::Box ||
-           cloned->element()->kind() == Ty::Kind::Vec ||
-           cloned->element()->kind() == Ty::Kind::Array))
+      if (cloned->kind() == SemanticType::Kind::Ref &&
+          (cloned->element()->kind() == SemanticType::Kind::Box ||
+           cloned->element()->kind() == SemanticType::Kind::Vec ||
+           cloned->element()->kind() == SemanticType::Kind::Array))
         cloned = cloned->element();
       if (!supports(cloned, "Clone", "", {}))
         report(node.span, "clone is not available for " + type_name(cloned));
-      // Clone borrows the object being cloned, including a Box itself.
+
       base = receiver.type;
       receiver_adjustments.clear();
       while (!same_type(base, cloned)) {
@@ -1771,11 +1789,11 @@ private:
       return finish(check_method_signature(node, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
-    if (base->kind() == Ty::Kind::Struct) {
+    if (base->kind() == SemanticType::Kind::Struct) {
       auto key = base->name() + "::" + name;
-      if (auto it = associated_functions_.find(key);
-          it != associated_functions_.end()) {
-        const auto &function = it->second;
+      if (auto found = associated_functions_.find(key);
+          found != associated_functions_.end()) {
+        const auto &function = found->second;
         if (!function.ast->signature.receiver.has_value()) {
           report(node.span, "associated function without self cannot be "
                             "called with dot syntax");
