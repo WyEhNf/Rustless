@@ -327,65 +327,67 @@ private:
             [&](const ast::TypeSyntax &, const ast::ParenType &payload) {
               return resolve_type(payload.inner, self_name);
             },
-            [&](const ast::TypeSyntax &, const ast::ReferenceType &p) {
-              return compound(Ty::Kind::Ref,
-                              resolve_type(p.referent, self_name),
-                              p.mutability == ast::Mutability::Mutable);
+            [&](const ast::TypeSyntax &, const ast::ReferenceType &payload) {
+              return compound(SemanticType::Kind::Ref,
+                              resolve_type(payload.referent, self_name),
+                              payload.mutability == ast::Mutability::Mutable);
             },
-            [&](const ast::TypeSyntax &, const ast::ArrayType &p) {
-              auto element = resolve_type(p.element, self_name);
-              auto length = evaluate_length(p.length, self_name);
+            [&](const ast::TypeSyntax &, const ast::ArrayType &payload) {
+              auto element = resolve_type(payload.element, self_name);
+              auto length = evaluate_length(payload.length, self_name);
               return types_.array(std::move(element), length.value_or(0));
             },
-            [&](const ast::TypeSyntax &node, const ast::PathType &p) {
-              return resolve_path_type(p.path, node.span, self_name);
+            [&](const ast::TypeSyntax &node, const ast::PathType &payload) {
+              return resolve_path_type(payload.path, node.span, self_name);
             }});
   }
-  TyPtr resolve_path_type(const ast::Path &path, Span span,
-                          std::string_view self_name) {
+  SemanticTypePtr resolve_path_type(const ast::Path &path, Span span,
+                                    std::string_view self_name) {
     const std::string name{ast::name_text(path.segments.back().name)};
     auto arguments = type_arguments(path);
     if (name == "Self") {
       if (self_name.empty()) {
         report(span, "Self is only available inside a struct or impl");
-        return ty(Ty::Kind::Error);
+        return primitive_type(SemanticType::Kind::Error);
       }
       return structure_type(std::string(self_name));
     }
-    static const std::unordered_map<std::string, Ty::Kind> primitives = {
-        {"bool", Ty::Kind::Bool},
-        {"i32", Ty::Kind::I32},
-        {"u32", Ty::Kind::U32},
-        {"isize", Ty::Kind::Isize},
-        {"usize", Ty::Kind::Usize}};
-    if (auto it = primitives.find(name); it != primitives.end()) {
+    static const std::unordered_map<std::string, SemanticType::Kind>
+        primitives = {{"bool", SemanticType::Kind::Bool},
+                      {"i32", SemanticType::Kind::I32},
+                      {"u32", SemanticType::Kind::U32},
+                      {"isize", SemanticType::Kind::Isize},
+                      {"usize", SemanticType::Kind::Usize}};
+    if (auto found = primitives.find(name); found != primitives.end()) {
       if (!arguments.empty())
         report(span, "primitive type '" + name + "' takes no type arguments");
-      return ty(it->second);
+      return primitive_type(found->second);
     }
     if (name == "Box" || name == "Vec") {
       if (arguments.size() != 1) {
         report(span, name + " requires exactly one concrete type argument");
-        return ty(Ty::Kind::Error);
+        return primitive_type(SemanticType::Kind::Error);
       }
-      return compound(name == "Box" ? Ty::Kind::Box : Ty::Kind::Vec,
-                      resolve_type(*arguments.front(), self_name));
+      auto element = resolve_type(*arguments.front(), self_name);
+      if (name == "Box")
+        return types_.box(std::move(element));
+      return types_.vector(std::move(element));
     }
-    if (structures_.contains(name)) {
+    if (structures_.find(name) != structures_.end()) {
       if (!arguments.empty())
         report(span, "struct '" + name + "' has no type parameters");
       return structure_type(name);
     }
     report(span, "unknown type '" + name + "'");
-    return ty(Ty::Kind::Error);
+    return primitive_type(SemanticType::Kind::Error);
   }
   std::optional<std::uint64_t>
   evaluate_length(const ast::ExprPtr &expression,
                   std::string_view self_name = {}) {
     auto errors = diagnostics_.error_count();
-    auto [type, value] =
-        constant_value(expression, ty(Ty::Kind::Usize), self_name);
-    if (type->kind() != Ty::Kind::Usize)
+    auto [type, value] = constant_value(
+        expression, primitive_type(SemanticType::Kind::Usize), self_name);
+    if (type->kind() != SemanticType::Kind::Usize)
       report(expression->span, "array length must have type usize");
     if (value < 0)
       report(expression->span, "array length cannot be negative");
@@ -400,7 +402,7 @@ private:
       return;
     if (constant.type_state == ConstantInfo::TypeState::Resolving) {
       report(constant.ast->span, "constant type dependency cycle");
-      constant.type = ty(Ty::Kind::Error);
+      constant.type = primitive_type(SemanticType::Kind::Error);
       constant.type_state = ConstantInfo::TypeState::Failed;
       return;
     }
@@ -412,11 +414,11 @@ private:
   }
 
   void resolve_declarations() {
-    // Register every associated item before resolving declaration types.
+
     for (const auto *implementation : impls_) {
       auto target = resolve_type(implementation->target);
-      if (target->kind() != Ty::Kind::Struct ||
-          !structures_.contains(target->name())) {
+      if (target->kind() != SemanticType::Kind::Struct ||
+          structures_.find(target->name()) == structures_.end()) {
         report(implementation->span,
                "an inherent impl target must be a user-defined struct");
         continue;
@@ -426,24 +428,24 @@ private:
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
         ast::visit(member, [&](const ast::Node &, const auto &declaration) {
-          using T = std::decay_t<decltype(declaration)>;
+          using Payload = std::decay_t<decltype(declaration)>;
           const auto &name = declaration.name.text;
           auto key = owner + "::" + name;
-          record_symbol(declaration.id,
-                        std::is_same_v<T, ast::Function>
-                            ? SymbolKind::AssociatedFunction
-                            : SymbolKind::AssociatedConstant,
-                        key, owner_symbol);
+          auto kind = SymbolKind::AssociatedConstant;
+          if constexpr (std::is_same_v<Payload, ast::Function>)
+            kind = SymbolKind::AssociatedFunction;
+          record_symbol(declaration.id, kind, key, owner_symbol);
           if (!associated_names.insert(name).second ||
-              associated_functions_.contains(key) ||
-              associated_constants_.contains(key))
+              (associated_functions_.find(key) !=
+               associated_functions_.end()) ||
+              (associated_constants_.find(key) != associated_constants_.end()))
             report(declaration.span,
                    "duplicate associated item '" + name + "'");
-          if constexpr (std::is_same_v<T, ast::Function>) {
+          if constexpr (std::is_same_v<Payload, ast::Function>) {
             associated_functions_[key].ast = &declaration;
             associated_functions_[key].owner = owner;
           } else {
-            static_assert(std::is_same_v<T, ast::Constant>);
+            static_assert(std::is_same_v<Payload, ast::Constant>);
             associated_constants_[key].ast = &declaration;
             associated_constants_[key].owner = owner;
           }
@@ -451,7 +453,6 @@ private:
       }
     }
 
-    // Constant types resolve lazily so their order cannot affect array lengths.
     for (auto &[_, constant] : constants_)
       resolve_constant_type(constant);
     for (auto &[_, constant] : associated_constants_)
@@ -468,11 +469,11 @@ private:
             report(structure.ast->span, "duplicate derive '" + derive + "'");
           structure.derives.insert(derive);
         }
-      if (structure.derives.contains("Copy") &&
-          !structure.derives.contains("Clone"))
+      if ((structure.derives.find("Copy") != structure.derives.end()) &&
+          structure.derives.find("Clone") == structure.derives.end())
         report(structure.ast->span, "Copy requires an explicit Clone derive");
-      if (structure.derives.contains("Eq") &&
-          !structure.derives.contains("PartialEq"))
+      if ((structure.derives.find("Eq") != structure.derives.end()) &&
+          structure.derives.find("PartialEq") == structure.derives.end())
         report(structure.ast->span, "Eq requires an explicit PartialEq derive");
       for (const auto &field : structure.ast->fields) {
         record_symbol(field.id, SymbolKind::Field, field.name.text,
@@ -515,7 +516,7 @@ private:
   }
 
   void evaluate_constant(ConstantInfo &constant) {
-    // The visit state turns recursive evaluation into cycle detection.
+
     resolve_constant_type(constant);
     if (constant.state == ConstantInfo::State::Done ||
         constant.state == ConstantInfo::State::Failed)
@@ -528,7 +529,7 @@ private:
     constant.state = ConstantInfo::State::Evaluating;
     auto [value_type, value] =
         constant_value(constant.ast->value, constant.type, constant.owner);
-    if (!same(constant.type, value_type)) {
+    if (!compatible_types(constant.type, value_type)) {
       report(constant.ast->span, "constant initializer has type " +
                                      type_name(value_type) + ", expected " +
                                      type_name(constant.type));
@@ -539,46 +540,46 @@ private:
     constant.state = ConstantInfo::State::Done;
   }
 
-  using EvaluatedConstant = std::pair<TyPtr, std::int64_t>;
+  using EvaluatedConstant = std::pair<SemanticTypePtr, std::int64_t>;
   EvaluatedConstant constant_path(const ast::Expr &node,
                                   const ast::PathExpr &path,
                                   std::string_view self_name) {
     auto name = ast::path_name(path.path);
-    if (!self_name.empty() && name.starts_with("Self::"))
+    if (!self_name.empty() && name.compare(0, 6, "Self::") == 0)
       name = std::string(self_name) + name.substr(4);
-    if (auto it = constants_.find(name); it != constants_.end()) {
-      evaluate_constant(it->second);
-      record_node(node, ExprInfo{it->second.type, false, false, false,
-                                 symbol_for(it->second.ast->id), name});
-      return {it->second.type, it->second.value};
+    if (auto found = constants_.find(name); found != constants_.end()) {
+      evaluate_constant(found->second);
+      record_node(node, ExprInfo{found->second.type, false, false, false,
+                                 symbol_for(found->second.ast->id), name});
+      return {found->second.type, found->second.value};
     }
-    if (auto it = associated_constants_.find(name);
-        it != associated_constants_.end()) {
-      evaluate_constant(it->second);
-      record_node(node, ExprInfo{it->second.type, false, false, false,
-                                 symbol_for(it->second.ast->id), name});
-      return {it->second.type, it->second.value};
+    if (auto found = associated_constants_.find(name);
+        found != associated_constants_.end()) {
+      evaluate_constant(found->second);
+      record_node(node, ExprInfo{found->second.type, false, false, false,
+                                 symbol_for(found->second.ast->id), name});
+      return {found->second.type, found->second.value};
     }
     report(node.span, "constant path does not resolve to a constant");
-    auto error = ty(Ty::Kind::Error);
+    auto error = primitive_type(SemanticType::Kind::Error);
     record_node(node, ExprInfo{error});
     return {error, 0};
   }
   EvaluatedConstant constant_value(const ast::ExprPtr &expression,
-                                   TyPtr expected = {},
+                                   SemanticTypePtr expected = {},
                                    std::string_view self_name = {}) {
     return ast::visit(
         *expression,
         ast::Overloaded{
             [&](const ast::Expr &node,
-                const ast::ParenExpr &p) -> EvaluatedConstant {
-              auto value = constant_value(p.inner, expected, self_name);
+                const ast::ParenExpr &payload) -> EvaluatedConstant {
+              auto value = constant_value(payload.inner, expected, self_name);
               record_node(node, ExprInfo{value.first});
               return value;
             },
             [&](const ast::Expr &node,
-                const ast::BooleanExpr &p) -> EvaluatedConstant {
-              auto type = ty(Ty::Kind::Bool);
+                const ast::BooleanExpr &payload) -> EvaluatedConstant {
+              auto type = primitive_type(SemanticType::Kind::Bool);
               record_node(node, ExprInfo{type});
               return {type, p.value};
             },
