@@ -1342,65 +1342,59 @@ private:
     return {scalar};
   }
 
+  OperandSemantics operand_use(const ast::Expr &node, const ExprInfo &info,
+                               bool references = true) {
+    OperandSemantics use{node.id, info.type, {}};
+    // Contextual coercions have already been recorded by check_expr.
+    for (const auto &adjustment : info.adjustments) {
+      use.adjustments.push_back(adjustment);
+      use.effective_type = adjustment.target;
+    }
+    while (references && use.effective_type->kind() == Ty::Kind::Ref &&
+           !use.effective_type->is_mutable()) {
+      use.effective_type = use.effective_type->element();
+      use.adjustments.push_back({Adjustment::Kind::Dereference, use.effective_type});
+    }
+    return use;
+  }
+
   ExprInfo check_binary(const ast::Expr &node, const ast::BinaryExpr &binary) {
     auto left = check_expr(binary.left);
     auto right = check_expr(binary.right, left.type);
-    auto lhs = scalar_operand(left.type);
-    auto rhs = scalar_operand(right.type);
-    auto op = binary.op;
-    if (op == ast::BinaryOp::LogicalAnd || op == ast::BinaryOp::LogicalOr) {
-      if (left.type->kind() != Ty::Kind::Bool ||
-          right.type->kind() != Ty::Kind::Bool)
-        report(node.span, "logical operators require bool operands");
-      return {ty(Ty::Kind::Bool)};
-    }
-    if (op == ast::BinaryOp::Eq || op == ast::BinaryOp::Ne) {
-      if (!same(lhs, rhs))
-        mismatch(node.span, rhs, lhs);
-      if (!supports(lhs, "PartialEq", "", {}))
-        report(node.span, "equality requires PartialEq");
-      return {ty(Ty::Kind::Bool)};
-    }
-    if (op == ast::BinaryOp::Lt || op == ast::BinaryOp::Le ||
-        op == ast::BinaryOp::Gt || op == ast::BinaryOp::Ge) {
-      auto ordering_left = left.type;
-      auto ordering_right = right.type;
-      if ((ordering_left->kind() == Ty::Kind::Ref) !=
-          (ordering_right->kind() == Ty::Kind::Ref)) {
+    const bool logical = binary.op == ast::BinaryOp::LogicalAnd ||
+                         binary.op == ast::BinaryOp::LogicalOr;
+    auto lhs = operand_use(*binary.left, left, !logical);
+    auto rhs = operand_use(*binary.right, right, !logical);
+    const bool ordering = binary.op == ast::BinaryOp::Lt ||
+                          binary.op == ast::BinaryOp::Le ||
+                          binary.op == ast::BinaryOp::Gt ||
+                          binary.op == ast::BinaryOp::Ge;
+    if (ordering) {
+      auto l = left.type;
+      auto r = right.type;
+      if ((l->kind() == Ty::Kind::Ref) != (r->kind() == Ty::Kind::Ref))
         report(node.span, "ordering requires matching scalar operands");
-        return {ty(Ty::Kind::Bool)};
+      while (l->kind() == Ty::Kind::Ref && r->kind() == Ty::Kind::Ref) {
+        if (l->is_mutable() && !r->is_mutable())
+          report(node.span, "ordering cannot coerce a mutable left reference to a shared right reference");
+        l = l->element(); r = r->element();
       }
-      while (ordering_left->kind() == Ty::Kind::Ref &&
-             ordering_right->kind() == Ty::Kind::Ref) {
-        if (ordering_left->is_mutable() && !ordering_right->is_mutable())
-          report(node.span, "ordering cannot coerce a mutable left "
-                            "reference to a shared right reference");
-        ordering_left = ordering_left->element();
-        ordering_right = ordering_right->element();
-      }
-      if ((!integer(ordering_left) && ordering_left->kind() != Ty::Kind::Bool) ||
-          !same(ordering_left, ordering_right))
-        report(node.span, "ordering requires matching scalar operands");
-      return {ty(Ty::Kind::Bool)};
     }
-    if (op == ast::BinaryOp::Shl || op == ast::BinaryOp::Shr) {
-      if (!integer(lhs) || !integer(rhs))
-        report(node.span, "shift operands must be integers");
-      return {lhs};
+    auto operation = resolve_operation(binary.op, lhs.effective_type, rhs.effective_type);
+    if (!operation) {
+      report(node.span, "operator " + std::string(ast::spelling(binary.op)) +
+                           " is not defined for " + type_name(lhs.effective_type) +
+                           " and " + type_name(rhs.effective_type));
+      return {};
     }
-    if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr ||
-         op == ast::BinaryOp::BitXor) &&
-        lhs->kind() == Ty::Kind::Bool && rhs->kind() == Ty::Kind::Bool)
-      return {ty(Ty::Kind::Bool)};
-    if (!integer(lhs) || !same(lhs, rhs))
-      report(node.span, "integer operator requires matching integer operands");
-    return {lhs};
-  }
-
-  TyPtr scalar_operand(TyPtr value) {
-    if (value->kind() == Ty::Kind::Ref && !value->is_mutable())
-      return value->element();
-    return value;
+    if ((binary.op == ast::BinaryOp::Eq || binary.op == ast::BinaryOp::Ne) &&
+        !supports(lhs.effective_type, "PartialEq", "", {}))
+      report(node.span, "equality requires PartialEq");
+    const bool boolean = std::holds_alternative<ScalarComparison>(*operation) ||
+                         std::holds_alternative<StructuralEquality>(*operation) || logical;
+    ExprInfo result{boolean ? ty(Ty::Kind::Bool) : lhs.effective_type};
+    result.binary = ResolvedBinary{*operation, std::move(lhs), std::move(rhs), result.type};
+    return result;
   }
 
   ExprInfo check_assignment(const ast::Expr &node,
