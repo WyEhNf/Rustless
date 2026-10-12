@@ -17,8 +17,7 @@ struct StructLayout {
   Layout layout;
   std::vector<FieldLayout> fields;
 };
-// Indirect is an address of by-value aggregate storage, not a source reference.
-// This internal convention is independent of the platform's C aggregate ABI.
+
 enum class Passing { Direct, Indirect };
 struct AbiValue {
   Type type;
@@ -52,25 +51,32 @@ enum class ShortCircuit { And, Or };
 struct ScalarArithmetic {
   BinaryOp op;
   Type operand_type;
-  // Lowering must mask the RHS before emitting a shift instruction.
+
   std::optional<std::uint32_t> shift_count_mask;
-  bool operator==(const ScalarArithmetic &) const = default;
+  bool operator==(const ScalarArithmetic &other) const {
+    return op == other.op && operand_type == other.operand_type &&
+           shift_count_mask == other.shift_count_mask;
+  }
+  bool operator!=(const ScalarArithmetic &other) const { return !(*this == other); }
 };
 struct ScalarComparison {
   Predicate predicate;
   Type operand_type;
-  bool operator==(const ScalarComparison &) const = default;
+  bool operator==(const ScalarComparison &other) const {
+    return predicate == other.predicate && operand_type == other.operand_type;
+  }
+  bool operator!=(const ScalarComparison &other) const { return !(*this == other); }
 };
 struct StructuralEquality {
   SemanticTypePtr compared_type;
   bool negated;
   bool operator==(const StructuralEquality &other) const {
-    return negated == other.negated &&
-           same_type(compared_type, other.compared_type);
+    return negated == other.negated && same_type(compared_type, other.compared_type);
   }
+  bool operator!=(const StructuralEquality &other) const { return !(*this == other); }
 };
-using LoweredOperation = std::variant<ScalarArithmetic, ScalarComparison,
-                                      ShortCircuit, StructuralEquality>;
+using LoweredOperation =
+    std::variant<ScalarArithmetic, ScalarComparison, ShortCircuit, StructuralEquality>;
 struct BinaryLowering {
   LoweredOperation operation;
   OperandSemantics left;
@@ -85,7 +91,7 @@ struct CompoundLowering {
 struct ScalarUnary {
   BinaryOp op;
   Type operand_type;
-  // Both forms emit a binary instruction with this constant on the left.
+
   std::uint32_t left_constant;
 };
 struct DereferencePlace {
@@ -101,40 +107,31 @@ class SemanticBridge {
 public:
   explicit SemanticBridge(const SemanticIndex &semantic,
                           TargetLayout target = TargetLayout::rv32());
-  SemanticBridge(SemanticIndex &&,
-                 TargetLayout = TargetLayout::rv32()) = delete;
-  SemanticBridge(const SemanticIndex &&,
-                 TargetLayout = TargetLayout::rv32()) = delete;
+  SemanticBridge(SemanticIndex &&, TargetLayout = TargetLayout::rv32()) = delete;
+  SemanticBridge(const SemanticIndex &&, TargetLayout = TargetLayout::rv32()) = delete;
   const TargetLayout &target() const { return target_; }
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
-  const StructLayout &structure(SymbolId symbol) const {
-    return layouts_.at(symbol);
-  }
+  const StructLayout &structure(SymbolId symbol) const { return layouts_.at(symbol); }
   FunctionAbi function(const ast::Function &node) const;
   FunctionAbi function(SymbolId symbol) const;
   Declaration declaration(const ast::Function &node) const;
   std::vector<Declaration> declarations() const;
-  BinaryLowering binary(const ast::Expr &node,
-                        const ast::BinaryExpr &payload) const;
-  CompoundLowering compound(const ast::Expr &node,
-                            const ast::CompoundAssignExpr &payload) const;
+  BinaryLowering binary(const ast::Expr &node, const ast::BinaryExpr &payload) const;
+  CompoundLowering compound(const ast::Expr &node, const ast::CompoundAssignExpr &payload) const;
   CallLowering call(const ast::Expr &node, const ast::CallExpr &payload) const;
-  CallLowering call(const ast::Expr &node,
-                    const ast::MethodCallExpr &payload) const;
-  UnaryLowering unary(const ast::Expr &node,
-                      const ast::UnaryExpr &payload) const;
+  CallLowering call(const ast::Expr &node, const ast::MethodCallExpr &payload) const;
+  UnaryLowering unary(const ast::Expr &node, const ast::UnaryExpr &payload) const;
 
 private:
   StructLayout &resolve_structure(SymbolId symbol);
   Layout compute_layout(const SemanticTypePtr &type);
   AbiValue abi(const SemanticTypePtr &type) const;
   BinaryLowering lower_binary(const ResolvedBinary &resolved) const;
-  CallLowering lower_call(const ast::Expr &node,
-                          const std::vector<ast::ExprPtr> &arguments) const;
+  CallLowering lower_call(const ast::Expr &node, const std::vector<ast::ExprPtr> &arguments) const;
   const SemanticIndex &semantic_;
   const TargetLayout target_;
   std::map<SymbolId, StructLayout> layouts_;
   std::set<SymbolId> resolving_;
 };
-} // namespace rx::ir
+}
