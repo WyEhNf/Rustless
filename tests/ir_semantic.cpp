@@ -125,12 +125,9 @@ fn main() {
     }
   });
   assert(rejected);
-  auto integer = std::make_shared<rx::SemanticType>();
-  integer->kind = rx::SemanticType::Kind::I32;
-  auto array = std::make_shared<rx::SemanticType>();
-  array->kind = rx::SemanticType::Kind::Array;
-  array->element = integer;
-  array->length = std::uint64_t{1} << 32;
+  rx::TypeContext types;
+  auto integer = types.primitive(rx::SemanticType::Kind::I32);
+  auto array = types.array(integer, std::uint64_t{1} << 32);
   rejected = false;
   try {
     (void)bridge.layout(array);
