@@ -838,54 +838,58 @@ private:
     if (literal.suffix) {
       switch (*literal.suffix) {
       case ast::IntegerSuffix::I32:
-        result = ty(Ty::Kind::I32);
+        result = primitive_type(SemanticType::Kind::I32);
         break;
       case ast::IntegerSuffix::U32:
-        result = ty(Ty::Kind::U32);
+        result = primitive_type(SemanticType::Kind::U32);
         break;
       case ast::IntegerSuffix::Isize:
-        result = ty(Ty::Kind::Isize);
+        result = primitive_type(SemanticType::Kind::Isize);
         break;
       case ast::IntegerSuffix::Usize:
-        result = ty(Ty::Kind::Usize);
+        result = primitive_type(SemanticType::Kind::Usize);
         break;
       }
     } else if (integer(expected))
       result = expected;
     else
-      result = ty(Ty::Kind::I32);
+      result = primitive_type(SemanticType::Kind::I32);
     auto value = integer_magnitude(literal);
     if (!value || *value > std::numeric_limits<std::uint32_t>::max())
       report(span, "integer literal is outside the 32-bit target range");
     return result;
   }
 
-  std::vector<Adjustment> coercion_adjustments(const TyPtr &from,
-                                               const TyPtr &to) const {
+  std::vector<Adjustment>
+  coercion_adjustments(const SemanticTypePtr &from,
+                       const SemanticTypePtr &to) const {
     std::vector<Adjustment> result;
-    if (!from || !to || same(from, to) || from->kind() == Ty::Kind::Error ||
-        to->kind() == Ty::Kind::Error)
+    if (!from || !to || compatible_types(from, to) ||
+        from->kind() == SemanticType::Kind::Error ||
+        to->kind() == SemanticType::Kind::Error)
       return result;
-    if (from->kind() == Ty::Kind::Never) {
+    if (from->kind() == SemanticType::Kind::Never) {
       result.push_back({Adjustment::Kind::NeverToAny, to});
       return result;
     }
-    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref &&
-        from->is_mutable() && !to->is_mutable() &&
-        same(from->element(), to->element())) {
+    if (from->kind() == SemanticType::Kind::Ref &&
+        to->kind() == SemanticType::Kind::Ref && from->is_mutable() &&
+        !to->is_mutable() && compatible_types(from->element(), to->element())) {
       result.push_back({Adjustment::Kind::MutToShared, to});
       return result;
     }
-    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref) {
+    if (from->kind() == SemanticType::Kind::Ref &&
+        to->kind() == SemanticType::Kind::Ref) {
       auto current = from;
-      while (current->kind() == Ty::Kind::Ref ||
-             current->kind() == Ty::Kind::Box) {
+      while (current->kind() == SemanticType::Kind::Ref ||
+             current->kind() == SemanticType::Kind::Box) {
         current = current->element();
         result.push_back({Adjustment::Kind::Dereference, current});
-        if (same(current, to->element())) {
-          result.push_back({to->is_mutable() ? Adjustment::Kind::BorrowMutable
-                                             : Adjustment::Kind::BorrowShared,
-                            to});
+        if (compatible_types(current, to->element())) {
+          auto borrow = Adjustment::Kind::BorrowShared;
+          if (to->is_mutable())
+            borrow = Adjustment::Kind::BorrowMutable;
+          result.push_back({borrow, to});
           return result;
         }
       }
@@ -904,32 +908,44 @@ private:
   }
 
   void record_node(const ast::Node &node, const ExprInfo &result) {
-    expression_facts_[node.id] = {
-        node.id,           result.type,          result.is_place,
-        result.is_mutable, result.access_locked, result.symbol,
-        result.target,     result.adjustments,   result.callable,
-        result.binary,     result.compound,      result.unary,
-        result.receiver};
+    ExpressionSemantics fact;
+    fact.node = node.id;
+    fact.type = result.type;
+    fact.is_place = result.is_place;
+    fact.is_mutable = result.is_mutable;
+    fact.access_locked = result.access_locked;
+    fact.symbol = result.symbol;
+    fact.target = result.target;
+    fact.adjustments = result.adjustments;
+    fact.callable = result.callable;
+    fact.binary = result.binary;
+    fact.compound = result.compound;
+    fact.unary = result.unary;
+    fact.receiver = result.receiver;
+    expression_facts_[node.id] = std::move(fact);
   }
-  ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
+  ExprInfo check_expr(const ast::ExprPtr &expression,
+                      SemanticTypePtr expected = {}) {
     return check_expr(*expression, std::move(expected));
   }
-  ExprInfo check_expr(const ast::Expr &expression, TyPtr expected = {},
+  ExprInfo check_expr(const ast::Expr &expression,
+                      SemanticTypePtr expected = {},
                       bool record_coercion = true) {
     auto result = ast::visit(
         expression,
         ast::Overloaded{
-            [&](const ast::Expr &node, const ast::IntegerExpr &p) -> ExprInfo {
-              return {literal_type(p.literal, expected, node.span)};
+            [&](const ast::Expr &node,
+                const ast::IntegerExpr &payload) -> ExprInfo {
+              return {literal_type(payload.literal, expected, node.span)};
             },
             [&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
-              return {ty(Ty::Kind::Bool)};
+              return {primitive_type(SemanticType::Kind::Bool)};
             },
             [&](const ast::Expr &, const ast::UnitExpr &) -> ExprInfo {
-              return {ty(Ty::Kind::Unit)};
+              return {primitive_type(SemanticType::Kind::Unit)};
             },
-            [&](const ast::Expr &, const ast::ParenExpr &p) {
-              auto inner = check_expr(*p.inner, expected, false);
+            [&](const ast::Expr &, const ast::ParenExpr &payload) {
+              auto inner = check_expr(*payload.inner, expected, false);
               inner.adjustments.clear();
               inner.binary.reset();
               inner.compound.reset();
@@ -949,11 +965,11 @@ private:
             [&](const ast::Expr &node, const ast::StructExpr &structure) {
               return check_struct(node, structure);
             },
-            [&](const ast::Expr &, const ast::BlockExpr &p) {
-              return check_block(*p.block, expected);
+            [&](const ast::Expr &, const ast::BlockExpr &payload) {
+              return check_block(*payload.block, expected);
             },
-            [&](const ast::Expr &node, const ast::IfExpr &p) {
-              return check_if(node, p, expected);
+            [&](const ast::Expr &node, const ast::IfExpr &payload) {
+              return check_if(node, payload, expected);
             },
             [&](const ast::Expr &node, const ast::LoopExpr &loop_expr) {
               return check_loop(node, loop_expr, expected);
@@ -992,14 +1008,14 @@ private:
             [&](const ast::Expr &node, const ast::IndexExpr &projection) {
               return check_index(node, projection);
             },
-            [&](const ast::Expr &node, const ast::BreakExpr &p) {
-              return check_break(node, p);
+            [&](const ast::Expr &node, const ast::BreakExpr &payload) {
+              return check_break(node, payload);
             },
-            [&](const ast::Expr &node, const ast::ContinueExpr &p) {
-              return check_continue(node, p);
+            [&](const ast::Expr &node, const ast::ContinueExpr &payload) {
+              return check_continue(node, payload);
             },
-            [&](const ast::Expr &node, const ast::ReturnExpr &p) {
-              return check_return(node, p);
+            [&](const ast::Expr &node, const ast::ReturnExpr &payload) {
+              return check_return(node, payload);
             }});
     if (expected && record_coercion && coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
@@ -1019,23 +1035,23 @@ private:
         std::string(ast::name_text(path.segments.front().name)) == "Self" &&
         current_function_ && !current_function_->owner.empty()) {
       name = current_function_->owner;
-      for (std::size_t i = 1; i < path.segments.size(); ++i)
-        name += "::" + std::string(ast::name_text(path.segments[i].name));
+      for (std::size_t index = 1; index < path.segments.size(); ++index)
+        name += "::" + std::string(ast::name_text(path.segments[index].name));
     }
     if (path.segments.size() == 1) {
       if (auto *binding = lookup(name))
         return {binding->type,   true, binding->is_mutable, false,
                 binding->symbol, name};
-      if (auto it = constants_.find(name); it != constants_.end())
-        return {it->second.type,
+      if (auto found = constants_.find(name); found != constants_.end())
+        return {found->second.type,
                 false,
                 false,
                 false,
-                symbol_for(it->second.ast->id),
+                symbol_for(found->second.ast->id),
                 name};
-      if (auto it = functions_.find(name); it != functions_.end()) {
-        auto value = types_.function(symbol_for(it->second.ast->id), name);
-        return {value, false, false, false, symbol_for(it->second.ast->id),
+      if (auto found = functions_.find(name); found != functions_.end()) {
+        auto value = types_.function(symbol_for(found->second.ast->id), name);
+        return {value, false, false, false, symbol_for(found->second.ast->id),
                 name};
       }
       if (builtin_function(name)) {
@@ -1044,24 +1060,24 @@ private:
       }
 
     } else {
-      if (auto it = associated_constants_.find(name);
-          it != associated_constants_.end())
-        return {it->second.type,
+      if (auto found = associated_constants_.find(name);
+          found != associated_constants_.end())
+        return {found->second.type,
                 false,
                 false,
                 false,
-                symbol_for(it->second.ast->id),
+                symbol_for(found->second.ast->id),
                 name};
-      if (auto it = associated_functions_.find(name);
-          it != associated_functions_.end()) {
-        auto value = types_.function(symbol_for(it->second.ast->id), name);
-        return {value, false, false, false, symbol_for(it->second.ast->id),
+      if (auto found = associated_functions_.find(name);
+          found != associated_functions_.end()) {
+        auto value = types_.function(symbol_for(found->second.ast->id), name);
+        return {value, false, false, false, symbol_for(found->second.ast->id),
                 name};
       }
       if (constructor_path(path)) {
         auto value = builtin_path_type(path, name);
         std::optional<SymbolId> symbol;
-        if (auto it = structures_.find(
+        if (auto found = structures_.find(
                 std::string(ast::name_text(path.segments.front().name)));
             it != structures_.end())
           symbol = symbol_for(it->second.ast->id);
