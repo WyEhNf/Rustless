@@ -1,0 +1,130 @@
+\appendix
+\chapter{源码阅读地图}
+\section*{导读}
+阅读一个定义时，应同时寻找它的使用者。下表按学习问题列出公开头文件，
+正文中的摘录则说明字段和处理规则。表中的路径以 Rustless 仓库为起点；
+\texttt{ast.hpp} 汇集各类定义，实际职责由下面的专门文件承担。
+
+\small
+\begin{longtable}{p{.40\textwidth}p{.54\textwidth}}
+\toprule 文件 & 阅读时需要回答的问题 \\ \midrule
+\endhead
+\path{include/rx/ast.hpp} & 对外汇集哪些 AST 家族？谁在直接读取这些定义？\\
+\path{include/rx/ast/node.hpp} & NodeId、Span、Box 和重载集合怎样组合？\\
+\path{include/rx/ast/source.hpp} & 源码由谁拥有，字节位置怎样连接字符位置？\\
+\path{include/rx/ast/names.hpp} & 名字、绑定和可变性各自保存什么？\\
+\path{include/rx/ast/path.hpp} & 路径段、Self 与具体泛型实参怎样保存？\\
+\path{include/rx/ast/operators.hpp} & 运算符的枚举身份在哪一层形成？\\
+\path{include/rx/ast/literal.hpp} & 整数字面量的进制、后缀和文本为何分别保存？\\
+\path{include/rx/ast/type.hpp} & 类型语法的五种形状怎样拥有子结构？\\
+\path{include/rx/ast/generics.hpp} & 生命周期与 where 写法怎样被保留？\\
+\path{include/rx/ast/use.hpp} & 导入前缀、末端和分组的递归关系是什么？\\
+\path{include/rx/ast/item.hpp} & 函数、结构体、常量与 impl 的身份怎样组织？\\
+\path{include/rx/ast/expr.hpp} & 二十五种表达式为何各有专属字段？\\
+\path{include/rx/ast/stmt.hpp} & 语句、分号与块尾表达式怎样分工？\\
+\path{include/rx/ast/dispatch.hpp} & owner 与具体载荷怎样一起进入处理规则？\\
+\path{include/rx/ast/visitor.hpp} & 明确的节点覆盖要求怎样被检查？\\
+\path{include/rx/ast/children.hpp} & 哪些成员是真正的结构性子节点？\\
+\path{include/rx/ast/traversal.hpp} & 进入、退出、跳过与停止怎样控制递归？\\
+\path{include/rx/frontend.hpp} & 解析成功与建树结果怎样分别表达？\\
+\path{include/rx/diagnostic.hpp} & 诊断如何连接源码范围？\\
+\path{include/rx/symbol.hpp} & 声明身份为何与语法身份具有不同类型？\\
+\path{include/rx/semantic_type.hpp} & 不可变载荷、访问分派和类型工厂怎样配合？\\
+\path{include/rx/builtin.hpp} & 内建语言操作怎样取得独立身份？\\
+\path{include/rx/semantic_literal.hpp} & 数值解码如何避免宿主类型的意外溢出？\\
+\path{include/rx/semantic_operation.hpp} & 固有类型、输入转换与已解析操作怎样分开？\\
+\path{include/rx/semantic.hpp} & 分析草稿怎样成为只读的成功或失败快照？\\
+\path{include/rx/semantic_index.hpp} & 查询如何保证身份、对象来源及事实完整性？\\
+\path{include/rx/ir_ids.hpp} & 值身份与基本块身份为何不能互换？\\
+\path{include/rx/ir.hpp} & 指令载荷、定义和使用怎样组织？\\
+\path{include/rx/ir_visit.hpp} & 指令访问为何与结构化的操作数检查配合？\\
+\path{include/rx/ir_builder.hpp} & 构建器怎样维护当前块及终结状态？\\
+\path{include/rx/ir_verify.hpp} & 哪些条件应由整份 IR 的验证承担？\\
+\path{include/rx/target_layout.hpp} & RV32 布局、偏移与目标元数据怎样集中？\\
+\path{include/rx/ir_semantic.hpp} & 布局、内部 ABI 和 lowering 描述怎样消费语义事实？\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+这些定义的主要使用过程分别位于 \path{src/frontend.cpp}、
+\path{src/semantic.cpp}、\path{src/semantic_type.cpp}、
+\path{src/semantic_operation.cpp} 和 \path{src/semantic_index.cpp}。
+IR 的构建、检查、打印与语义桥接位于 \path{src/llvm/}；新增的
+\path{ir_call.cpp} 将已解析的函数或内建身份及实参转换组织为调用计划。
+它没有自行解析函数名，也没有承担完整调用指令的发射。
+
+\chapter{实验与检验的阅读方法}
+\section*{导读}
+一次实验应当先说明要观察什么。解析器接受输入，只说明该输入符合所选语法
+入口；树结构检查进一步核对身份与子节点；语义测试还需要区分应接受与应拒绝
+的程序。IR 验证检查计算表示的良构条件，最终输入输出实验才检验执行行为。
+
+在 Rustless 仓库中完成 CMake 配置后，可运行下列命令。构建环境需要 C++23
+编译器及项目 CMake 所声明的 Java 和 ANTLR 依赖。
+\begin{lstlisting}
+cmake --build build --parallel 4
+ctest --test-dir build --output-on-failure
+python scripts/test_frontend.py --compiler build/rxc.exe \
+  --test-root ../rx-compiler-testcases --jobs 4
+\end{lstlisting}
+最后一条命令以各目录的 manifest 为预期来源。返回码 0 表示接受，1 表示源
+程序被正常拒绝，2 表示调用或内部错误；应拒绝的程序不能以异常退出作为通过。
+当前外部测试集包含 53 个 lex、442 个 parse、236 个 semantic 测试，本文对应
+修订已逐组通过。这个结论不扩展到 codegen 或 optimization 组的执行行为。
+
+为了观察具体 AST，应选取以 crate 为入口的合法程序：
+\begin{lstlisting}
+build/rxc.exe --stage parse --dump-ast example.rx
+build/rxc.exe --stage semantic --dump-typed example.rx
+build/frontend_ast_corpus.exe \
+  ../rx-compiler-testcases/semantic --semantic
+\end{lstlisting}
+在 PowerShell 中，示例中的换行反斜杠应删除并把命令写为一行。
+parse 组中的表达式、类型和语句入口可以单独验证语法；当前 CLI 的
+\texttt{--dump-ast} 用于完整 crate。解释一棵树时，应将 dump 与节点的实际
+载荷和源码范围对照，而不能仅凭输出包含某个名字就断定树的结构正确。
+
+\texttt{semantic\_type} 检验唯一化及类型身份；
+\texttt{semantic\_index\_invariants} 故意删项、换序、修改类型和转换链；
+\texttt{semantic\_operations} 核对运算规则、调用别名、输入转换归属；
+\texttt{ir\_semantic} 与 \texttt{ir\_calls} 核对布局及 lowering 描述；
+\texttt{ir\_alignment} 检验 CFG、SSA 和 Phi 的不变量。这里的每一种测试都
+有自己的观察对象，故意错误的例子使该对象所要求的关系更容易看清。
+
+\section{重新形成独立的 TeX 文件}
+各章源片段便于分章修改，交付的教程将它们完整嵌入同一个文件，编译时无需
+任何额外图片或章节文件。更新各章后运行：
+\begin{lstlisting}
+python scripts/build_tutorial.py
+\end{lstlisting}
+输出为 \path{docs/compiler-design-tutorial.tex}。文件采用 ctexbook 与
+Fandol 字体，图示由 TikZ 绘制；采用支持这些宏包的 XeLaTeX 环境时，可运行
+两次 XeLaTeX 更新目录和交叉引用，亦可在 Codex 的 LaTeX 编辑器中打开源文件。
+
+\chapter{继续阅读}
+\section*{导读}
+项目定义回答“这一实现怎样表达关系”，经典资料帮助比较其他表达方式。
+以下资料用于继续学习相应概念。Rustless 并不照搬其中全部语言能力或数据结构。
+\begin{itemize}
+\item \href{https://clang.llvm.org/docs/IntroductionToTheClangAST.html}{Clang AST 简介}：
+  观察表达式、声明及 AST 访问如何分工。
+\item \href{https://rustc-dev-guide.rust-lang.org/ty.html}{Rust Compiler Development Guide：类型表示}：
+  比较类型语法与编译器内部类型，并学习类型唯一化的动机。
+\item \href{https://rustc-dev-guide.rust-lang.org/hir-typeck/coercions.html}{rustc 的 coercion 与 adjustment}：
+  将类型相容判断与后续所需的隐式操作联系起来。
+\item \href{https://llvm.org/docs/LangRef.html}{LLVM Language Reference}：
+  核对具体指令、Phi、移位、支配要求与目标元数据的定义。
+\item \href{https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl05.html}{LLVM 控制流教程}、
+  \href{https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl07.html}{可变变量教程}：
+  学习分支构造和栈槽提升到 SSA 的过程。
+\item \href{https://llvm.org/docs/CodeGenerator.html}{LLVM Code Generator}：
+  继续阅读指令选择、寄存器分配、机器表示和栈帧处理的职责。
+\item \href{https://riscv-non-isa.github.io/riscv-elf-psabi-doc/}{RISC-V ELF psABI}：
+  核对平台调用约定，尤其区分本文的内部聚合传参约定与对外 ABI。
+\end{itemize}
+写作顺序还参考了
+\href{https://chihaozhang.com/teaching/Prob2026/}{概率论课程讲义}从具体问题引入
+抽象关系的方式，以及
+\href{https://awesome-embedded-learning-studio.github.io/Tutorial_AwesomeModernCPP/vol4-advanced/vol4-generics-patterns/16-visitor}{Modern C++ Visitor 教程}
+从处理需求解释访问模式的方式。本文的程序示例、源码解释与设计推导围绕
+Rustless 自身展开。
