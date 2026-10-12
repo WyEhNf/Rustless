@@ -2,14 +2,11 @@
 
 #include "rx/ir.hpp"
 #include "rx/semantic_index.hpp"
+#include "rx/target_layout.hpp"
 #include <map>
 #include <set>
 
 namespace rx::ir {
-struct Layout {
-  std::uint32_t bytes;
-  std::uint32_t alignment;
-};
 struct FieldLayout {
   SymbolId symbol;
   std::uint32_t offset;
@@ -45,8 +42,11 @@ struct BinaryLowering {
 };
 class SemanticBridge {
 public:
-  explicit SemanticBridge(const SemanticIndex &semantic);
-  SemanticBridge(SemanticIndex &&) = delete;
+  explicit SemanticBridge(const SemanticIndex &semantic,
+                          TargetLayout target = TargetLayout::rv32());
+  SemanticBridge(SemanticIndex &&,
+                 TargetLayout = TargetLayout::rv32()) = delete;
+  const TargetLayout &target() const { return target_; }
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
   const StructLayout &structure(SymbolId symbol) const {
@@ -65,6 +65,7 @@ private:
   Layout compute_layout(const SemanticTypePtr &type);
   AbiValue abi(const SemanticTypePtr &type) const;
   const SemanticIndex &semantic_;
+  const TargetLayout target_;
   std::map<std::string, SymbolId> structures_;
   std::map<SymbolId, StructLayout> layouts_;
   std::set<SymbolId> resolving_;
