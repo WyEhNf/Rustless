@@ -1079,8 +1079,8 @@ private:
         std::optional<SymbolId> symbol;
         if (auto found = structures_.find(
                 std::string(ast::name_text(path.segments.front().name)));
-            it != structures_.end())
-          symbol = symbol_for(it->second.ast->id);
+            found != structures_.end())
+          symbol = symbol_for(found->second.ast->id);
         return {value, false, false, false, symbol, "builtin::" + name};
       }
     }
@@ -1095,13 +1095,16 @@ private:
       return BuiltinId::PrintInt;
     return BuiltinId::PrintlnInt;
   }
-  TyPtr builtin_path_type(const ast::Path &path, const std::string &name) {
+  SemanticTypePtr builtin_path_type(const ast::Path &path,
+                                    const std::string &name) {
     const std::string owner{ast::name_text(path.segments[0].name)};
     const auto member = ast::name_text(path.segments[1].name);
     BuiltinId id = BuiltinId::Clone;
-    if (member == "new")
-      id = owner == "Box" ? BuiltinId::BoxNew : BuiltinId::VecNew;
-    else if (member == "len")
+    if (member == "new") {
+      id = BuiltinId::VecNew;
+      if (owner == "Box")
+        id = BuiltinId::BoxNew;
+    } else if (member == "len")
       id = BuiltinId::Len;
     else if (member == "is_empty")
       id = BuiltinId::IsEmpty;
@@ -1109,7 +1112,7 @@ private:
       id = BuiltinId::Push;
     else if (member == "remove")
       id = BuiltinId::Remove;
-    if (structures_.contains(owner)) {
+    if (structures_.find(owner) != structures_.end()) {
       auto type = structure_type(owner);
       if (!supports(type, "Clone", "", {}))
         report(path.span, "clone is not available for " + type_name(type));
@@ -1121,8 +1124,12 @@ private:
       return types_.builtin(id);
     }
     auto element = resolve_type(*arguments.front());
-    return types_.builtin(
-        id, compound(owner == "Box" ? Ty::Kind::Box : Ty::Kind::Vec, element));
+    SemanticTypePtr container;
+    if (owner == "Box")
+      container = types_.box(element);
+    else
+      container = types_.vector(element);
+    return types_.builtin(id, std::move(container));
   }
 
   static bool builtin_function(std::string_view name) {
@@ -1142,31 +1149,32 @@ private:
         (first == "Vec" && member) ||
         (first == "Box" && (second == "new" || second == "clone"));
     return container_member ||
-           (structures_.contains(first) && second == "clone");
+           ((structures_.find(first) != structures_.end()) &&
+            second == "clone");
   }
 
   ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array,
-                       const TyPtr &expected) {
-    auto expected_element = expected && expected->kind() == Ty::Kind::Array
-                                ? expected->element()
-                                : TyPtr{};
+                       const SemanticTypePtr &expected) {
+    SemanticTypePtr expected_element;
+    if (expected && expected->kind() == SemanticType::Kind::Array)
+      expected_element = expected->element();
     if (array.elements.empty()) {
       if (!expected_element) {
         report(node.span, "an empty array requires an expected array type");
         return {};
       }
-      return {compound(Ty::Kind::Array, expected_element)};
+      return {compound(SemanticType::Kind::Array, expected_element)};
     }
     auto first = check_expr(array.elements.front(), expected_element);
 
-    for (std::size_t i = 1; i < array.elements.size(); ++i) {
-      auto element = check_expr(array.elements[i], expected_element);
+    for (std::size_t index = 1; index < array.elements.size(); ++index) {
+      auto element = check_expr(array.elements[index], expected_element);
       auto merged = common_type(first.type, element.type);
-      if (merged->kind() == Ty::Kind::Error)
-        mismatch(array.elements[i]->span, element.type, first.type);
+      if (merged->kind() == SemanticType::Kind::Error)
+        mismatch(array.elements[index]->span, element.type, first.type);
       else {
-        if (!same(element.type, merged))
-          append_adjustments(array.elements[i]->id,
+        if (!compatible_types(element.type, merged))
+          append_adjustments(array.elements[index]->id,
                              coercion_adjustments(element.type, merged));
         first.type = merged;
       }
@@ -1179,14 +1187,13 @@ private:
   }
   ExprInfo check_repeat_array(const ast::Expr &node,
                               const ast::RepeatArrayExpr &array,
-                              const TyPtr &expected) {
-    auto expected_element = expected && expected->kind() == Ty::Kind::Array
-                                ? expected->element()
-                                : TyPtr{};
+                              const SemanticTypePtr &expected) {
+    SemanticTypePtr expected_element;
+    if (expected && expected->kind() == SemanticType::Kind::Array)
+      expected_element = expected->element();
     auto first = check_expr(array.element, expected_element);
-    check_expr(array.count, ty(Ty::Kind::Usize));
-    auto length = evaluate_length(
-        array.count, current_function_ ? current_function_->owner : "");
+    check_expr(array.count, primitive_type(SemanticType::Kind::Usize));
+    auto length = evaluate_length(array.count, current_owner());
     auto result = types_.array(first.type, length.value_or(0));
     if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
       report(node.span, "array repetition requires Copy");
@@ -1202,8 +1209,8 @@ private:
     if (name == "Self" && current_function_ &&
         !current_function_->owner.empty())
       name = current_function_->owner;
-    auto it = structures_.find(name);
-    if (it == structures_.end()) {
+    auto found = structures_.find(name);
+    if (found == structures_.end()) {
       report(node.span,
              "struct literal names an unknown struct '" + name + "'");
       return {};
@@ -1213,8 +1220,8 @@ private:
       if (!initialized.insert(field.name.text).second)
         report(field.span,
                "duplicate field initializer '" + field.name.text + "'");
-      auto expected = it->second.fields.find(field.name.text);
-      if (expected == it->second.fields.end()) {
+      auto expected = found->second.fields.find(field.name.text);
+      if (expected == found->second.fields.end()) {
         report(field.span, "unknown field '" + field.name.text + "'");
         check_expr(field.value);
       } else {
@@ -1223,56 +1230,60 @@ private:
           mismatch(field.value->span, value.type, expected->second);
       }
     }
-    for (const auto &[field, _] : it->second.fields)
-      if (!initialized.contains(field))
+    for (const auto &[field, _] : found->second.fields)
+      if (initialized.find(field) == initialized.end())
         report(node.span, "missing field initializer '" + field + "'");
     auto result = structure_type(name);
-    return {result, false, false, false, symbol_for(it->second.ast->id), name};
+    return {result, false, false, false, symbol_for(found->second.ast->id),
+            name};
   }
 
-  ExprInfo check_block(const ast::Block &block, const TyPtr &expected = {}) {
+  ExprInfo check_block(const ast::Block &block,
+                       const SemanticTypePtr &expected = {}) {
     scopes_.emplace_back();
-    TyPtr result = ty(Ty::Kind::Unit);
-    for (std::size_t i = 0; i < block.statements.size(); ++i) {
-      const auto &statement = block.statements[i];
+    SemanticTypePtr result = primitive_type(SemanticType::Kind::Unit);
+    for (std::size_t index = 0; index < block.statements.size(); ++index) {
+      const auto &statement = block.statements[index];
       ast::visit(
           *statement,
           ast::Overloaded{
               [&](const ast::Stmt &node, const ast::EmptyStmt &) {},
-              [&](const ast::Stmt &node, const ast::LetStmt &p) {
-                auto annotation =
-                    p.annotation
-                        ? resolve_type(
-                              *p.annotation,
-                              current_function_ ? current_function_->owner : "")
-                        : TyPtr{};
-                auto initializer = check_expr(p.initializer, annotation);
-                auto binding_type = annotation ? annotation : initializer.type;
+              [&](const ast::Stmt &node, const ast::LetStmt &payload) {
+                SemanticTypePtr annotation;
+                if (payload.annotation)
+                  annotation =
+                      resolve_type(*payload.annotation, current_owner());
+                auto initializer = check_expr(payload.initializer, annotation);
+                auto binding_type = initializer.type;
+                if (annotation)
+                  binding_type = annotation;
                 if (annotation && !coercible(initializer.type, annotation))
-                  mismatch(p.initializer->span, initializer.type, annotation);
-                if (annotation && annotation->kind() == Ty::Kind::Ref &&
+                  mismatch(payload.initializer->span, initializer.type,
+                           annotation);
+                if (annotation &&
+                    annotation->kind() == SemanticType::Kind::Ref &&
                     annotation->is_mutable() && initializer.access_locked)
-                  report(p.initializer->span,
+                  report(payload.initializer->span,
                          "mutable reference initializer requires mutable "
                          "container access");
-                record_symbol(
-                    node.id, SymbolKind::Local, p.binding.name.text,
-                    current_function_
-                        ? std::optional<ast::NodeId>(current_function_->ast->id)
-                        : std::nullopt);
+                std::optional<ast::NodeId> owner;
+                if (current_function_)
+                  owner = current_function_->ast->id;
+                record_symbol(node.id, SymbolKind::Local,
+                              payload.binding.name.text, owner);
                 record_symbol_type(node.id, binding_type);
-                if (protected_builtin_value(p.binding.name.text))
-                  report(p.binding.name.span,
+                if (protected_builtin_value(payload.binding.name.text))
+                  report(payload.binding.name.span,
                          "cannot shadow a protected builtin");
-                scopes_.back()[p.binding.name.text] = {
+                scopes_.back()[payload.binding.name.text] = {
                     binding_type,
-                    p.binding.mutability == ast::Mutability::Mutable,
+                    payload.binding.mutability == ast::Mutability::Mutable,
                     symbol_for(node.id)};
               },
-              [&](const ast::Stmt &node, const ast::ExprStmt &p) {
-                auto value = check_expr(p.expression);
-                if (!block.tail && i + 1 == block.statements.size() &&
-                    value.type->kind() == Ty::Kind::Never)
+              [&](const ast::Stmt &node, const ast::ExprStmt &payload) {
+                auto value = check_expr(payload.expression);
+                if (!block.tail && index + 1 == block.statements.size() &&
+                    value.type->kind() == SemanticType::Kind::Never)
                   result = value.type;
                 else if (p.termination == ast::Termination::Omitted &&
                          value.type->kind() != Ty::Kind::Unit &&
