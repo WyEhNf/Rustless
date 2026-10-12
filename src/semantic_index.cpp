@@ -466,8 +466,8 @@ void SemanticIndex::validate_declarations() const {
     else if (fact.result->kind() != SemanticType::Kind::Unit)
       throw std::invalid_argument("unannotated function result is not unit");
     ast::walk(*node.body, [&](const auto &statement, const auto &payload) {
-      if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
-                                 ast::LetStmt>) {
+      if constexpr (std::is_same_v<std::decay_t<decltype(payload)>,
+                                   ast::LetStmt>) {
         const auto local = require_symbol(statement, SymbolKind::Local, id,
                                           payload.binding.name.text);
         if (payload.annotation)
@@ -480,35 +480,38 @@ void SemanticIndex::validate_declarations() const {
   };
   auto check_constant = [&](const ast::Constant &node,
                             std::optional<SymbolId> owner = {}) {
-    const auto id = require_symbol(
-        node, owner ? SymbolKind::AssociatedConstant : SymbolKind::Constant,
-        owner,
-        owner ? symbol(*owner).name + "::" + node.name.text : node.name.text);
+    auto kind = SymbolKind::Constant;
+    auto name = node.name.text;
+    if (owner) {
+      kind = SymbolKind::AssociatedConstant;
+      name = symbol(*owner).name + "::" + name;
+    }
+    const auto id = require_symbol(node, kind, owner, name);
     require_equivalent(symbol_type(id), type(*node.type));
     require_equivalent(symbol_type(id), expression(*node.value).type);
     (void)constant(id);
   };
   for (const auto &item : crate_->items)
     ast::visit(item, [&](const ast::Node &, const auto &payload) {
-      using T = std::remove_cvref_t<decltype(payload)>;
-      if constexpr (std::same_as<T, ast::Struct>)
+      using Payload = std::decay_t<decltype(payload)>;
+      if constexpr (std::is_same_v<Payload, ast::Struct>)
         check_struct(payload);
-      if constexpr (std::same_as<T, ast::Function>)
+      if constexpr (std::is_same_v<Payload, ast::Function>)
         check_function(payload);
-      if constexpr (std::same_as<T, ast::Constant>)
+      if constexpr (std::is_same_v<Payload, ast::Constant>)
         check_constant(payload);
-      if constexpr (std::same_as<T, ast::Impl>) {
+      if constexpr (std::is_same_v<Payload, ast::Impl>) {
         const auto target = type(*payload.target);
         if (target->kind() != SemanticType::Kind::Struct)
           throw std::invalid_argument("checked impl target is not a struct");
         const auto owner = target->symbol();
         for (const auto &member : payload.members)
           ast::visit(member, [&](const ast::Node &, const auto &value) {
-            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
-                                       ast::Function>)
+            if constexpr (std::is_same_v<std::decay_t<decltype(value)>,
+                                         ast::Function>)
               check_function(value, owner);
-            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
-                                       ast::Constant>)
+            if constexpr (std::is_same_v<std::decay_t<decltype(value)>,
+                                         ast::Constant>)
               check_constant(value, owner);
           });
       }
@@ -518,44 +521,44 @@ void SemanticIndex::validate_declarations() const {
         "semantic symbols do not match AST declarations");
 }
 void SemanticIndex::validate_shapes() const {
-  using K = SemanticType::Kind;
-  auto expect = [](const SemanticTypePtr &type, K kind) {
+  using TypeKind = SemanticType::Kind;
+  auto expect = [](const SemanticTypePtr &type, TypeKind kind) {
     if (type->kind() != kind)
       throw std::invalid_argument("semantic type does not match AST payload");
   };
   ast::walk(*crate_, [&](const auto &node, const auto &payload) {
-    using Owner = std::remove_cvref_t<decltype(node)>;
-    using P = std::remove_cvref_t<decltype(payload)>;
-    if constexpr (std::same_as<Owner, ast::TypePredicate>)
+    using Owner = std::decay_t<decltype(node)>;
+    using Payload = std::decay_t<decltype(payload)>;
+    if constexpr (std::is_same_v<Owner, ast::TypePredicate>)
       return ast::WalkControl::SkipChildren;
-    if constexpr (std::same_as<Owner, ast::TypeSyntax>) {
+    if constexpr (std::is_same_v<Owner, ast::TypeSyntax>) {
       const auto &resolved = type(node);
-      if constexpr (std::same_as<P, ast::UnitType>)
-        expect(resolved, K::Unit);
-      if constexpr (std::same_as<P, ast::ParenType>)
+      if constexpr (std::is_same_v<Payload, ast::UnitType>)
+        expect(resolved, TypeKind::Unit);
+      if constexpr (std::is_same_v<Payload, ast::ParenType>)
         require_equivalent(resolved, type(*payload.inner));
-      if constexpr (std::same_as<P, ast::ReferenceType>) {
-        expect(resolved, K::Ref);
+      if constexpr (std::is_same_v<Payload, ast::ReferenceType>) {
+        expect(resolved, TypeKind::Ref);
         if (resolved->is_mutable() !=
             (payload.mutability == ast::Mutability::Mutable))
           throw std::invalid_argument("reference type mutability mismatch");
         require_equivalent(resolved->element(), type(*payload.referent));
       }
-      if constexpr (std::same_as<P, ast::ArrayType>) {
-        expect(resolved, K::Array);
+      if constexpr (std::is_same_v<Payload, ast::ArrayType>) {
+        expect(resolved, TypeKind::Array);
         require_equivalent(resolved->element(), type(*payload.element));
-        expect(expression(*payload.length).type, K::Usize);
+        expect(expression(*payload.length).type, TypeKind::Usize);
       }
-      if constexpr (std::same_as<P, ast::PathType>) {
+      if constexpr (std::is_same_v<Payload, ast::PathType>) {
         if (payload.path.segments.empty())
           throw std::invalid_argument("checked type path is empty");
         const auto name = ast::name_text(payload.path.segments.back().name);
-        const std::unordered_map<std::string_view, K> primitives{
-            {"bool", K::Bool},
-            {"i32", K::I32},
-            {"u32", K::U32},
-            {"isize", K::Isize},
-            {"usize", K::Usize}};
+        const std::unordered_map<std::string_view, TypeKind> primitives{
+            {"bool", TypeKind::Bool},
+            {"i32", TypeKind::I32},
+            {"u32", TypeKind::U32},
+            {"isize", TypeKind::Isize},
+            {"usize", TypeKind::Usize}};
         std::vector<const ast::TypeSyntax *> arguments;
         for (const auto &segment : payload.path.segments)
           if (segment.arguments)
@@ -568,13 +571,16 @@ void SemanticIndex::validate_shapes() const {
             throw std::invalid_argument(
                 "primitive has unexpected type arguments");
         } else if (name == "Box" || name == "Vec") {
-          expect(resolved, name == "Box" ? K::Box : K::Vec);
+          if (name == "Box")
+            expect(resolved, TypeKind::Box);
+          else
+            expect(resolved, TypeKind::Vec);
           if (arguments.size() != 1)
             throw std::invalid_argument(
                 "container type argument count mismatch");
           require_equivalent(resolved->element(), type(*arguments.front()));
         } else {
-          expect(resolved, K::Struct);
+          expect(resolved, TypeKind::Struct);
           if (name != "Self" && resolved->name() != name)
             throw std::invalid_argument(
                 "type path resolves to wrong declaration");
@@ -583,18 +589,20 @@ void SemanticIndex::validate_shapes() const {
         }
       }
     }
-    if constexpr (std::same_as<Owner, ast::Expr>) {
+    if constexpr (std::is_same_v<Owner, ast::Expr>) {
       const auto &fact = expression(node);
-      if (fact.binary.has_value() != std::same_as<P, ast::BinaryExpr> ||
-          fact.compound.has_value() != std::same_as<P, ast::CompoundAssignExpr>)
+      if (fact.binary.has_value() != std::is_same_v<Payload, ast::BinaryExpr> ||
+          fact.compound.has_value() !=
+              std::is_same_v<Payload, ast::CompoundAssignExpr>)
         throw std::invalid_argument(
             "resolved operation attached to wrong AST kind");
-      if (fact.unary.has_value() != std::same_as<P, ast::UnaryExpr>)
+      if (fact.unary.has_value() != std::is_same_v<Payload, ast::UnaryExpr>)
         throw std::invalid_argument(
             "resolved unary attached to wrong AST kind");
-      constexpr bool receiver_kind = std::same_as<P, ast::MethodCallExpr> ||
-                                     std::same_as<P, ast::FieldExpr> ||
-                                     std::same_as<P, ast::IndexExpr>;
+      constexpr bool receiver_kind =
+          std::is_same_v<Payload, ast::MethodCallExpr> ||
+          std::is_same_v<Payload, ast::FieldExpr> ||
+          std::is_same_v<Payload, ast::IndexExpr>;
       if (fact.receiver.has_value() != receiver_kind)
         throw std::invalid_argument("receiver use attached to wrong AST kind");
       if (fact.receiver)
@@ -603,7 +611,7 @@ void SemanticIndex::validate_shapes() const {
         validate_operand(*this, OperandSemantics{node.id,
                                                  fact.adjustments.back().target,
                                                  fact.adjustments});
-      if constexpr (std::same_as<P, ast::UnaryExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::UnaryExpr>) {
         const auto &unary = *fact.unary;
         constexpr std::array operations{UnaryOperation::Negate,
                                         UnaryOperation::Complement,
@@ -617,41 +625,43 @@ void SemanticIndex::validate_shapes() const {
         require_equivalent(fact.type, unary.result);
         const auto &operand_type = unary.operand.effective_type;
         if (unary.operation == UnaryOperation::Dereference) {
-          if (operand_type->kind() != K::Ref && operand_type->kind() != K::Box)
+          if (operand_type->kind() != TypeKind::Ref &&
+              operand_type->kind() != TypeKind::Box)
             throw std::invalid_argument(
                 "unary dereference has no referent type");
           require_equivalent(unary.result, operand_type->element());
         } else {
           require_equivalent(unary.result, operand_type);
           const auto kind = operand_type->kind();
-          if (unary.operation == UnaryOperation::Negate
-                  ? (kind != K::I32 && kind != K::Isize)
-                  : (kind != K::I32 && kind != K::Isize && kind != K::U32 &&
-                     kind != K::Usize && kind != K::Bool))
+          bool valid = kind == TypeKind::I32 || kind == TypeKind::Isize;
+          if (unary.operation == UnaryOperation::Complement)
+            valid = valid || kind == TypeKind::U32 || kind == TypeKind::Usize ||
+                    kind == TypeKind::Bool;
+          if (!valid)
             throw std::invalid_argument(
                 "unary operator is invalid for operand type");
         }
       }
-      if constexpr (std::same_as<P, ast::BinaryExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::BinaryExpr>) {
         validate_operation(*this, *fact.binary, *payload.left, *payload.right,
                            payload.op);
         require_equivalent(fact.type, fact.binary->result);
       }
-      if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::CompoundAssignExpr>) {
         validate_operation(*this, *fact.compound, *payload.target,
                            *payload.value, binary_operation(payload.op));
         require_equivalent(fact.compound->result,
                            expression(*payload.target).type);
       }
-      if constexpr (std::same_as<P, ast::CallExpr> ||
-                    std::same_as<P, ast::MethodCallExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::CallExpr> ||
+                    std::is_same_v<Payload, ast::MethodCallExpr>) {
         if (!fact.callable)
           throw std::invalid_argument("checked call has no resolved target");
         if (const auto *target = std::get_if<FunctionTarget>(&*fact.callable)) {
           const auto &signature = function(target->symbol);
           require_equivalent(fact.type, signature.result);
           std::vector<SemanticTypePtr> parameters;
-          if constexpr (std::same_as<P, ast::CallExpr>)
+          if constexpr (std::is_same_v<Payload, ast::CallExpr>)
             if (signature.receiver)
               parameters.push_back(signature.receiver->type);
           for (const auto &parameter : signature.parameters)
@@ -659,22 +669,22 @@ void SemanticIndex::validate_shapes() const {
           if (parameters.size() != payload.arguments.size())
             throw std::invalid_argument(
                 "call argument count differs from signature");
-          for (std::size_t i = 0; i < parameters.size(); ++i) {
-            const auto &argument = expression(*payload.arguments[i]);
-            const auto &effective = argument.adjustments.empty()
-                                        ? argument.type
-                                        : argument.adjustments.back().target;
-            require_equivalent(effective, parameters[i]);
+          for (std::size_t index = 0; index < parameters.size(); ++index) {
+            const auto &argument = expression(*payload.arguments[index]);
+            auto effective = argument.type;
+            if (!argument.adjustments.empty())
+              effective = argument.adjustments.back().target;
+            require_equivalent(effective, parameters[index]);
           }
         }
       }
-      if constexpr (std::same_as<P, ast::CallExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::CallExpr>) {
         const auto &callee = expression(*payload.callee);
         if (!callee.callable || !same_target(*fact.callable, *callee.callable))
           throw std::invalid_argument(
               "call target does not match callee identity");
       }
-      if constexpr (std::same_as<P, ast::MethodCallExpr>) {
+      if constexpr (std::is_same_v<Payload, ast::MethodCallExpr>) {
         if (fact.receiver->node != payload.receiver->id)
           throw std::invalid_argument(
               "method receiver use points to wrong AST node");
