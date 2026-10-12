@@ -887,3 +887,208 @@ fn main() { printInt(read(&1)); }
 
 \paragraph{本章小结与下一章。}
 聚合声明提供成员要求，函数签名提供参数与返回上下文，内建身份提供语言操作类别，控制流决定哪些路径会正常产生结果。有限布局、派生能力和访问权限都必须按自身含义处理递归与间接层。下一章将讨论怎样把这些判断保存为稳定的语义知识，使后续转换能够直接依赖它们。
+
+\chapter{语义事实、诊断恢复与阶段边界}
+\label{chap:semantic-boundary}
+\section*{本章导读}
+名字解析与类型检查已经确定了程序的许多含义，后续生成指令时应能够使用这些决定，而不必重新猜测它们。本章介绍语义副表、不可变结果和查询索引，解释“已有条目合法”为什么还不足以保证结果完整，也说明对象寿命与来源身份怎样保护查询。最后，读者将比较直接从已检查 AST 转换和增加显式语义中间层的两种路径。清楚的边界应当使每个阶段知道自己获得了什么，以及可以据此省去哪些重复工作。
+
+\section{为什么单独保存语义事实}
+AST 保存源程序的结构。它需要说明某处是 BinaryExpr、左右子表达式是什么、运算符写在哪里，却不应为了每个分析过程不断添加一批可选字段。一个按节点身份保存的语义副表，可以说明这个节点得到什么类型、引用哪个声明、需要哪些转换，同时保持语法树的含义稳定。
+
+这种分开不是唯一正确方案。另一种方案是建立 typed AST，在新树中直接嵌入检查后的类型与操作。但如果简单把类型字段塞进原 AST，就还需要说明树何时完全检查、字段何时有效、错误状态怎样表示，以及同一树能否在不同环境中重新分析。副表把一次分析的结果归属于一次分析过程，适合当前已有的身份体系。
+
+分开也带来成本。AST 与事实之间需要可靠身份，事实应完整对应节点，两个对象的寿命需要协调。查询需要索引，构造成功结果时需要检查关联关系。因此，副表的优点不是“完全没有额外工作”，而是把这项工作放在清楚的位置，让每个语法节点不必了解所有下游用途。
+
+下图将源码树与几组语义知识分列，用 \texttt{NodeId} 和 \texttt{SymbolId} 展示关联方式。节点身份连接一次语法出现，符号身份连接一个声明及其签名或成员信息。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 19mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=35mm}]
+\node (expr) {AST 表达式节点};
+\node (decl) [below=of expr] {AST 声明节点};
+\node (type) [below=of decl] {AST 类型语法};
+\node (ef) [right=of expr] {表达式语义事实};
+\node (sf) [right=of decl] {符号与声明类型};
+\node (tf) [right=of type] {类型解析结果};
+\draw[->] (expr) -- node[above,draw=none] {NodeId} (ef);
+\draw[->] (decl) -- node[above,draw=none] {声明连接} (sf);
+\draw[->] (type) -- node[above,draw=none] {NodeId} (tf);
+\draw[->] (ef) -- node[right,draw=none] {SymbolId} (sf);
+\end{tikzpicture}
+\caption{语法树与语义副表}
+\end{figure}
+
+\section{语义结果包含哪些知识}
+当前结果先由可构建的 \texttt{SemanticData} 汇集，再由 \texttt{SemanticResult} 包装为不可变快照。下面按主键说明各组事实的用途：
+\begin{longtable}{p{0.23\textwidth}p{0.20\textwidth}p{0.47\textwidth}}
+\toprule
+事实组 & 主键 & 保存的知识 \\
+\midrule
+\texttt{symbols} & SymbolId & 声明类别、展示名、所属符号、对应声明节点。\\
+\texttt{expressions} & NodeId & 内在类型、位置与权限、转换、可调用目标与已解析操作。\\
+\texttt{resolved\_types} & NodeId & 类型语法节点对应的不可变语义类型。\\
+\texttt{constants} & SymbolId & 当前目标模型中的常量位模式。\\
+\texttt{symbol\_types} & SymbolId & 局部、参数、字段、常量等声明的类型。\\
+\texttt{functions} & SymbolId & 接收者、参数顺序、参数身份与结果类型。\\
+\texttt{structures} & SymbolId & 声明顺序中的完整字段身份序列。\\
+\bottomrule
+\end{longtable}
+摘要中的计数方便观察分析结果，但不能代替任何一组完整事实。下游需要一个具体字段的类型时，不能从“共有两个字段”的摘要推出它；需要函数签名时，也不能只知道函数名字存在。
+
+表达式事实中的可调用身份尤其需要与局部符号区别开来：
+\begin{lstlisting}[language=Rustless]
+fn emit() { printInt(1); }
+fn main() {
+    let g = emit;
+    g();
+}
+\end{lstlisting}
+路径 \lstinline[language=Rustless]|g| 引用局部声明，因而其符号可以是局部 g；该值的函数项类型和调用目标却指向 emit。若只保存一个字符串 target，局部绑定、函数声明和内建别名很容易被混为一类。当前具体 \texttt{CallTarget} 保存原函数身份或内建身份，使这两层含义分别存在。
+
+\section{Error 与诊断恢复的含义}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let x = missing;
+    printInt(x);
+}
+\end{lstlisting}
+这是一个错误程序。检查器首先应指出 missing 没有定义。如果随后为 x 产生一个恢复用的 Error 类型，可以继续检查其余结构，并避免把每次使用 x 都报告成一个独立根本错误。否则，读者可能得到大量由同一原因派生的诊断，反而难以找到应当修正的位置。
+
+恢复兼容允许带有 Error 的某些比较暂时通过，只为了继续分析。它不能成为成功程序的事实。当前正常发布会拒绝 Error 及含有 Error 的嵌套类型；失败结果由另一个冻结入口保存，\texttt{success()} 为 false，不能建立正常的语义查询索引供后续转换使用。
+
+因此，错误类型与 Never 需要严格区分。Error 说明分析没有得到有效类型；Never 说明程序在该处没有正常续行，是有效的控制流知识。将两者都当作“特殊类型”而在所有地方宽容处理，会使真实失败混进合法发散路径。
+
+还应区分源程序错误与实现自身的不一致。未知名字、类型不匹配应当通过带源码位置的诊断解释给读者；成功事实缺少字段、链接到不存在的符号、来源节点不匹配，则说明当前表示违背了已经声明的内部要求。后者不应该被悄悄降级为某个默认类型继续生成代码。
+
+\section{查询索引、快照所有权与 AST 寿命}
+\texttt{SemanticIndex} 为按身份保存的结果建立查询表。表达式查询返回 \texttt{ExpressionSemantics}，声明查询返回 \texttt{SymbolRecord}，函数与结构体查询返回完整签名和成员序列。它拥有一个 \texttt{shared\_ptr<const SemanticData>}，因而即使外部 \texttt{SemanticResult} 包装对象已被销毁，索引指向的事实仍然存活。
+
+AST 的情况不同。索引借用原来的 Crate，并不拥有或复制整个语法树。调用者必须让 AST 在索引使用期间存活且保持不变。后续桥接对象又借用索引，因而它的寿命必须包含在索引寿命内。拥有快照与借用语法树分别说明了哪些资源由对象负责保存，不能用一个模糊的“所有对象都要活得更久”替代这项关系。
+
+下图呈现 AST、结果快照、查询索引和桥接对象的关系。实线表示拥有或共享拥有，虚线表示借用；这张图描述寿命依赖，不描述程序数据流。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=9mm and 18mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=34mm}]
+\node (result) {SemanticResult 包装};
+\node (snapshot) [below=of result] {不可变 SemanticData 快照};
+\node (index) [right=of result] {SemanticIndex};
+\node (ast) [right=of snapshot] {原 AST Crate};
+\node (bridge) [above=of index] {SemanticBridge};
+\draw[->] (result) -- (snapshot);
+\draw[->] (index) -- (snapshot);
+\draw[->,dashed] (index) -- (ast);
+\draw[->,dashed] (bridge) -- (index);
+\end{tikzpicture}
+\caption{拥有快照与借用源对象}
+\end{figure}
+
+身份查询还需要考虑不同语法树可能重复使用相同编号。两个分别解析的 Crate 都可以有编号为 7 的表达式；不能因此让它们互用语义事实。构造索引时检查原 Crate 身份，对对象形式的查询还同时检查节点地址。当前实现的 \texttt{require\_node} 为：
+\begin{lstlisting}[language=C++]
+void SemanticIndex::require_node(const ast::Node &node) const {
+  const auto found = nodes_.find(node.id);
+  if (found == nodes_.end() || found->second != &node)
+    throw std::invalid_argument("semantic query uses a foreign AST node");
+}
+\end{lstlisting}
+同一 AST 内的 ID 查询仍然方便；跨对象入口则应使用对象重载，以获得来源检查。这种约束允许编号保持紧凑，而不要求每个 NodeId 成为全局唯一的巨大标识。其前提仍然是 AST 不被移动、修改或提前销毁，地址检查不能使已经悬空的 C++ 引用恢复安全。
+
+\section{完整性与对应关系}
+假设一个结构体声明了两个字段，而导出列表只保留一个。保留下来的字段可能拥有合法身份、正确 owner 和有效类型，但布局仍会遗漏另一个字段。函数参数也是如此：现存参数全部合法，并不能证明原签名没有被截短。
+
+成功发布因此检查完整对应，而不只检查现存条目。当前结构体验证的代表性代码如下：
+\begin{lstlisting}[language=C++]
+if (fact.fields.size() != node.fields.size())
+  throw std::invalid_argument("semantic struct field count mismatch");
+for (std::size_t i = 0; i < node.fields.size(); ++i) {
+  const auto &field = node.fields[i];
+  const auto field_id =
+      require_symbol(field, SymbolKind::Field, id, field.name.text);
+  if (fact.fields[i] != field_id)
+    throw std::invalid_argument("semantic struct field order mismatch");
+  require_equivalent(symbol_type(field_id), type(*field.type));
+}
+\end{lstlisting}
+数量、顺序、身份、所属关系与类型共同构成对应。函数还核对接收者存在与否、参数序列、返回注解、参数事实和声明类型。局部声明、常量、类型语法、表达式也具有相应的形状和覆盖要求。类型对象内部的元素、名义身份及内建类别同样需要有效。
+
+下图比较完整字段导出、缺失字段和顺序错误，解释下游布局所需的完整性。即使每一个格子内的身份都存在，右侧两种情况也不能代表原声明。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 10mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=30mm}]
+\node (ast) {AST 字段\par left，right};
+\node (good) [right=of ast] {完整事实\par left，right};
+\node (missing) [below=of good] {缺失事实\par left};
+\node (wrong) [below=of missing] {错误顺序\par right，left};
+\draw[->] (ast) -- (good);
+\draw[->,dashed] (ast.south) -- (missing.west);
+\draw[->,dashed] (ast.south) to[bend right=20] (wrong.west);
+\end{tikzpicture}
+\caption{现存条目合法与完整对应不同}
+\end{figure}
+
+表达式的操作事实也需要对应具体载荷。BinaryExpr 必须有 Binary 的已解析操作，保存的左右 NodeId 必须对应真实子表达式，操作类别必须适合有效类型，结果类型必须与表达式一致。Unary、Compound、Method receiver 同样如此。一个有效的 \texttt{ResolvedBinary} 若附着在 ParenExpr 上，仍然是错误事实。
+
+完整性要求还必须诚实反映语义范围。AST 遍历可以覆盖 where 约束的所有节点，当前语义分析却没有为 TypePredicate 内部提供完整解释；查询验证因而明确跳过这部分语义覆盖要求，同时保留语法身份与源码范围检查。遍历覆盖不能被介绍为已经完成约束求解。
+
+这些检查验证表示关系，并不取代语言规则本身。一个任意编造的、内部一致的类型判断，不能仅靠结构检查证明其语义正确。分析器仍然需要正确实现名字和类型规则；发布检查的作用是发现遗漏、错位、重复和相互矛盾的记录，防止这种不一致无声进入下游。
+
+\section{从可构建数据到不可变成功结果}
+检查期间需要逐步积累事实，因此 \texttt{SemanticData} 保持可构建。成功之后，消费者应看到不可变数据。当前 \texttt{SemanticResult} 的私有构造接收 const 快照，公开成功入口先完成验证：
+\begin{lstlisting}[language=C++]
+SemanticResult SemanticResult::publish(const ast::Crate &crate,
+                                       SemanticData data) {
+  data.source_crate = &crate;
+  data.success = true;
+  auto snapshot = std::make_shared<const SemanticData>(std::move(data));
+  SemanticIndex validated(crate, snapshot, SemanticIndex::ValidationTag{});
+  return SemanticResult(std::move(snapshot));
+}
+\end{lstlisting}
+构造验证使用的 Index 拥有快照，完成全部检查之后才返回结果。如果某项检查失败，就不会产生可供正常转换使用的成功包装。失败冻结入口则明确保存失败状态。默认结果也不是一个凭空检查成功的程序。
+
+这里的不可变性有两层。const 数据快照保护 vectors 中的事实；const 类型对象保护指针所指的类型图。只把外层 \texttt{SemanticResult} 声明为 const，而内部仍保存可修改类型对象，并不能保证先前的布局和操作决定保持稳定。
+
+完整验证应在少数明确边界进行，不应在每次查询时遍历全部 AST。当前发布时检查，公开构造 Index 时也进行一次检查与索引建立，随后查询只查相应映射。这样，额外验证成本集中在创建阶段。若将来需要大量索引，可以在受控的成功结果内部复用索引或验证标记，但必须保持来源与不可变性要求，不能以减少检查为由允许可变数据绕过边界。
+
+\section{下游应当直接获得哪些决定}
+\begin{lstlisting}[language=Rustless]
+struct Pair { value: i32 }
+impl Pair { fn get(&self) -> i32 { self.value } }
+fn main() {
+    let p = Pair { value: 1 };
+    let result = p.get() + 2;
+    printInt(result);
+}
+\end{lstlisting}
+转换这个加法时，下游应能直接知道：调用目标是哪一个方法；接收者怎样形成共享引用；调用结果的内在类型是 i32；加法两个使用的有效类型是 i32；已解析操作是整数加法；结构体字段及方法签名完整。它不需要再次用名称查找 \lstinline[language=Rustless]|get|，也不需要猜测接收者借用是否会改变调用结果。
+
+与此同时，语义事实不必提前决定一切机器细节。字段存储偏移、聚合间接参数、隐藏返回地址、机器指令和目标寄存器属于后续表示选择。语义阶段需要保留内容相等、有符号运算、短路和正常续行等含义，布局与后端再依据这些含义形成实现。
+
+这种边界同时有利于维护与运行效率。规则改变主要影响负责规则的地方，消费者使用统一结果；重复的名字查找与类型推断可以避免；不变量检查又能在造成后续错误之前发现遗漏。其代价是保存事实和建立索引的空间与时间，不能假设所有程序都因增加副表而自动更快。清楚的设计先使工作不会重复，再根据实际规模评估表示成本。
+
+\section{是否需要增加语义中间层}
+一种路径是继续使用原 AST，加上已检查事实直接进行 lowering。它保留完整源码结构，现有 Visitor 与身份查询可以复用。另一种路径是在检查之后建立较小的显式语义树，把隐式转换变成明确节点，再从这棵树生成计算表示。后者可以减少 lowering 对语法细节和副表的反复组合，但需要构造新表示并维护来源信息。
+
+下图比较直接使用已检查 AST 与增加显式语义层的位置，说明两种选择消除重复解释的方式。两条路径都以已经确定的语义为输入，区别在于隐式操作何时展开。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 11mm,
+ every node/.style={draw,rounded corners,align=center,font=\small,text width=31mm}]
+\node (checked) {AST 与已检查事实};
+\node (direct) [right=of checked] {直接 lowering};
+\node (ir) [right=of direct] {计算 IR};
+\node (typed) [below=of direct] {显式语义表示};
+\draw[->] (checked) -- (direct);
+\draw[->] (direct) -- (ir);
+\draw[->] (checked.south) -- (typed.west);
+\draw[->] (typed.east) -- (ir.south);
+\end{tikzpicture}
+\caption{已检查事实的两种消费方式}
+\end{figure}
+
+是否增加层次，应根据重复推断、转换复杂度和语法差异的实际负担判断。层数多并不自动使设计优雅，直接转换也不自动使设计简单。当前已经保存具体操作、独立输入转换和调用身份，可以先检验这些事实是否足以支持清楚的 lowering；当转换代码不得不多次重新解释同一含义时，再引入适当的语义中间层。
+
+\paragraph{本章小结与下一篇。}
+语义副表使结构与判断分开，不可变类型与快照保持判断稳定，完整对应检查防止遗漏，来源和寿命约束保护查询。成功结果交给下游的是已经确定的语言含义，而不是要求下游再次运行一套类型检查。下一篇将把这些含义组织成显式计算，研究 IR 指令、控制流、布局和调用表示如何延续前端的决定。
