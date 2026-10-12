@@ -40,7 +40,7 @@ fn calculate(a: i32, b: i32, c: i32) -> i32 {
 显式结果还有维护上的价值。某项分析若要寻找乘积的所有使用，可以围绕其值身份工作，而不必在每个语法形状中重新寻找嵌套位置。相应代价是需要维护定义、使用与类型的一致性；SSA 验证器将在下一章承担这一职责。
 
 \section{语义类型投影到 IR 类型}
-当前 \texttt{include/rx/ir.hpp} 中的机器值类型集合很小：
+当前 \path{include/rx/ir.hpp} 中的机器值类型集合很小：
 \begin{lstlisting}[language=C++,caption={当前 IR 的类型集合}]
 enum class Type { Void, I1, I8, I32, Ptr };
 \end{lstlisting}
@@ -678,15 +678,15 @@ valid 为假时 check 不应执行。转换器先判断左侧，再决定是否�
 下图先呈现 RHS 的有条件执行，再呈现一个 return 分支退出函数，说明合流只收集实际到达它的路径。
 \begin{figure}[htbp]\centering
 \begin{tikzpicture}[node distance=8mm and 15mm]
-\node[irbox,text width=23mm] (l) {左侧条件};
-\node[irbox,below left=of l,text width=23mm] (false) {直接为 false};
-\node[irbox,below right=of l,text width=23mm] (rhs) {计算 RHS};
-\node[irbox,below=22mm of l,text width=23mm] (j) {结果合流};
+\node[irbox,text width=23mm] (l) at (0,0) {左侧条件};
+\node[irbox,text width=23mm] (false) at (-2,-1.6) {直接为 false};
+\node[irbox,text width=23mm] (rhs) at (2,-1.6) {计算 RHS};
+\node[irbox,text width=23mm] (j) at (0,-3.2) {结果合流};
 \draw[irarrow] (l)--(false);\draw[irarrow] (l)--(rhs);
 \draw[irarrow] (false)--(j);\draw[irarrow] (rhs)--(j);
-\node[irbox,right=34mm of l,text width=23mm] (if) {if 条件};
-\node[irbox,below=of if,text width=23mm] (ret) {return\\退出函数};
-\node[irbox,right=14mm of ret,text width=23mm] (normal) {正常分支\\到达后续};
+\node[irbox,text width=23mm] (if) at (7.4,0) {if 条件};
+\node[irbox,text width=23mm] (ret) at (5.4,-1.6) {return\\退出函数};
+\node[irbox,text width=23mm] (normal) at (9.4,-1.6) {正常分支\\到达后续};
 \draw[irarrow] (if)--(ret);\draw[irarrow] (if)--(normal);
 \end{tikzpicture}
 \caption{条件执行与终止路径}
@@ -786,7 +786,7 @@ fn main() {
 
 对于已有数组类型，元素地址由“数组基址加索引乘 stride”得到。静态长度较小时可以逐项展开，长度较大时可以生成循环；两者必须实现相同的求值次数和复制含义。零长度需要避免实际元素读写，也需要保留元素表达式中规定发生的行为。对象字节数为零并不意味着整个初始化表达式没有行为。
 
-下面是当前重复数组检查中决定能力要求的真实片段，来自 \texttt{src/semantic.cpp} 的 \texttt{check\_repeat\_array}。它说明 Copy 是语言条件，而不是由 \texttt{memcpy} 的可用性推出的条件。
+下面是当前重复数组检查中决定能力要求的真实片段，来自 \path{src/semantic.cpp} 的 \texttt{check\_repeat\_array}。它说明 Copy 是语言条件，而不是由 \texttt{memcpy} 的可用性推出的条件。
 \begin{lstlisting}[language=C++,caption={当前重复数组的能力条件}]
 auto result = types_.array(first.type, length.value_or(0));
 if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
@@ -871,7 +871,7 @@ fn main() {
 \caption{Box 的表示与内容语义}
 \end{figure}
 
-当前桥接已经把这项区别落实为类型。\texttt{include/rx/ir\_semantic.hpp} 的下列定义让结构相等携带待比较的完整语义类型；标量比较则携带机器类型和谓词。
+当前桥接已经把这项区别落实为类型。\path{include/rx/ir_semantic.hpp} 的下列定义让结构相等携带待比较的完整语义类型；标量比较则携带机器类型和谓词。
 \begin{lstlisting}[language=C++,caption={当前内容比较描述与标量比较分离}]
 struct ScalarComparison {
   Predicate predicate;
@@ -895,7 +895,7 @@ using LoweredOperation = std::variant<ScalarArithmetic, ScalarComparison,
 \section{辅助函数的生成与复用}
 给每个表达式展开一份完整结构比较，会在大类型上造成重复代码。另一条路线为具体类型生成辅助函数，例如 \texttt{eq\_Pair}、\texttt{clone\_Pair}，所有相关使用共享它们。缓存的键应包含具体语义类型和操作种类；仅使用类型显示名字，会把不同声明身份混在一起。
 
-下面是 Rx-Compiler 参考实现 \texttt{src/llvm/lower.cpp} 中辅助函数体生成的真实循环。该实现只作为算法参照，其旧表示无需原样保留。
+下面是 Rx-Compiler 参考实现 \path{src/llvm/lower.cpp} 中辅助函数体生成的真实循环。该实现只作为算法参照，其旧表示无需原样保留。
 \begin{lstlisting}[language=C++,caption={参考实现允许构造辅助函数时登记新的依赖}]
 // Recursive concrete helpers are registered before their bodies are built.
 for (std::size_t i = 0; i < helpers.size(); ++i) {
@@ -941,7 +941,7 @@ fn main() {
 \end{lstlisting}
 alias 是使用处的名字，实际调用目标仍是 copy\_pair 的声明身份。桥接必须消费语义检查已经解析出的 FunctionTarget，不能用字符串 alias 再查找一个函数。方法的 receiver 同样已有调整序列，例如为 q.first() 形成共享借用；转换器不应另行猜测要自动解引用多少层。
 
-当前 \texttt{include/rx/ir\_semantic.hpp} 提供以下调用描述。
+当前 \path{include/rx/ir_semantic.hpp} 提供以下调用描述。
 \begin{lstlisting}[language=C++,caption={已经实现的调用转换计划}]
 struct FunctionCall { FunctionAbi signature; };
 struct BuiltinCall { BuiltinId builtin; };
@@ -954,7 +954,7 @@ struct CallLowering {
 \end{lstlisting}
 普通调用携带内部 ABI，内建调用携带专门身份。receiver 与普通参数分离，参数 vector 保持源码次序。对于上述 copy\_pair，内部参数和结果都是间接聚合：后续转换需要准备参数副本和结果缓冲区，再发出调用；对于 first，receiver 的借用可以映射为对象地址，返回整数则直接映射为标量结果。
 
-下面摘自 \texttt{src/llvm/ir\_call.cpp} 的 \texttt{lower\_call}；目标分派与 receiver 取值展示了它消费事实的方式。
+下面摘自 \path{src/llvm/ir_call.cpp} 的 \texttt{lower\_call}；目标分派与 receiver 取值展示了它消费事实的方式。
 \begin{lstlisting}[language=C++,caption={当前调用桥接依据具体身份选择目标}]
 const auto &fact = semantic_.expression(node);
 if (!fact.callable)
@@ -987,7 +987,7 @@ CallLowering result{std::move(target), fact.receiver, {}, fact.type};
 \end{figure}
 
 \section{内建操作需要一致的身份和契约}
-内建函数可以拥有多种源拼写，例如已有输入输出别名。拼写适合诊断，BuiltinId 适合后续分派。当前 \texttt{include/rx/builtin.hpp} 的独立枚举覆盖输入输出、Box::new、Vec::new、clone、len、is\_empty、push 和 remove；它们不是用户声明的 SymbolId，也不应伪造用户函数身份。
+内建函数可以拥有多种源拼写，例如已有输入输出别名。拼写适合诊断，BuiltinId 适合后续分派。当前 \path{include/rx/builtin.hpp} 的独立枚举覆盖输入输出、Box::new、Vec::new、clone、len、is\_empty、push 和 remove；它们不是用户声明的 SymbolId，也不应伪造用户函数身份。
 
 这项集中身份已经实现，但身份表并不等于完整运行时说明。后续可以为每个 BuiltinId 建立一致描述：语义参数规则、receiver 能力、返回规则、内存效果、实现符号以及机器 ABI。有些操作通过普通运行时函数实现，有些要按具体元素类型生成辅助函数，还有些可以直接生成少量 IR。表中应表达这些区别，而不是强迫所有内建都使用同一个字符串调用方案。
 
@@ -1083,7 +1083,7 @@ fn main() {
 选择少量优化有助于学习，因为每一项都有可手算的前后表示和反例。先处理常量与清楚的控制流，再讨论内存变换，可以让复杂性逐步来自真实需求。
 
 \section{内存效果、别名与可能失败的操作}
-当前 \texttt{src/llvm/ir.cpp} 的基本效果分类如下。
+当前 \path{src/llvm/ir.cpp} 的基本效果分类如下。
 \begin{lstlisting}[language=C++,caption={当前效果查询适合保守的基本分类}]
 bool has_side_effects(const Instruction &instruction) {
   auto op = opcode(instruction);
@@ -1220,7 +1220,7 @@ using MachineOperand = std::variant<VirtualRegister, PhysicalRegister,
 \end{lstlisting}
 完整实现还需要列全寄存器、描述寄存器类及每条指令允许的操作数。上述枚举只是说明分类方法。位置编号不能被当成立即数，ValueId 不能被当作物理寄存器号，属于类型层应尽早排除的错误。
 
-Rx-Compiler 的 \texttt{src/backend/machine.hpp} 使用以下真实结构保存选择之后的附加信息。
+Rx-Compiler 的 \path{src/backend/machine.hpp} 使用以下真实结构保存选择之后的附加信息。
 \begin{lstlisting}[language=C++,caption={参考机器表示集中记录复制、使用和定义}]
 struct MachineInstruction {
   ir::Instruction instruction;
@@ -1279,7 +1279,7 @@ struct MachineInstruction {
 \caption{并行复制循环中的旧值必须先保存}
 \end{figure}
 
-参考 \texttt{src/backend/riscv.cpp} 的 \texttt{copies} 先删除同位置复制，再寻找目标不会破坏其他待用来源的复制；找不到时保存一个旧目标。它还根据最终位置处理寄存器和 spill 槽，所以循环分析不能只看虚拟名字。
+参考 \path{src/backend/riscv.cpp} 的 \texttt{copies} 先删除同位置复制，再寻找目标不会破坏其他待用来源的复制；找不到时保存一个旧目标。它还根据最终位置处理寄存器和 spill 槽，所以循环分析不能只看虚拟名字。
 
 复制合并让两个可兼容值获得同一物理位置，可以省去部分 move，但不能让彼此干涉的值共享位置。分配前保留“偏好的相同位置”与分配后消除已满足的复制，是两种可组合策略。为了便于推理，教学实现可以先保留并行复制集合，完成位置分配后再把它调度成顺序指令。
 
@@ -1426,7 +1426,7 @@ x 在 printInt 之前形成，之后仍会使用。若将 x 放在调用允许�
 \caption{统一栈帧布局连接各阶段的存储需求}
 \end{figure}
 
-参考 \texttt{src/backend/machine.cpp} 在 spill、对象及保存区域都安排完之后，以 \texttt{aligned(cursor,16)} 得到总大小；\texttt{verify\_machine} 再核对帧内区域。新实现可以采用更明确的 StackSlotId 和帧布局记录，避免把“还未安排的槽”过早伪装成最终立即数偏移。
+参考 \path{src/backend/machine.cpp} 在 spill、对象及保存区域都安排完之后，以 \texttt{aligned(cursor,16)} 得到总大小；\texttt{verify\_machine} 再核对帧内区域。新实现可以采用更明确的 StackSlotId 和帧布局记录，避免把“还未安排的槽”过早伪装成最终立即数偏移。
 
 \section{RISC-V 整数调用约定}
 针对标准 RV32 整数 ABI，a0 至 a7 用于参数，前两个也用于返回值；本教程的单字标量结果使用 a0。s0 至 s11 要跨调用保留，参数和 t 类临时寄存器不承担这种保留义务。ra 保存返回地址，sp 表示栈位置；gp、tp 不作为普通可分配寄存器。标准栈对齐为十六字节，进入函数时的首个栈参数位于入口 sp 的零偏移。规则依据 \href{https://riscv-non-isa.github.io/riscv-elf-psabi-doc/}{RISC-V ABI 规范的整数约定}。
@@ -1447,7 +1447,7 @@ fn main() { printInt(ninth(1, 2, 3, 4, 5, 6, 7, 8, 9)); }
 
 尾声需要恢复保存寄存器和 ra，然后把 sp 调回入口值，再返回。所有正常 return 应遵循同一恢复规则，可以跳到共享退出块。源程序里有多个 return，不应导致部分路径漏掉恢复。
 
-以下真实片段来自参考 \texttt{src/backend/riscv.cpp} 的输出函数；它把相同布局记录用于保存与恢复。
+以下真实片段来自参考 \path{src/backend/riscv.cpp} 的输出函数；它把相同布局记录用于保存与恢复。
 \begin{lstlisting}[language=C++,caption={参考序言与尾声使用同一帧记录}]
 if (function_->has_calls)
   memory("sw", "ra", "sp", function_->return_address_offset);
@@ -1594,7 +1594,7 @@ fn calculate(a: i32, b: i32, c: i32) -> i32 { a + b * c }
 \end{lstlisting}
 对此输入，结构预期是函数体的 tail 为 BinaryExpr(Add)，left 指向 a，right 为 BinaryExpr(Mul)，其两个子节点分别指向 b 和 c。还应核对各次出现有不同身份，以及范围能切出对应源文本。只核对 dump 中出现了加法和乘法，会遗漏两者的父子关系。
 
-dump 便于人观察，但直接载荷断言更适合检验精确关系。当前 \texttt{tests/frontend\_ast\_structure.cpp} 对导入组、别名、类型和表达式形状作独立断言；其中如下片段直接根据示例检查组内数量及别名类别。
+dump 便于人观察，但直接载荷断言更适合检验精确关系。当前 \path{tests/frontend_ast_structure.cpp} 对导入组、别名、类型和表达式形状作独立断言；其中如下片段直接根据示例检查组内数量及别名类别。
 \begin{lstlisting}[language=C++,caption={当前结构测试根据输入建立独立预期}]
 const auto &use = std::get<ast::Use>(crate.items[0]);
 assert(use.tree.prefix.root == ast::PathRoot::Absolute);
@@ -1607,7 +1607,7 @@ assert(std::get<ast::Identifier>(*rename.alias).text == "r");
 范围检查需要具体预期。把打印器返回的范围再与同一打印器结果比较，不能证明坐标转换正确。可以在小输入中手工确定字节区间，包含注释、括号和 UTF-8 注释等有区分力的情形；语言不支持的 Unicode 标识符不应被偷换成范围测试的正例。
 
 \section{Visitor 的编译期承诺与运行期关系}
-Visitor 的覆盖约束检查是否能处理每个载荷、owner 是否合适、返回类型是否一致，以及只读入口是否拒绝可变载荷参数。当前 \texttt{tests/ast\_visitor.cpp} 有如下真实断言。
+Visitor 的覆盖约束检查是否能处理每个载荷、owner 是否合适、返回类型是否一致，以及只读入口是否拒绝可变载荷参数。当前 \path{tests/ast_visitor.cpp} 有如下真实断言。
 \begin{lstlisting}[language=C++,caption={当前访问接口对不合适处理者给出编译期否定}]
 static_assert(!ast::ExhaustiveVisitor<OnlyBinary, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<DifferentReturns, ast::Expr>);
@@ -1642,7 +1642,7 @@ fn main() {
 \section{IR 与后端需要独立预期}
 IR 测试可以手工构造不合法表示：重复值定义、错误类型的操作数、不存在的分支目标、终结指令之后的普通指令、不受定义支配的使用，以及 Phi 输入与边不一致。确认 verifier 拒绝它们，能够直接检验前章的不变量。
 
-当前 \texttt{tests/ir\_alignment.cpp} 对多重边使用独立修改。下面片段把两条到达边的 Phi 少留一个输入，检查它不能覆盖两条边。
+当前 \path{tests/ir_alignment.cpp} 对多重边使用独立修改。下面片段把两条到达边的 Phi 少留一个输入，检查它不能覆盖两条边。
 \begin{lstlisting}[language=C++,caption={当前 Phi 回归直接检验边重数规则}]
 auto second = phi.incoming.back();
 phi.incoming.pop_back();

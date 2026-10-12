@@ -16,7 +16,7 @@ fn main() {
 \end{lstlisting}
 三次出现各有自己的源码范围，也分别构成不同的语法节点。因而它们需要三个节点身份。与此同时，两次使用都指向同一个变量声明。这个共同的含义需要另一种身份来表达。Rustless 将语法节点身份称为 \texttt{NodeId}，将声明身份称为 \texttt{SymbolId}。这两种身份解决的问题不同，不能因为它们都可由整数表示，就让它们彼此替代。
 
-\texttt{include/rx/symbol.hpp} 给出了声明身份的类型：
+\path{include/rx/symbol.hpp} 给出了声明身份的类型：
 \begin{lstlisting}[language=C++]
 struct SymbolTag;
 using SymbolId = ast::Id<SymbolTag>;
@@ -42,7 +42,7 @@ using SymbolId = ast::Id<SymbolTag>;
 \end{figure}
 
 \section{符号记录与所属关系}
-在当前 \texttt{include/rx/semantic.hpp} 中，一个符号记录保存如下信息：
+在当前 \path{include/rx/semantic.hpp} 中，一个符号记录保存如下信息：
 \begin{lstlisting}[language=C++]
 struct SymbolRecord {
   SymbolId id{};
@@ -56,7 +56,7 @@ struct SymbolRecord {
 
 可以把符号记录看作关于声明的最小知识。它不直接承担表达式类型推断，也不保存机器地址。这样，名字解析、类型检查和后续布局都可以引用同一声明，而不要求符号对象理解每个阶段的全部内容。新增一种处理过程时，通常增加相应的结果表即可。
 
-\texttt{src/semantic.cpp} 的 \texttt{symbol\_for} 为声明分配稳定的身份：
+\path{src/semantic.cpp} 的 \texttt{symbol\_for} 为声明分配稳定的身份：
 \begin{lstlisting}[language=C++]
 SymbolId symbol_for(ast::NodeId node) {
   auto [entry, inserted] =
@@ -82,7 +82,7 @@ fn main() {
 \end{lstlisting}
 内层的 \lstinline[language=Rustless]|if x| 使用布尔变量；退出内层块之后，最后的加法使用外层整数变量。把所有局部名字保存到同一个永不恢复的表中，就会失去这种关系。
 
-当前分析器使用一组作用域表。进入块时压入一个表，退出块时移除它。查找从最内层开始，只有在该层找不到名字时才继续向外。下面是 \texttt{src/semantic.cpp} 中 \texttt{lookup} 的实际实现：
+当前分析器使用一组作用域表。进入块时压入一个表，退出块时移除它。查找从最内层开始，只有在该层找不到名字时才继续向外。下面是 \path{src/semantic.cpp} 中 \texttt{lookup} 的实际实现：
 \begin{lstlisting}[language=C++]
 Binding *lookup(const std::string &name) {
   for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
@@ -199,7 +199,7 @@ fn main() { printInt(first(&[1, 2, 3])); }
 \end{lstlisting}
 语法类型 \texttt{TypeSyntax} 需要保留括号、路径、生命周期名字及数组长度表达式等源码信息。语义类型不需要把同一个名字查找多次，也不需要在每次比较数组时重新计算 \lstinline[language=Rustless]|N|。因此，类型解析把这些语法节点解释为另一组对象：引用包含其所指类型，数组包含元素类型与长度，结构体类型包含对应声明的身份。
 
-\texttt{include/rx/semantic.hpp} 中的连接结构很小：
+\path{include/rx/semantic.hpp} 中的连接结构很小：
 \begin{lstlisting}[language=C++]
 struct TypeResolution {
   ast::NodeId node{};
@@ -356,7 +356,7 @@ enum class State { Fresh, Evaluating, Done, Failed } state{State::Fresh};
 \section{为什么语义类型也需要具体形状}
 语法节点已经使用具体载荷表达形状，语义类型也需要同样清楚的结构。若类型对象只有 \texttt{kind}、\texttt{name}、\texttt{element}、\texttt{length} 和一个布尔标志，就必须依赖约定说明哪些字段有效。一个缺少元素的 Array 或同时带着无关长度的 Bool，仍可能由普通构造产生。
 
-当前 \texttt{include/rx/semantic\_type.hpp} 已把这些形状分开。下面选取四种实际定义，其间其他载荷的定义没有列出：
+当前 \path{include/rx/semantic_type.hpp} 已把这些形状分开。下面选取四种实际定义，其间其他载荷的定义没有列出：
 \begin{lstlisting}[language=C++]
 struct StructType {
   SymbolId symbol;
@@ -389,7 +389,7 @@ using SemanticTypePtr = std::shared_ptr<const SemanticType>;
 
 \texttt{TypeContext} 还将相同类型归并为共享的对象。数组的键包含元素身份和长度，引用的键包含元素身份和可变性，结构体和函数项的键包含声明身份。元素先被归并，外层对象的键便可以引用已经稳定的元素对象。相同上下文中反复出现的 \lstinline[language=Rustless]|&i32| 不必每次都创建一个新对象。
 
-下面摘录 \texttt{src/semantic\_type.cpp} 的键构造与复用逻辑中的代表性部分：
+下面摘录 \path{src/semantic_type.cpp} 的键构造与复用逻辑中的代表性部分：
 \begin{lstlisting}[language=C++]
 if (key.kind == K::Array)
   key.length = value.length();
@@ -440,7 +440,7 @@ if (const auto found = impl_->types.find(key);
 \section{具体载荷与类型规则的组织}
 可以用 $\Gamma\vdash e:T$ 表示“在环境 $\Gamma$ 中，表达式 $e$ 具有类型 $T$”。这里的环境包含局部绑定、声明签名、当前函数和循环上下文。对于整数加法，规则需要先知道两个子表达式的类型；对于函数调用，规则需要知道被调用函数的签名。语法形状决定采用哪种规则，环境则为规则提供必要信息。
 
-当前 \texttt{check\_expr} 使用 AST Visitor 将具体载荷交给相应规则。下面是 \texttt{src/semantic.cpp} 中两个相邻分支的实际摘录：
+当前 \texttt{check\_expr} 使用 AST Visitor 将具体载荷交给相应规则。下面是 \path{src/semantic.cpp} 中两个相邻分支的实际摘录：
 \begin{lstlisting}[language=C++]
 [&](const ast::Expr &, const ast::BooleanExpr &) -> ExprInfo {
   return {ty(Ty::Kind::Bool)};
@@ -540,7 +540,7 @@ fn main() {
 \end{lstlisting}
 可变引用与共享引用不是严格相同的类型，但在这个调用位置可以把可变引用作为共享引用使用。类型相等、是否允许使用以及如何实现这种使用，需要三个分别明确的回答。\texttt{same\_type} 回答严格相等，\texttt{coercible} 回答上下文兼容，\texttt{Adjustment} 保存所需步骤。
 
-当前 \texttt{include/rx/semantic\_operation.hpp} 的定义为：
+当前 \path{include/rx/semantic_operation.hpp} 的定义为：
 \begin{lstlisting}[language=C++]
 struct Adjustment {
   enum class Kind {
@@ -624,7 +624,7 @@ fn main() {
 
 当前设计通过 \texttt{resolve\_operation} 统一选择运算类别，复合赋值先将自身运算符对应到二元运算符，然后使用同一规则。因此 bool 的位运算赋值可以被接受，bool 算术和移位赋值会被拒绝。这里的集中并不是建立一个接受所有节点的巨大函数，而是把真正相同的语言决定放在共同位置。
 
-下面是 \texttt{src/semantic\_operation.cpp} 中算术分支的节选：
+下面是 \path{src/semantic_operation.cpp} 中算术分支的节选：
 \begin{lstlisting}[language=C++]
 case A::Add: case A::Sub: case A::Mul: case A::Div: case A::Rem:
   if (!integers || !equal) return {};
