@@ -28,7 +28,7 @@ SemanticBridge::SemanticBridge(const SemanticIndex &semantic,
   for (const auto &item : semantic.crate().items)
     ast::visit(item, ast::Overloaded{
                          [&](const ast::Struct &node, const ast::Struct &) {
-                           resolve_structure(semantic.declaration(node.id).id);
+                          resolve_structure(semantic.declaration(node).id);
                          },
                          [](const ast::Use &, const ast::Use &) {},
                          [](const ast::Function &, const ast::Function &) {},
@@ -130,7 +130,7 @@ AbiValue SemanticBridge::abi(const SemanticTypePtr &type) const {
           scalar ? Passing::Direct : Passing::Indirect, layout(type)};
 }
 FunctionAbi SemanticBridge::function(const ast::Function &node) const {
-  auto symbol = semantic_.declaration(node.id).id;
+  auto symbol = semantic_.declaration(node).id;
   const auto &signature = semantic_.function(symbol);
   FunctionAbi result{
       symbol, semantic_.symbol(symbol).name, abi(signature.result), {}, {}};
