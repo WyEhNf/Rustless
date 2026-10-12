@@ -102,6 +102,7 @@ void check_parallel_edges() {
 int main(int argc, char **argv) {
   check_parallel_edges();
   auto module = diamond();
+  module.functions.push_back(parallel_edges().functions.front());
   assert(ir::verify(module).empty());
   auto llvm = ir::print(module);
   if (argc == 2) {
