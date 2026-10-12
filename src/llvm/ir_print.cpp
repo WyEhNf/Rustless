@@ -154,55 +154,58 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
 }
 
 std::string symbol_name(std::string_view name) {
-  auto initial = [](unsigned char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
-           c == '.' || c == '$' || c == '-';
+  auto initial = [](unsigned char character) {
+    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+           character == '_' || character == '.' || character == '$' || character == '-';
   };
   bool plain = !name.empty() && initial(name.front());
-  for (unsigned char c : name)
-    plain &= initial(c) || (c >= '0' && c <= '9');
-  if (plain)
+  for (unsigned char character : name) {
+    plain &= initial(character) || (character >= '0' && character <= '9');
+  }
+  if (plain) {
     return std::string(name);
+  }
   std::string result = "\"";
   constexpr std::string_view hex = "0123456789ABCDEF";
-  for (unsigned char c : name) {
-    if (c == '"' || c == '\\' || c < 32 || c >= 127) {
+  for (unsigned char character : name) {
+    if (character == '"' || character == '\\' || character < 32 || character >= 127) {
       result += '\\';
-      result += hex[c >> 4];
-      result += hex[c & 15];
-    } else
-      result += static_cast<char>(c);
+      result += hex[character >> 4];
+      result += hex[character & 15];
+    } else {
+      result += static_cast<char>(character);
+    }
   }
   return result + '"';
 }
 
 std::string print(const Module &module) {
-  if (auto errors = verify(module); !errors.empty())
-    throw std::invalid_argument("invalid IR in " + errors.front().function +
-                                ": " + errors.front().message);
+  if (auto errors = verify(module); !errors.empty()) {
+    throw std::invalid_argument("invalid IR in " + errors.front().function + ": " +
+                                errors.front().message);
+  }
   std::ostringstream out;
   out << "; Rx LLVM IR: RV32IM / ILP32\n"
-      << "target datalayout = \"" << TargetLayout::rv32().llvm_data_layout()
-      << "\"\n"
+      << "target datalayout = \"" << TargetLayout::rv32().llvm_data_layout() << "\"\n"
       << "target triple = \"" << TargetLayout::rv32().triple() << "\"\n\n";
   for (const auto &declaration : module.declarations) {
-    out << "declare " << type_name(declaration.result) << " @"
-        << symbol_name(declaration.name) << '(';
-    for (std::size_t i = 0; i < declaration.parameters.size(); ++i) {
-      if (i)
+    out << "declare " << type_name(declaration.result) << " @" << symbol_name(declaration.name)
+        << '(';
+    for (std::size_t index = 0; index < declaration.parameters.size(); ++index) {
+      if (index) {
         out << ", ";
-      out << type_name(declaration.parameters[i]);
+      }
+      out << type_name(declaration.parameters[index]);
     }
     out << ")\n";
   }
   for (const auto &function : module.functions) {
-    out << "\ndefine " << type_name(function.result) << " @"
-        << symbol_name(function.name) << '(';
-    for (std::size_t i = 0; i < function.parameters.size(); ++i) {
-      if (i)
+    out << "\ndefine " << type_name(function.result) << " @" << symbol_name(function.name) << '(';
+    for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+      if (index) {
         out << ", ";
-      out << type_name(function.parameters[i].type) << " %v"
-          << function.parameters[i].id;
+      }
+      out << type_name(function.parameters[index].type) << " %v" << function.parameters[index].id;
     }
     out << ") {\n";
     for (const auto &block : function.blocks) {
@@ -210,12 +213,13 @@ std::string print(const Module &module) {
       std::replace(comment.begin(), comment.end(), '\n', ' ');
       std::replace(comment.begin(), comment.end(), '\r', ' ');
       out << "b" << block.id << ": ; " << comment << '\n';
-      for (const auto &instruction : block.instructions)
+      for (const auto &instruction : block.instructions) {
         print_instruction(out, instruction);
+      }
     }
     out << "}\n";
   }
   return out.str();
 }
 
-} // namespace rx::ir
+}
