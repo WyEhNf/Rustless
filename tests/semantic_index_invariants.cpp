@@ -1,5 +1,6 @@
 #include "rx/frontend.hpp"
 #include "rx/semantic_index.hpp"
+#include "rx/ast/visitor.hpp"
 
 #undef NDEBUG
 #include <algorithm>
@@ -11,6 +12,7 @@ int main() {
   rx::DiagnosticEngine diagnostics;
   auto parsed = rx::parse_source(R"(
 const N: usize = 2;
+const NEGATIVE: i32 = -1;
 struct Pair { enabled: bool, value: i32 }
 impl Pair { fn get(&self) -> i32 { self.value } }
 fn choose(value: i32, enabled: bool) -> i32 {
@@ -24,9 +26,13 @@ fn main() {
     count += 2;
     let sum = &count + &count;
     printInt(sum);
+    printInt(-&count);
+    printInt(p.get() + 1);
     let a = Box::<i32>::new(1);
     let b = Box::<i32>::new(1);
     let equal = a == b;
+    let cloned = a.clone();
+    let also_equal = a == cloned;
 }
 )", diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
@@ -143,6 +149,16 @@ fn main() {
   });
   rejects([](auto &draft) {
     for (auto &fact : draft.expressions)
+      if (fact.unary) { fact.unary.reset(); return; }
+    assert(false);
+  });
+  rejects([](auto &draft) {
+    for (auto &fact : draft.expressions)
+      if (fact.receiver) { fact.receiver.reset(); return; }
+    assert(false);
+  });
+  rejects([](auto &draft) {
+    for (auto &fact : draft.expressions)
       if (fact.compound) {
         fact.compound.reset();
         return;
@@ -164,6 +180,33 @@ fn main() {
     retained = std::make_unique<rx::SemanticIndex>(*parsed.crate, temporary);
   }
   assert(retained->function(choose).parameters.size() == 2);
+  rx::DiagnosticEngine foreign_diagnostics;
+  auto foreign = rx::parse_source(parsed.crate->source.text, foreign_diagnostics);
+  assert(foreign.syntax_ok && foreign.crate);
+  auto rejects_query = [](auto query) {
+    bool rejected = false;
+    try { query(); } catch (const std::invalid_argument &) { rejected = true; }
+    assert(rejected);
+  };
+  std::size_t foreign_queries = 0;
+  rx::ast::walk(*foreign.crate, [&](const auto &node, const auto &) {
+    using T = std::remove_cvref_t<decltype(node)>;
+    if constexpr (std::same_as<T, rx::ast::Expr> ||
+                  std::same_as<T, rx::ast::Block> ||
+                  std::same_as<T, rx::ast::IfBranch>) {
+      rejects_query([&] { (void)retained->expression(node); });
+      ++foreign_queries;
+    }
+    if constexpr (std::same_as<T, rx::ast::TypeSyntax>) {
+      rejects_query([&] { (void)retained->type(node); });
+      ++foreign_queries;
+    }
+    if constexpr (std::same_as<T, rx::ast::Function>) {
+      rejects_query([&] { (void)retained->declaration(node); });
+      ++foreign_queries;
+    }
+  });
+  assert(foreign_queries);
   auto failed = rx::SemanticResult::rejected(*parsed.crate, original);
   assert(!failed.success());
   bool rejected_failed = false;
