@@ -72,4 +72,79 @@ fn main() {
   }
 }
 
-int main() { boolean_assignments(); }
+void reference_operand_adjustments() {
+  Program program(R"(
+fn main() {
+  let x: i32 = 1;
+  let r = &x;
+  let rr = &r;
+  let arithmetic = r + r;
+  let ordering = rr < rr;
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  ir::SemanticBridge bridge(index);
+  for (const auto text : {"r + r", "rr < rr"}) {
+    const auto &node = expression(program, text);
+    const auto &payload = *ast::get_if<ast::BinaryExpr>(node);
+    const auto &resolved = *index.expression(node).binary;
+    const std::size_t count = text == std::string_view("r + r") ? 1 : 2;
+    for (const auto *operand : {&resolved.left, &resolved.right}) {
+      auto current = index.expression(operand->node).type;
+      assert(current->kind() == K::Ref);
+      assert(operand->adjustments.size() == count);
+      for (const auto &adjustment : operand->adjustments) {
+        assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
+        assert(current->kind() == K::Ref);
+        assert(rx::same_type(adjustment.target, current->element()));
+        current = adjustment.target;
+      }
+      assert(current->kind() == K::I32);
+      assert(rx::same_type(current, operand->effective_type));
+    }
+    assert(resolved.left.node == payload.left->id &&
+           resolved.right.node == payload.right->id);
+    const auto lowered = bridge.binary(node, payload);
+    assert(lowered.left.adjustments.size() == count);
+    assert(lowered.right.adjustments.size() == count);
+    if (payload.op == ast::BinaryOp::Add)
+      assert(std::get<ir::ScalarArithmetic>(lowered.operation).op ==
+             ir::BinaryOp::Add);
+    else
+      assert(std::get<ir::ScalarComparison>(lowered.operation).predicate ==
+             ir::Predicate::SLt);
+  }
+}
+
+void box_equality() {
+  Program program(R"(
+fn main() {
+  let a = Box::<i32>::new(1);
+  let b = Box::<i32>::new(1);
+  let equal = a == b;
+  let different = a != b;
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  ir::SemanticBridge bridge(index);
+  for (const auto text : {"a == b", "a != b"}) {
+    const auto &node = expression(program, text);
+    const auto &resolved = *index.expression(node).binary;
+    assert(std::holds_alternative<rx::StructuralEquality>(resolved.operation));
+    assert(resolved.left.effective_type->kind() == K::Box);
+    const auto lowered =
+        bridge.binary(node, *ast::get_if<ast::BinaryExpr>(node));
+    const auto &operation = std::get<ir::StructuralEquality>(lowered.operation);
+    assert(operation.compared_type->kind() == K::Box);
+    assert(operation.negated == (text == std::string_view("a != b")));
+    assert(lowered.result_type == ir::Type::I1);
+  }
+}
+
+int main() {
+  boolean_assignments();
+  reference_operand_adjustments();
+  box_equality();
+}
