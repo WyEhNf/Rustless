@@ -18,14 +18,22 @@ using ParseContext = antlr4::ParserRuleContext;
 using ParseTree = antlr4::tree::ParseTree;
 using TerminalNode = antlr4::tree::TerminalNode;
 
+bool has_prefix(std::string_view text, std::string_view prefix) {
+  return text.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool has_suffix(std::string_view text, std::string_view suffix) {
+  if (text.size() < suffix.size())
+    return false;
+  return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 class SyntaxListener final : public antlr4::BaseErrorListener {
 public:
-  explicit SyntaxListener(DiagnosticEngine &diagnostics)
-      : diagnostics_(diagnostics) {}
+  explicit SyntaxListener(DiagnosticEngine &diagnostics) : diagnostics_(diagnostics) {}
 
-  void syntaxError(antlr4::Recognizer *, antlr4::Token *offending,
-                   std::size_t line, std::size_t column,
-                   const std::string &message, std::exception_ptr) override {
+  void syntaxError(antlr4::Recognizer *, antlr4::Token *offending, std::size_t line,
+                   std::size_t column, const std::string &message, std::exception_ptr) override {
     Span span{0, 0, line, column};
     if (offending) {
       span.begin = offending->getStartIndex();
@@ -49,9 +57,9 @@ Span raw_source_span(ParseContext *context) {
   if (!start)
     return {};
   const auto begin = start->getStartIndex();
-  const auto end = stop && stop->getType() != antlr4::Token::EOF
-                       ? stop->getStopIndex() + 1
-                       : begin;
+  auto end = begin;
+  if (stop && stop->getType() != antlr4::Token::EOF)
+    end = stop->getStopIndex() + 1;
   return {begin, end, start->getLine(), start->getCharPositionInLine()};
 }
 
@@ -60,15 +68,12 @@ Span merge(Span first, Span second) {
   return first;
 }
 
-// AstBuilder consumes only generated parser contexts; it never reparses tokens.
 class AstBuilder {
 public:
-  AstBuilder(const std::vector<std::string> &rule_names,
-             std::string_view source)
+  AstBuilder(const std::vector<std::string> &rule_names, std::string_view source)
       : rule_names_(rule_names), source_(std::string(source)) {}
 
-  std::unique_ptr<ast::Crate>
-  build(rxgrammar::RxParser::CrateContext *context) {
+  std::unique_ptr<ast::Crate> build(rxgrammar::RxParser::CrateContext *context) {
     auto crate = std::make_unique<ast::Crate>(source_.text);
     stamp(*crate, context);
     for (auto *item : context->item()) {
@@ -84,10 +89,8 @@ public:
         crate->items.emplace_back(build_impl(item->inherentImpl()));
     }
     if (!crate->items.empty()) {
-      std::visit([&](const auto &item) { crate->span = item.span; },
-                 crate->items.front());
-      std::visit([&](const auto &item) { crate->span.end = item.span.end; },
-                 crate->items.back());
+      std::visit([&](const auto &item) { crate->span = item.span; }, crate->items.front());
+      std::visit([&](const auto &item) { crate->span.end = item.span.end; }, crate->items.back());
     }
     return crate;
   }
@@ -108,54 +111,47 @@ private:
     return rule_names_.at(context->getRuleIndex());
   }
 
-  static ParseContext *as_context(ParseTree *tree) {
-    return dynamic_cast<ParseContext *>(tree);
-  }
+  static ParseContext *as_context(ParseTree *tree) { return dynamic_cast<ParseContext *>(tree); }
 
-  static TerminalNode *as_terminal(ParseTree *tree) {
-    return dynamic_cast<TerminalNode *>(tree);
-  }
+  static TerminalNode *as_terminal(ParseTree *tree) { return dynamic_cast<TerminalNode *>(tree); }
 
-  // One builder handles the ordinary, condition, and statement rule families.
   bool is_expression_context(ParseContext *context) const {
     const auto name = rule(context);
-    return name == "expression" || name.ends_with("Expression") ||
-           name == "nonBlockPrimary" || name == "conditionPrimary" ||
-           name == "conditionPrimaryWithoutBareBlock";
+    return name == "expression" || has_suffix(name, "Expression") || name == "nonBlockPrimary" ||
+           name == "conditionPrimary" || name == "conditionPrimaryWithoutBareBlock";
   }
 
   static bool is_operator_rule(std::string_view name) {
-    return name == "assignmentOperator" || name == "equalsSign" ||
-           name == "comparisonExceptLt" || name == "shiftRight" ||
-           name == "additiveOperator" || name == "multiplicativeOperator" ||
+    return name == "assignmentOperator" || name == "equalsSign" || name == "comparisonExceptLt" ||
+           name == "shiftRight" || name == "additiveOperator" || name == "multiplicativeOperator" ||
            name == "genericClose";
   }
 
-  static bool is_binary_rule(std::string_view name) {
-    return name.ends_with("Expression") &&
-           (name.contains("LogicalOr") || name.starts_with("logicalOr") ||
-            name.contains("LogicalAnd") || name.starts_with("logicalAnd") ||
-            name.contains("Comparison") || name.starts_with("comparison") ||
-            name.contains("BitOr") || name.starts_with("bitOr") ||
-            name.contains("BitXor") || name.starts_with("bitXor") ||
-            name.contains("BitAnd") || name.starts_with("bitAnd") ||
-            name.contains("Shift") || name.starts_with("shift") ||
-            name.contains("Additive") || name.starts_with("additive") ||
-            name.contains("Multiplicative") ||
-            name.starts_with("multiplicative"));
+  static bool is_rule_family(std::string_view name, std::string_view prefix,
+                             std::string_view nested_name) {
+    return has_prefix(name, prefix) || name.find(nested_name) != std::string_view::npos;
   }
 
-  template <class Payload>
-  ast::ExprPtr make_expr(ParseContext *context, Payload payload) {
+  static bool is_binary_rule(std::string_view name) {
+    if (!has_suffix(name, "Expression"))
+      return false;
+    return is_rule_family(name, "logicalOr", "LogicalOr") ||
+           is_rule_family(name, "logicalAnd", "LogicalAnd") ||
+           is_rule_family(name, "comparison", "Comparison") ||
+           is_rule_family(name, "bitOr", "BitOr") || is_rule_family(name, "bitXor", "BitXor") ||
+           is_rule_family(name, "bitAnd", "BitAnd") || is_rule_family(name, "shift", "Shift") ||
+           is_rule_family(name, "additive", "Additive") ||
+           is_rule_family(name, "multiplicative", "Multiplicative");
+  }
+
+  template <class Payload> ast::ExprPtr make_expr(ParseContext *context, Payload payload) {
     auto expression = ast::box<ast::Expr>(ast::Expr::Data{std::move(payload)});
     stamp(*expression, context);
     return expression;
   }
 
-  template <class Payload>
-  ast::TypePtr make_type(ParseContext *context, Payload payload) {
-    auto type =
-        ast::box<ast::TypeSyntax>(ast::TypeSyntax::Data{std::move(payload)});
+  template <class Payload> ast::TypePtr make_type(ParseContext *context, Payload payload) {
+    auto type = ast::box<ast::TypeSyntax>(ast::TypeSyntax::Data{std::move(payload)});
     stamp(*type, context);
     return type;
   }
@@ -167,13 +163,12 @@ private:
     return {context->getText(), source_span(context)};
   }
   ast::Binding binding(rxgrammar::RxParser::IdentifierBindingContext *context) {
-    return {identifier(context->identifier()),
-            context->MUT() ? ast::Mutability::Mutable
-                           : ast::Mutability::Immutable};
+    return {identifier(context->identifier()), mutability(context->MUT() != nullptr)};
   }
   ast::Mutability mutability(bool mutable_value) {
-    return mutable_value ? ast::Mutability::Mutable
-                         : ast::Mutability::Immutable;
+    if (mutable_value)
+      return ast::Mutability::Mutable;
+    return ast::Mutability::Immutable;
   }
   std::optional<ast::GenericParameters>
   build_generics(rxgrammar::RxParser::GenericParamsContext *context) {
@@ -190,8 +185,7 @@ private:
     }
     return result;
   }
-  std::optional<ast::WhereClause>
-  build_where(rxgrammar::RxParser::WhereClauseContext *context) {
+  std::optional<ast::WhereClause> build_where(rxgrammar::RxParser::WhereClauseContext *context) {
     if (!context)
       return {};
     ast::WhereClause result{source_span(context), {}};
@@ -204,13 +198,11 @@ private:
         for (auto *name : list->lifetime())
           bounds.push_back(lifetime(name));
       if (predicate->lifetime()) {
-        ast::LifetimePredicate value{
-            {}, lifetime(predicate->lifetime()), std::move(bounds)};
+        ast::LifetimePredicate value{{}, lifetime(predicate->lifetime()), std::move(bounds)};
         stamp(value, predicate);
         result.predicates.emplace_back(std::move(value));
       } else {
-        ast::TypePredicate value{
-            {}, build_type(predicate->typeRef()), std::move(bounds)};
+        ast::TypePredicate value{{}, build_type(predicate->typeRef()), std::move(bounds)};
         stamp(value, predicate);
         result.predicates.emplace_back(std::move(value));
       }
@@ -231,8 +223,7 @@ private:
     }
     return result;
   }
-  ast::PathName
-  path_ident(rxgrammar::RxParser::PathIdentSegmentContext *context) {
+  ast::PathName path_ident(rxgrammar::RxParser::PathIdentSegmentContext *context) {
     if (context->SELF_VALUE())
       return ast::SelfValue{source_span(context)};
     if (context->SELF_TYPE())
@@ -240,30 +231,24 @@ private:
     return identifier(context->identifier());
   }
   template <class Segment> ast::PathSegment path_segment(Segment *context) {
-    return {path_ident(context->pathIdentSegment()),
-            build_arguments(context->genericArgs()), source_span(context)};
+    return {path_ident(context->pathIdentSegment()), build_arguments(context->genericArgs()),
+            source_span(context)};
   }
-  template <class Context>
-  ast::TypePtr reference_type(Context *context, ParseContext *referent) {
+  template <class Context> ast::TypePtr reference_type(Context *context, ParseContext *referent) {
     std::optional<ast::LifetimeName> name;
     if (context->lifetime())
       name = lifetime(context->lifetime());
-    auto inner = make_type(
-        context, ast::ReferenceType{std::move(name),
-                                    mutability(context->MUT() != nullptr),
-                                    build_type(referent)});
+    auto inner = make_type(context, ast::ReferenceType{std::move(name),
+                                                       mutability(context->MUT() != nullptr),
+                                                       build_type(referent)});
     if (!context->ANDAND())
       return inner;
-    // The second ampersand belongs to the inner reference.
     ++inner->span.begin;
     ++inner->span.column;
-    return make_type(
-        context,
-        ast::ReferenceType{{}, ast::Mutability::Immutable, std::move(inner)});
+    return make_type(context, ast::ReferenceType{{}, ast::Mutability::Immutable, std::move(inner)});
   }
   ast::TypePtr build_type(ParseContext *context) {
-    if (auto *type =
-            dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
+    if (auto *type = dynamic_cast<rxgrammar::RxParser::TypeRefContext *>(context)) {
       if (type->typeRef())
         return make_type(type, ast::ParenType{build_type(type->typeRef())});
       if (type->typePath()) {
