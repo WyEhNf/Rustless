@@ -7,8 +7,8 @@
 
 namespace ast = rx::ast;
 struct IdentityVisitor {
-  template <class T>
-  ast::NodeId operator()(const ast::Node &node, const T &) const {
+  template <class Payload>
+  ast::NodeId operator()(const ast::Node &node, const Payload &) const {
     return node.id;
   }
 };
@@ -16,26 +16,28 @@ struct OnlyBinary {
   void operator()(const ast::Expr &, const ast::BinaryExpr &) {}
 };
 struct DifferentReturns {
-  template <class T> int operator()(const ast::Node &, const T &) { return 0; }
+  template <class Payload> int operator()(const ast::Node &, const Payload &) {
+    return 0;
+  }
   void operator()(const ast::Expr &, const ast::BinaryExpr &) {}
 };
 struct MutablePayload {
-  template <class T>
-  void operator()(const ast::Node &, T &)
-    requires(!std::is_const_v<T>)
-  {}
+  template <class Payload, std::enable_if_t<!std::is_const_v<Payload>, int> = 0>
+  void operator()(const ast::Node &, Payload &) {}
 };
 struct ReferenceVisitor {
-  template <class P>
-  const ast::NodeId &operator()(const ast::Node &node, const P &) {
+  template <class Payload>
+  const ast::NodeId &operator()(const ast::Node &node, const Payload &) {
     return node.id;
   }
 };
 struct WrongOwner {
-  template <class P> void operator()(const ast::TypeSyntax &, const P &) {}
+  template <class Payload>
+  void operator()(const ast::TypeSyntax &, const Payload &) {}
 };
 struct DifferentItems {
-  template <class P> int operator()(const ast::Node &, const P &) const {
+  template <class Payload>
+  int operator()(const ast::Node &, const Payload &) const {
     return 0;
   }
   void operator()(const ast::Function &, const ast::Function &) const {}
@@ -56,15 +58,16 @@ static_assert(!ast::ExhaustiveVisitor<IdentityVisitor, int>);
 static_assert(!ast::ExhaustiveVisitor<WrongOwner, ast::Expr>);
 static_assert(!ast::ExhaustiveVisitor<DifferentItems, ast::Item>);
 static_assert(
-    std::same_as<decltype(ast::visit(std::declval<const ast::Expr &>(),
-                                     std::declval<ReferenceVisitor &>())),
-                 const ast::NodeId &>);
+    std::is_same_v<decltype(ast::visit(std::declval<const ast::Expr &>(),
+                                       std::declval<ReferenceVisitor &>())),
+                   const ast::NodeId &>);
 
 struct BinaryObserver : ast::DefaultVisitor {
   using DefaultVisitor::enter;
   int count{};
-  ast::WalkControl enter(const ast::Expr &owner, const ast::BinaryExpr &p) {
-    assert(owner.id.value && p.left->id != p.right->id);
+  ast::WalkControl enter(const ast::Expr &owner,
+                         const ast::BinaryExpr &Payload) {
+    assert(owner.id.value && Payload.left->id != Payload.right->id);
     ++count;
     return ast::WalkControl::Continue;
   }
@@ -73,19 +76,24 @@ struct TraceVisitor {
   ast::NodeId target{};
   ast::WalkControl action{ast::WalkControl::Continue};
   std::vector<ast::NodeId> entered, left, stack;
-  template <class P> ast::WalkControl enter(const ast::Node &node, const P &) {
+  template <class Payload>
+  ast::WalkControl enter(const ast::Node &node, const Payload &) {
     entered.push_back(node.id);
     stack.push_back(node.id);
-    return node.id == target ? action : ast::WalkControl::Continue;
+    if (node.id == target) {
+      return action;
+    }
+    return ast::WalkControl::Continue;
   }
-  template <class P> void leave(const ast::Node &node, const P &) {
+  template <class Payload> void leave(const ast::Node &node, const Payload &) {
     assert(!stack.empty() && stack.back() == node.id);
     stack.pop_back();
     left.push_back(node.id);
   }
 };
 struct MissingLeave {
-  template <class P> ast::WalkControl enter(const ast::Node &, const P &) {
+  template <class Payload>
+  ast::WalkControl enter(const ast::Node &, const Payload &) {
     return ast::WalkControl::Continue;
   }
 };
@@ -94,23 +102,31 @@ struct WrongControl : ast::DefaultVisitor {
   bool enter(const ast::Expr &, const ast::BinaryExpr &) { return true; }
 };
 struct MissingBinary {
-  template <class P>
-    requires(!std::same_as<P, ast::BinaryExpr>)
-  ast::WalkControl enter(const ast::Node &, const P &) {
+  template <
+      class Payload,
+      std::enable_if_t<!std::is_same_v<Payload, ast::BinaryExpr>, int> = 0>
+  ast::WalkControl enter(const ast::Node &, const Payload &) {
     return ast::WalkControl::Continue;
   }
-  template <class P> void leave(const ast::Node &, const P &) {}
+  template <class Payload> void leave(const ast::Node &, const Payload &) {}
 };
 struct BothInterfaces : BinaryObserver {
   int callback_calls{};
-  template <class P> void operator()(const ast::Node &, const P &) {
+  template <class Payload> void operator()(const ast::Node &, const Payload &) {
     ++callback_calls;
   }
 };
-template <class T>
-concept CanWalk = requires(const T &node, TraceVisitor &visitor) {
-  ast::walk(node, visitor);
-};
+template <class Owner, class Enable = void>
+struct WalkIsAvailable : std::false_type {};
+
+template <class Owner>
+struct WalkIsAvailable<
+    Owner, std::void_t<decltype(ast::walk(std::declval<const Owner &>(),
+                                          std::declval<TraceVisitor &>()))>>
+    : std::true_type {};
+
+template <class Owner>
+inline constexpr bool CanWalk = WalkIsAvailable<Owner>::value;
 static_assert(!ast::TraversalVisitor<MissingBinary>);
 static_assert(CanWalk<ast::Expr> && CanWalk<ast::Item>);
 static_assert(!CanWalk<int> && !CanWalk<ast::Node>);
@@ -167,8 +183,10 @@ void check_walk(const ast::Crate &crate, const ast::Expr &expr) {
   callback_ids.clear();
   assert(ast::walk(crate, [&](const ast::Node &node, const auto &) {
            callback_ids.push_back(node.id);
-           return node.id == expr.id ? ast::WalkControl::Stop
-                                     : ast::WalkControl::Continue;
+           if (node.id == expr.id) {
+             return ast::WalkControl::Stop;
+           }
+           return ast::WalkControl::Continue;
          }) == ast::WalkResult::Stopped);
   assert(callback_ids.size() == 5);
 }
