@@ -57,9 +57,8 @@ struct StructuralEquality {
            same_type(compared_type, other.compared_type);
   }
 };
-using LoweredOperation =
-    std::variant<ScalarArithmetic, ScalarComparison, ShortCircuit,
-                 StructuralEquality>;
+using LoweredOperation = std::variant<ScalarArithmetic, ScalarComparison,
+                                      ShortCircuit, StructuralEquality>;
 struct BinaryLowering {
   LoweredOperation operation;
   OperandSemantics left;
@@ -89,7 +88,7 @@ public:
   BinaryLowering binary(const ast::Expr &node,
                         const ast::BinaryExpr &payload) const;
   CompoundLowering compound(const ast::Expr &node,
-                           const ast::CompoundAssignExpr &payload) const;
+                            const ast::CompoundAssignExpr &payload) const;
 
 private:
   StructLayout &resolve_structure(SymbolId symbol);

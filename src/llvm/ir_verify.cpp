@@ -9,18 +9,17 @@ namespace {
 bool same_operand(const Operand &left, const Operand &right) {
   if (left.type != right.type || left.data.index() != right.data.index())
     return false;
-  return visit(left, ast::Overloaded{
-                         [&](const Operand &, const ConstantOperand &p) {
-                           return p.bits ==
-                                  std::get<ConstantOperand>(right.data).bits;
-                         },
-                         [&](const Operand &, const LocalOperand &p) {
-                           return p.id == std::get<LocalOperand>(right.data).id;
-                         },
-                         [&](const Operand &, const GlobalOperand &p) {
-                           return p.symbol ==
-                                  std::get<GlobalOperand>(right.data).symbol;
-                         }});
+  return visit(
+      left, ast::Overloaded{
+                [&](const Operand &, const ConstantOperand &p) {
+                  return p.bits == std::get<ConstantOperand>(right.data).bits;
+                },
+                [&](const Operand &, const LocalOperand &p) {
+                  return p.id == std::get<LocalOperand>(right.data).id;
+                },
+                [&](const Operand &, const GlobalOperand &p) {
+                  return p.symbol == std::get<GlobalOperand>(right.data).symbol;
+                }});
 }
 } // namespace
 std::vector<std::string> verify_instruction(const Instruction &node) {

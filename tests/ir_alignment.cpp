@@ -66,9 +66,9 @@ ir::Module parallel_edges() {
   auto entry = builder.create_block("entry");
   auto join = builder.create_block("join");
   builder.select(entry);
-  auto value = builder.binary(ir::BinaryOp::Add,
-                              ir::Operand::constant(ir::Type::I32, 3),
-                              ir::Operand::constant(ir::Type::I32, 4));
+  auto value =
+      builder.binary(ir::BinaryOp::Add, ir::Operand::constant(ir::Type::I32, 3),
+                     ir::Operand::constant(ir::Type::I32, 4));
   builder.cond_branch(ir::Operand::constant(ir::Type::I1, 1), join, join);
   builder.select(join);
   auto merged = builder.phi(ir::Type::I32, {{value, entry}, {value, entry}});
@@ -79,22 +79,26 @@ void check_parallel_edges() {
   auto module = parallel_edges();
   assert(ir::verify(module).empty());
   assert(ir::print(module).find("phi i32") != std::string::npos);
-  auto &phi = std::get<ir::Phi>(module.functions[0].blocks[1].instructions[0].data);
+  auto &phi =
+      std::get<ir::Phi>(module.functions[0].blocks[1].instructions[0].data);
   auto second = phi.incoming.back();
   phi.incoming.pop_back();
   assert(!ir::verify(module).empty()); // One incoming cannot cover two edges.
   phi.incoming.push_back(second);
   phi.incoming.back().value = ir::Operand::constant(ir::Type::I32, 8);
-  assert(!ir::verify(module).empty()); // Duplicate edges cannot select two values.
+  assert(
+      !ir::verify(module).empty()); // Duplicate edges cannot select two values.
   phi.incoming.back() = second;
   phi.incoming.push_back(second);
-  assert(!ir::verify(module).empty()); // Three incoming values exceed two edges.
+  assert(
+      !ir::verify(module).empty()); // Three incoming values exceed two edges.
   phi.incoming.pop_back();
-  auto &branch =
-      std::get<ir::CondBranch>(module.functions[0].blocks[0].instructions.back().data);
+  auto &branch = std::get<ir::CondBranch>(
+      module.functions[0].blocks[0].instructions.back().data);
   module.functions[0].blocks[0].instructions.back().data =
       ir::Branch{branch.consequent};
-  assert(!ir::verify(module).empty()); // Two incoming values cannot cover one edge.
+  assert(!ir::verify(module)
+              .empty()); // Two incoming values cannot cover one edge.
   phi.incoming.pop_back();
   assert(ir::verify(module).empty());
 }

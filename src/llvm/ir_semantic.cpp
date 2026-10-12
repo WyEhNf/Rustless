@@ -12,9 +12,8 @@ std::uint32_t checked_size(std::uint64_t size, const TargetLayout &target) {
 }
 std::uint32_t align_size(std::uint32_t size, std::uint32_t alignment,
                          const TargetLayout &target) {
-  return checked_size((std::uint64_t{size} + alignment - 1) / alignment *
-                          alignment,
-                      target);
+  return checked_size(
+      (std::uint64_t{size} + alignment - 1) / alignment * alignment, target);
 }
 Layout array_layout(Layout element, std::uint64_t count,
                     const TargetLayout &target) {
@@ -23,18 +22,18 @@ Layout array_layout(Layout element, std::uint64_t count,
   return {static_cast<std::uint32_t>(element.bytes * count), element.alignment};
 }
 } // namespace
-SemanticBridge::SemanticBridge(const SemanticIndex &semantic, TargetLayout target)
+SemanticBridge::SemanticBridge(const SemanticIndex &semantic,
+                               TargetLayout target)
     : semantic_(semantic), target_(target) {
   for (const auto &item : semantic.crate().items)
-    ast::visit(
-        item,
-        ast::Overloaded{[&](const ast::Struct &node, const ast::Struct &) {
-                          resolve_structure(semantic.declaration(node.id).id);
-                        },
-                        [](const ast::Use &, const ast::Use &) {},
-                        [](const ast::Function &, const ast::Function &) {},
-                        [](const ast::Constant &, const ast::Constant &) {},
-                        [](const ast::Impl &, const ast::Impl &) {}});
+    ast::visit(item, ast::Overloaded{
+                         [&](const ast::Struct &node, const ast::Struct &) {
+                           resolve_structure(semantic.declaration(node.id).id);
+                         },
+                         [](const ast::Use &, const ast::Use &) {},
+                         [](const ast::Function &, const ast::Function &) {},
+                         [](const ast::Constant &, const ast::Constant &) {},
+                         [](const ast::Impl &, const ast::Impl &) {}});
 }
 std::optional<Type>
 SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
@@ -101,7 +100,8 @@ Layout SemanticBridge::compute_layout(const SemanticTypePtr &type) {
   if (type->kind() == K::Struct)
     return resolve_structure(type->symbol()).layout;
   if (type->kind() == K::Array)
-    return array_layout(compute_layout(type->element()), type->length(), target_);
+    return array_layout(compute_layout(type->element()), type->length(),
+                        target_);
   return layout(type);
 }
 StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {

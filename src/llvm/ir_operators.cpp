@@ -11,37 +11,53 @@ bool signed_integer(const SemanticTypePtr &type) {
 }
 BinaryOp arithmetic(ArithmeticOp op, bool sign) {
   switch (op) {
-  case ArithmeticOp::Add: return BinaryOp::Add;
-  case ArithmeticOp::Sub: return BinaryOp::Sub;
-  case ArithmeticOp::Mul: return BinaryOp::Mul;
-  case ArithmeticOp::Div: return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
-  case ArithmeticOp::Rem: return sign ? BinaryOp::SRem : BinaryOp::URem;
+  case ArithmeticOp::Add:
+    return BinaryOp::Add;
+  case ArithmeticOp::Sub:
+    return BinaryOp::Sub;
+  case ArithmeticOp::Mul:
+    return BinaryOp::Mul;
+  case ArithmeticOp::Div:
+    return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
+  case ArithmeticOp::Rem:
+    return sign ? BinaryOp::SRem : BinaryOp::URem;
   }
   throw std::invalid_argument("invalid resolved arithmetic operation");
 }
 BinaryOp bitwise(BitwiseOp op) {
   switch (op) {
-  case BitwiseOp::And: return BinaryOp::And;
-  case BitwiseOp::Or: return BinaryOp::Or;
-  case BitwiseOp::Xor: return BinaryOp::Xor;
+  case BitwiseOp::And:
+    return BinaryOp::And;
+  case BitwiseOp::Or:
+    return BinaryOp::Or;
+  case BitwiseOp::Xor:
+    return BinaryOp::Xor;
   }
   throw std::invalid_argument("invalid resolved bitwise operation");
 }
 Predicate comparison(Relation relation, bool sign) {
   switch (relation) {
-  case Relation::Eq: return Predicate::Eq;
-  case Relation::Ne: return Predicate::Ne;
-  case Relation::Lt: return sign ? Predicate::SLt : Predicate::ULt;
-  case Relation::Le: return sign ? Predicate::SLe : Predicate::ULe;
-  case Relation::Gt: return sign ? Predicate::SGt : Predicate::UGt;
-  case Relation::Ge: return sign ? Predicate::SGe : Predicate::UGe;
+  case Relation::Eq:
+    return Predicate::Eq;
+  case Relation::Ne:
+    return Predicate::Ne;
+  case Relation::Lt:
+    return sign ? Predicate::SLt : Predicate::ULt;
+  case Relation::Le:
+    return sign ? Predicate::SLe : Predicate::ULe;
+  case Relation::Gt:
+    return sign ? Predicate::SGt : Predicate::UGt;
+  case Relation::Ge:
+    return sign ? Predicate::SGe : Predicate::UGe;
   }
   throw std::invalid_argument("invalid resolved comparison");
 }
 ShortCircuit short_circuit(LogicalOp op) {
   switch (op) {
-  case LogicalOp::And: return ShortCircuit::And;
-  case LogicalOp::Or: return ShortCircuit::Or;
+  case LogicalOp::And:
+    return ShortCircuit::And;
+  case LogicalOp::Or:
+    return ShortCircuit::Or;
   }
   throw std::invalid_argument("invalid resolved logical operation");
 }
@@ -62,8 +78,8 @@ SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
   auto operation = std::visit(
       ast::Overloaded{
           [&](const IntegerArithmetic &p) -> LoweredOperation {
-            return ScalarArithmetic{arithmetic(p.op, sign), require_scalar(true),
-                                    {}};
+            return ScalarArithmetic{
+                arithmetic(p.op, sign), require_scalar(true), {}};
           },
           [&](const BitwiseOperation &p) -> LoweredOperation {
             const auto type = require_scalar();
@@ -76,11 +92,14 @@ SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
               throw std::invalid_argument("unsupported shift count policy");
             BinaryOp op;
             switch (p.direction) {
-            case ShiftDirection::Left: op = BinaryOp::Shl; break;
+            case ShiftDirection::Left:
+              op = BinaryOp::Shl;
+              break;
             case ShiftDirection::Right:
               op = sign ? BinaryOp::AShr : BinaryOp::LShr;
               break;
-            default: throw std::invalid_argument("invalid shift direction");
+            default:
+              throw std::invalid_argument("invalid shift direction");
             }
             return ScalarArithmetic{op, require_scalar(true),
                                     target_.shift_count_mask()};

@@ -30,8 +30,10 @@ public:
   constexpr Layout unit() const { return {0, 1}; }
   constexpr VecLayout vector() const {
     const auto word = integer();
-    return {{pointer().bytes + 2 * word.bytes, word.alignment}, 0,
-            pointer().bytes, pointer().bytes + word.bytes};
+    return {{pointer().bytes + 2 * word.bytes, word.alignment},
+            0,
+            pointer().bytes,
+            pointer().bytes + word.bytes};
   }
   constexpr std::uint32_t shift_count_mask() const {
     return integer_bits() - 1;
@@ -39,9 +41,7 @@ public:
   constexpr std::uint64_t max_object_size() const {
     return std::numeric_limits<std::uint32_t>::max();
   }
-  constexpr std::string_view triple() const {
-    return "riscv32-unknown-elf";
-  }
+  constexpr std::string_view triple() const { return "riscv32-unknown-elf"; }
   constexpr std::string_view llvm_data_layout() const {
     return "e-m:e-p:32:32-i64:64-n32-S128";
   }

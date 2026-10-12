@@ -27,7 +27,8 @@ fn main() {
   let mut flag = true;
   flag &= false;
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
@@ -170,7 +171,8 @@ fn main() {
       assignments.push_back(lowered.operation);
       assert(lowered.target.node == payload.target->id);
       assert(lowered.value.node == payload.value->id);
-      assert(index.expression(owner).type->kind() == rx::SemanticType::Kind::Unit);
+      assert(index.expression(owner).type->kind() ==
+             rx::SemanticType::Kind::Unit);
     }
   });
   using Operation = decltype(ir::BinaryLowering::operation);
@@ -181,11 +183,13 @@ fn main() {
       ir::ScalarArithmetic{ir::BinaryOp::LShr, ir::Type::I32, 31},
       ir::ScalarComparison{ir::Predicate::SLt, ir::Type::I32},
       ir::ScalarComparison{ir::Predicate::ULt, ir::Type::I32},
-      ir::ShortCircuit::And, ir::ShortCircuit::Or};
+      ir::ShortCircuit::And,
+      ir::ShortCircuit::Or};
   assert(operations == expected);
   assert(assignments ==
-         (std::vector{ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
-                      ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}}}));
+         (std::vector{
+             ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
+             ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}}}));
   auto alien = rx::parse_source("fn main() { let x = 1 + 2; }", diagnostics);
   bool rejected = false;
   ast::walk(*alien.crate, [&](const auto &, const auto &payload) {
