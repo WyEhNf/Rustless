@@ -77,6 +77,11 @@ void SemanticIndex::validate_links() const {
     case SymbolKind::AssociatedFunction:
       (void)function(fact->id);
       break;
+    case SymbolKind::Constant:
+    case SymbolKind::AssociatedConstant:
+      (void)constant(fact->id);
+      require_type(symbol_type(fact->id));
+      break;
     default:
       require_type(symbol_type(fact->id));
       break;
@@ -133,6 +138,8 @@ void SemanticIndex::validate_links() const {
 }
 void SemanticIndex::validate_tree() const {
   std::unordered_set<ast::NodeId> identities;
+  std::unordered_set<ast::NodeId> expression_nodes;
+  std::unordered_set<ast::NodeId> type_nodes;
   // The first traversal also includes preserved, not-yet-interpreted
   // constraints.
   ast::walk(*crate_, [&](const ast::Node &node, const auto &) {
@@ -156,12 +163,19 @@ void SemanticIndex::validate_tree() const {
     if constexpr (std::same_as<T, ast::TypePredicate>)
       return ast::WalkControl::SkipChildren;
     if constexpr (std::same_as<T, ast::Expr> || std::same_as<T, ast::Block> ||
-                  std::same_as<T, ast::IfBranch>)
+                  std::same_as<T, ast::IfBranch>) {
       (void)expression(owner.id);
-    if constexpr (std::same_as<T, ast::TypeSyntax>)
+      expression_nodes.insert(owner.id);
+    }
+    if constexpr (std::same_as<T, ast::TypeSyntax>) {
       (void)type(owner.id);
+      type_nodes.insert(owner.id);
+    }
     return ast::WalkControl::Continue;
   });
+  if (expression_nodes.size() != expressions_.size() ||
+      type_nodes.size() != types_.size())
+    throw std::invalid_argument("semantic fact is attached to wrong AST shape");
 }
 namespace {
 bool equivalent(const SemanticTypePtr &left, const SemanticTypePtr &right) {
@@ -194,21 +208,24 @@ void require_equivalent(const SemanticTypePtr &left,
 void SemanticIndex::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
   auto require_symbol = [&](const ast::Node &node, SymbolKind kind,
-                            std::optional<SymbolId> owner = {}) -> SymbolId {
+                            std::optional<SymbolId> owner = {},
+                            std::string_view name = {}) -> SymbolId {
     const auto &record = declaration(node.id);
-    if (record.kind != kind || record.owner != owner)
+    if (record.kind != kind || record.owner != owner ||
+        (!name.empty() && record.name != name))
       throw std::invalid_argument("AST declaration kind or owner mismatch");
     expected.insert(node.id);
     return record.id;
   };
   auto check_struct = [&](const ast::Struct &node) {
-    const auto id = require_symbol(node, SymbolKind::Struct);
+    const auto id = require_symbol(node, SymbolKind::Struct, {}, node.name.text);
     const auto &fact = structure(id);
     if (fact.fields.size() != node.fields.size())
       throw std::invalid_argument("semantic struct field count mismatch");
     for (std::size_t i = 0; i < node.fields.size(); ++i) {
       const auto &field = node.fields[i];
-      const auto field_id = require_symbol(field, SymbolKind::Field, id);
+      const auto field_id =
+          require_symbol(field, SymbolKind::Field, id, field.name.text);
       if (fact.fields[i] != field_id)
         throw std::invalid_argument("semantic struct field order mismatch");
       require_equivalent(symbol_type(field_id), type(*field.type));
@@ -218,7 +235,8 @@ void SemanticIndex::validate_declarations() const {
                             std::optional<SymbolId> owner = {}) {
     const auto id = require_symbol(
         node, owner ? SymbolKind::AssociatedFunction : SymbolKind::Function,
-        owner);
+        owner, owner ? symbol(*owner).name + "::" + node.name.text
+                     : node.name.text);
     const auto &fact = function(id);
     if (fact.parameters.size() != node.signature.parameters.size() ||
         fact.receiver.has_value() != node.signature.receiver.has_value())
@@ -226,7 +244,8 @@ void SemanticIndex::validate_declarations() const {
     for (std::size_t i = 0; i < node.signature.parameters.size(); ++i) {
       const auto &parameter = node.signature.parameters[i];
       const auto parameter_id =
-          require_symbol(parameter, SymbolKind::Parameter, id);
+          require_symbol(parameter, SymbolKind::Parameter, id,
+                         parameter.binding.name.text);
       if (fact.parameters[i].symbol != parameter_id)
         throw std::invalid_argument("semantic parameter order mismatch");
       require_equivalent(fact.parameters[i].type, type(*parameter.type));
@@ -235,7 +254,7 @@ void SemanticIndex::validate_declarations() const {
     if (fact.receiver) {
       const auto &receiver = *node.signature.receiver;
       const auto receiver_id =
-          require_symbol(receiver, SymbolKind::Receiver, id);
+          require_symbol(receiver, SymbolKind::Receiver, id, "self");
       if (!owner || fact.receiver->symbol != receiver_id)
         throw std::invalid_argument("semantic receiver identity mismatch");
       require_equivalent(fact.receiver->type, symbol_type(receiver_id));
@@ -257,7 +276,8 @@ void SemanticIndex::validate_declarations() const {
     ast::walk(*node.body, [&](const auto &statement, const auto &payload) {
       if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
                                  ast::LetStmt>) {
-        const auto local = require_symbol(statement, SymbolKind::Local, id);
+        const auto local = require_symbol(statement, SymbolKind::Local, id,
+                                          payload.binding.name.text);
         if (payload.annotation)
           require_equivalent(symbol_type(local), type(**payload.annotation));
         else
@@ -266,6 +286,16 @@ void SemanticIndex::validate_declarations() const {
       }
     });
   };
+  auto check_constant = [&](const ast::Constant &node,
+                            std::optional<SymbolId> owner = {}) {
+    const auto id = require_symbol(
+        node, owner ? SymbolKind::AssociatedConstant : SymbolKind::Constant,
+        owner, owner ? symbol(*owner).name + "::" + node.name.text
+                     : node.name.text);
+    require_equivalent(symbol_type(id), type(*node.type));
+    require_equivalent(symbol_type(id), expression(*node.value).type);
+    (void)constant(id);
+  };
   for (const auto &item : crate_->items)
     ast::visit(item, [&](const ast::Node &, const auto &payload) {
       using T = std::remove_cvref_t<decltype(payload)>;
@@ -273,6 +303,8 @@ void SemanticIndex::validate_declarations() const {
         check_struct(payload);
       if constexpr (std::same_as<T, ast::Function>)
         check_function(payload);
+      if constexpr (std::same_as<T, ast::Constant>)
+        check_constant(payload);
       if constexpr (std::same_as<T, ast::Impl>) {
         const auto target = type(*payload.target);
         if (target->kind != SemanticType::Kind::Struct)
@@ -286,8 +318,13 @@ void SemanticIndex::validate_declarations() const {
             if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
                                        ast::Function>)
               check_function(value, owner);
+            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
+                                       ast::Constant>)
+              check_constant(value, owner);
           });
       }
     });
+  if (expected.size() != declarations_.size())
+    throw std::invalid_argument("semantic symbols do not match AST declarations");
 }
 } // namespace rx
