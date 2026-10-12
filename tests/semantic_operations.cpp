@@ -259,12 +259,62 @@ fn main() {
     assert(fact.binary->left.adjustments.empty());
     const auto &left = index.expression(fact.binary->left.node);
     assert(left.type->kind() == K::I32);
+    assert(left.receiver && left.adjustments.empty());
+    assert(!left.receiver->adjustments.empty());
+    assert(left.receiver->adjustments.front().kind ==
+           rx::Adjustment::Kind::Dereference);
     const auto lowered =
         bridge.binary(node, *ast::get_if<ast::BinaryExpr>(node));
     assert(std::get<ir::ScalarArithmetic>(lowered.operation).op ==
            ir::BinaryOp::Add);
     assert(lowered.result_type == ir::Type::I32);
   }
+}
+
+void unary_operand_adjustments() {
+  Program program(R"(
+fn main() {
+  let value: i32 = 1;
+  let r = &value;
+  let rr = &r;
+  let negative = -r;
+  let complemented = !rr;
+  let flag = true;
+  let br = &flag;
+  let not_flag = !br;
+  let explicit = *r;
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  for (const auto text : {"-r", "!rr", "!br"}) {
+    const auto &node = expression(program, text);
+    const auto &payload = *ast::get_if<ast::UnaryExpr>(node);
+    const auto &fact = index.expression(node);
+    assert(fact.unary && fact.unary->operand.node == payload.operand->id);
+    const auto &operand = fact.unary->operand;
+    auto current = index.expression(*payload.operand).type;
+    const std::size_t count = text == std::string_view("!rr") ? 2 : 1;
+    assert(operand.adjustments.size() == count);
+    for (const auto &adjustment : operand.adjustments) {
+      assert(current->kind() == K::Ref);
+      assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
+      assert(rx::same_type(adjustment.target, current->element()));
+      current = adjustment.target;
+    }
+    assert(rx::same_type(current, operand.effective_type));
+    assert(rx::same_type(current, fact.unary->result));
+    assert(fact.type->kind() ==
+           (text == std::string_view("!br") ? K::Bool : K::I32));
+    assert(fact.unary->operation == (text == std::string_view("-r")
+                                         ? rx::UnaryOperation::Negate
+                                         : rx::UnaryOperation::Complement));
+  }
+  const auto &explicit_fact = index.expression(expression(program, "*r"));
+  assert(explicit_fact.unary->operation == rx::UnaryOperation::Dereference);
+  assert(explicit_fact.unary->operand.adjustments.empty());
+  assert(explicit_fact.unary->operand.effective_type->kind() == K::Ref);
+  assert(explicit_fact.type->kind() == K::I32 && explicit_fact.is_place);
 }
 
 int main() {
@@ -274,4 +324,5 @@ int main() {
   callable_aliases();
   shift_policy();
   projection_result_operations();
+  unary_operand_adjustments();
 }
