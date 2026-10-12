@@ -1169,3 +1169,392 @@ fn choose(flag: bool) -> i32 {
 一个优化器的价值可以从正确性条件、可观察改进和维护成本共同评价。算法数量、框架层数和遍历抽象数量并不直接说明设计更好。当前 IR 的明确指令形状、统一关系枚举和验证边界，为小规模优化提供了合适起点；更复杂的分析应随真实需求增长。
 
 下一章把这种仍可拥有任意多个值的表示，放到有限寄存器和具体机器指令之中。
+
+\chapter{机器表示、Phi 消除与寄存器分配}
+\label{chap:machine}
+\section*{本章导读}
+IR 中的每个结果都可以获得一个独立 ValueId，机器却只有有限寄存器；一条抽象操作也可能需要多条具体指令。本章由这些差异推导机器表示，然后解释 Phi 如何变为边上的复制，值又如何获得物理位置。重点在于各项约束如何逐步进入设计，而不是记忆某个寄存器分配算法的名称。
+
+Rustless 当前尚无本章描述的直接机器后端。真实 C++ 摘录来自 Rx-Compiler 参考项目，并明确标注；建议接口用于展示怎样延续当前有类型表示的原则。理解这些算法以后，才能在新表示上逐项实现并验证它们。
+
+\section{从抽象操作到具体机器操作}
+\begin{lstlisting}[language=Rustless,caption={立即数大小影响机器实现路径}]
+fn small(x: i32) -> i32 { x + 7 }
+fn large(x: i32) -> i32 { x + 100000 }
+fn main() { printInt(large(small(getInt()))); }
+\end{lstlisting}
+两个加法在当前 IR 中都可以表示为一个 Binary，但目标指令允许的操作数不同。RV32I 的 addi 使用带符号十二位立即数；7 可以直接放入指令，100000 则需要先形成寄存器中的常量，再执行寄存器加法。具体编码条件可查阅 \href{https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html}{RISC-V 的 RV32I 规范}。因此 IR 指令数量不能直接当作机器指令数量。
+
+下图比较小立即数与大立即数的两条实现路径，呈现目标操作数限制如何改变指令选择。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 14mm]
+\node[irbox] (small) {IR：x + 7};
+\node[irbox,right=of small] (addi) {addi\\立即数 7};
+\draw[irarrow] (small)--(addi);
+\node[irbox,below=of small] (large) {IR：x + 100000};
+\node[irbox,right=of large] (constant) {形成大常量\\一个或多个指令};
+\node[irbox,right=of constant] (add) {add\\两个寄存器};
+\draw[irarrow] (large)--(constant); \draw[irarrow] (constant)--(add);
+\end{tikzpicture}
+\caption{抽象运算与目标指令不是固定的一对一关系}
+\end{figure}
+
+同样，大栈偏移可能超出 load/store 的立即数字段，需要额外计算地址；有些比较可以用一条机器比较形成结果，有些需要组合比较和取反。RV32IM 表示还选择了乘除扩展，若改为 RV32I，则乘除要走另一条实现路线。目标扩展集合必须与输出工具链和执行环境一致。
+
+机器中所有整数寄存器具有相同位宽，bool 仍要保持语言的零或一表示。比较结果通常天然符合这一条件；外部返回值或内存读取得到怎样的位模式，则需要在明确契约下规范化。把一个任意整数截取最低位与判断是否非零是两种不同操作，不能因二者都“得到 bool”就相互替换。
+
+\section{机器操作数也需要具体类型}
+虚拟寄存器是编译器尚未分配位置的值，物理寄存器是目标硬件中的位置；立即数是指令编码的一部分，栈槽是将来获得字节偏移的存储对象。函数符号和块标签又承担不同重定位与跳转角色。这些概念应在类型中区分。
+
+\begin{lstlisting}[language=C++,caption={教学建议：机器操作数避免混用多种编号}]
+// Proposed machine representation, not existing Rustless code.
+struct VirtualRegister { std::uint32_t value; };
+struct StackSlotId { std::uint32_t value; };
+struct MachineBlockId { std::uint32_t value; };
+struct Immediate { std::int32_t value; };
+enum class PhysicalRegister { Zero, Ra, Sp, A0, A1, S0, S1, T0, T1 };
+struct SymbolOperand { std::string name; };
+using MachineOperand = std::variant<VirtualRegister, PhysicalRegister,
+                                    Immediate, StackSlotId,
+                                    MachineBlockId, SymbolOperand>;
+\end{lstlisting}
+完整实现还需要列全寄存器、描述寄存器类及每条指令允许的操作数。上述枚举只是说明分类方法。位置编号不能被当成立即数，ValueId 不能被当作物理寄存器号，属于类型层应尽早排除的错误。
+
+Rx-Compiler 的 \texttt{src/backend/machine.hpp} 使用以下真实结构保存选择之后的附加信息。
+\begin{lstlisting}[language=C++,caption={参考机器表示集中记录复制、使用和定义}]
+struct MachineInstruction {
+  ir::Instruction instruction;
+  std::vector<Copy> copies;
+  std::set<ir::ValueId> uses;
+  std::set<ir::ValueId> definitions;
+  // a0-a7, t0-t6 and ra are reserved; calls never destroy an allocated
+  // register.
+  bool call_clobbers{};
+};
+\end{lstlisting}
+它适合阅读边复制和活跃性算法，但仍把原 IR 指令放在机器记录中。Rustless 若建立直接后端，可以让指令选择真正产生有目标约束的载荷，并由统一接口枚举使用、定义和调用破坏。这样不会要求汇编打印器临时承担全部选择规则。
+
+选择之后未必仍保持原 IR 的 SSA。例如 Phi 消除给同一目标位置在不同边上赋值，已经引入机器层的多处定义。此时应明确新阶段的不变量，不能继续假定原来的“一个 ValueId 只定义一次”规则未经变化。
+
+\section{Phi 成为到达边上的复制}
+回到 choose：合流块的结果从 then 取得 10，从 else 取得 20。机器没有必须在块开头执行的 Phi 指令，可以在 then 到 join 的边上把 10 写入结果位置，在 else 到 join 的边上写入 20。Phi 的输入是边使用，第十五章的这项定义正好指导转换。
+
+如果前驱只有这一个后继，复制可以放在其终结指令之前；如果后继只有这一个前驱，也可能放在后继开头。若前驱有多个后继且后继有多个前驱，这条边称为关键边。放在前驱会使复制在其他离开路径上也执行，放在后继会使复制在其他到达路径上也执行。拆出一个专用边块能准确限定执行条件。
+
+下图把一个 Phi 输入转移到专用边块，呈现关键边拆分怎样保留复制只在该边上执行的含义。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\node[irbox] (p) at (0,0) {P\\两个后继};
+\node[irbox] (q) at (0,-2) {Q};
+\node[irbox] (join) at (4,-1) {J\\Phi(a from P, b from Q)};
+\node[irbox] (other) at (4,1) {另一后继};
+\draw[irarrow] (p)--(other); \draw[irarrow] (q)--(join);
+\draw[irarrow,dashed] (p)--node[above,font=\small]{原关键边}(join);
+\node[irbox] (edge) at (8.1,0) {新边块 E\\result := a};
+\draw[irarrow] (p.north) to[bend left=35] (edge.north);
+\draw[irarrow] (edge)--(join);
+\end{tikzpicture}
+\caption{把 Phi 的一个输入实现为受路径限制的复制}
+\end{figure}
+
+参考 \texttt{machine.cpp} 为每个有 Phi 复制的前驱与后继关系建立专用块，这种保守方案使实现容易验证。未来也可以只拆必要的关键边，减少块数量，但需相应证明复制放置安全。
+
+当前 Rustless 允许到同一后继的多重边，Phi 验证按边重数检查，并要求同一前驱的重复输入一致。新机器层若把边映射为一个 pair，需要考虑是否合并了重复边、跳转目标怎样重写及复制怎样保留。显式边身份或者保留重复后继记录，都应与转换约定一致。参考项目的旧算法不能在未核对这些条件时直接搬入。
+
+\section{并行复制不能依次覆盖旧值}
+一个合流块可能有多个 Phi，它们在一条到达边上的赋值是同时选择各自的旧输入。假设分配后的两个位置需要交换：位置 r1 的新值来自旧 r2，位置 r2 的新值来自旧 r1。这不是 Rustless 新增的并行赋值语法，而是多个 Phi 共同推导出的机器复制要求。
+
+若直接先执行 r1:=r2，再执行 r2:=r1，旧 r1 已经丢失。应先保存旧 r1 到临时位置，再写 r1，最后把保存值写入 r2。独立复制可按依赖安全地排序；出现循环时则需要打破循环。
+
+下图追踪交换中两个旧值的去向，呈现临时位置为什么是正确性条件。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\node[irbox] (old) at (0,0) {开始\\r1=A，r2=B};
+\node[irbox] (save) at (3.5,0) {保存\\tmp=A};
+\node[irbox] (first) at (7,0) {第一步\\r1=B};
+\node[irbox] (second) at (10.5,0) {第二步\\r2=tmp=A};
+\draw[irarrow] (old)--(save); \draw[irarrow] (save)--(first);
+\draw[irarrow] (first)--(second);
+\end{tikzpicture}
+\caption{并行复制循环中的旧值必须先保存}
+\end{figure}
+
+参考 \texttt{src/backend/riscv.cpp} 的 \texttt{copies} 先删除同位置复制，再寻找目标不会破坏其他待用来源的复制；找不到时保存一个旧目标。它还根据最终位置处理寄存器和 spill 槽，所以循环分析不能只看虚拟名字。
+
+复制合并让两个可兼容值获得同一物理位置，可以省去部分 move，但不能让彼此干涉的值共享位置。分配前保留“偏好的相同位置”与分配后消除已满足的复制，是两种可组合策略。为了便于推理，教学实现可以先保留并行复制集合，完成位置分配后再把它调度成顺序指令。
+
+\section{活跃性通过控制流达到固定点}
+\begin{lstlisting}[language=Rustless,caption={回边使未来使用不能按单次源码扫描判断}]
+fn sum(limit: i32) -> i32 {
+    let mut i = 0;
+    let mut total = 0;
+    while i < limit {
+        total += i;
+        i += 1;
+    }
+    total
+}
+\end{lstlisting}
+一个值若从某位置出发存在一条路径会在被重新定义之前使用它，就在该位置活跃。对每个块，use 包含块中先于定义的使用，def 包含块内定义。块出口的活跃值来自所有后继入口；入口活跃值则包括本块 use，以及出口中没有被本块定义覆盖的部分。
+\[
+\begin{array}{l}
+\mathrm{out}(B)=\displaystyle\bigcup_{S\in\mathrm{succ}(B)}\mathrm{in}(S),\\[3pt]
+\mathrm{in}(B)=\mathrm{use}(B)\cup
+                 \bigl(\mathrm{out}(B)\setminus\mathrm{def}(B)\bigr).
+\end{array}
+\]
+循环的 body 把新的 i 和 total 传回 header，header 又决定是否进入下一轮。第一次计算后继集合时，回边另一端的结论可能尚未完整，因此需要重复更新直到没有集合变化。有限值集合上从空集开始单调增加，能够得到固定点；反向遍历常有利于更快传播，但遍历一次并不足以构成证明。
+
+下列真实片段来自参考 \texttt{machine.cpp} 的 \texttt{liveness}，对应上述两个方程。
+\begin{lstlisting}[language=C++,caption={参考实现以集合变化驱动活跃性迭代}]
+std::set<ir::ValueId> out;
+for (auto successor : block.successors) {
+  const auto &next = function.blocks.at(indices.at(successor)).live_in;
+  out.insert(next.begin(), next.end());
+}
+auto in = difference(out, definitions[index]);
+in.insert(uses[index].begin(), uses[index].end());
+changed |= in != block.live_in || out != block.live_out;
+block.live_in = std::move(in);
+block.live_out = std::move(out);
+\end{lstlisting}
+
+该参考算法先把 Phi 输入放入显式边块，因而能直接使用普通方程。若在带 Phi 的 SSA 上分析，必须把 incoming 的使用放在对应边上；把所有输入算成 join 的普通使用，会制造并不存在的同时活跃关系。算法正确性始终依赖所分析表示的含义。
+
+\section{从活跃关系到寄存器约束}
+\begin{lstlisting}[language=Rustless,caption={两个输入必须在最终加法之前同时保留}]
+fn combine(a: i32, b: i32) -> i32 {
+    let x = a + 1;
+    let y = b + 2;
+    x + y
+}
+\end{lstlisting}
+x 形成以后，在 y 的计算及最后加法之前仍被需要；y 形成以后也要保留。若在 y 的结果写入时覆盖 x，最终结果就错误。因此 x 与 y 的活跃范围重叠，构成干涉，不能共享同一个位置。
+
+下图把指令间隔中的活跃范围连接到一条干涉边，呈现图着色算法所解决的约束来源。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}
+\draw[irarrow] (0,0)--(7,0) node[right,font=\small]{指令次序};
+\draw[very thick,blue] (1,-0.8)--(5.9,-0.8);
+\node[left,font=\small] at (1,-0.8) {x};
+\draw[very thick,red] (3,-1.5)--(5.9,-1.5);
+\node[left,font=\small] at (3,-1.5) {y};
+\draw[dashed] (3,0)--(3,-1.8); \draw[dashed] (5.9,0)--(5.9,-1.8);
+\node[draw,circle] (x) at (9,-0.6) {x};
+\node[draw,circle] (y) at (11.5,-0.6) {y};
+\draw[thick] (x)--node[above,font=\small]{干涉}(y);
+\node[irnote] at (10.25,-1.6) {重叠区间需要\\不同位置};
+\end{tikzpicture}
+\caption{同时需要的不同值不能共享寄存器}
+\end{figure}
+
+图着色把物理寄存器看成有限颜色，连接的值必须颜色不同。简化、选择与 spill 的启发式影响效果，但最终必须独立检查每条干涉约束。Rx-Compiler 的 allocate 使用图及选择顺序，并在分配后再次核对相邻值是否共享了已分配寄存器。
+
+线性扫描把活跃范围按指令位置组织，通常实现和编译耗时更简洁；控制流中不连续的活跃区间、拆分及调用位置会使精度要求增加。图着色更直接表达干涉关系，却需要维护图和较复杂的启发式。两者都不是对所有学习目标的唯一答案。先用可手算例子验证约束，再选择算法，比单凭成熟编译器的名称更有依据。
+
+\section{spill 改变存放位置，不改变值}
+当同时活跃的值多于可用寄存器时，某些值必须暂存在栈槽。spill 不是丢弃值，而是在定义后保存，使用前读取，并给这些额外机器步骤分配所需临时位置。
+
+下图展示一个结果进入 spill 槽后，在后续使用点重新读取，呈现保存与读取如何保持原来的定义使用关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 12mm]
+\node[irbox] (define) {计算 v\\临时寄存器};
+\node[irbox,right=of define] (store) {保存到\\StackSlot(v)};
+\node[irbox,below=of store] (load) {使用之前\\重新读取};
+\node[irbox,left=of load] (use) {参与原运算};
+\draw[irarrow] (define)--(store); \draw[irarrow] (store)--(load);
+\draw[irarrow] (load)--(use);
+\end{tikzpicture}
+\caption{spill 用显式读写延长值的保存}
+\end{figure}
+
+若一个值在循环体中频繁使用，spill 会在每轮增加访问；另一个很少使用的值即使活跃范围很长，也可能更适合放到栈上。使用频率、循环深度、复制收益和读取代价可以参与启发式。代价模型只决定优先选择谁，不能放宽保留值的正确性条件。
+
+插入 spill 指令还会产生新临时值和新干涉。有些简单后端预留少数临时寄存器，统一用于读取、计算和写回；更一般的分配器会重新处理新值及分裂后的区间。预留策略降低算法负担，但减少可长期保存值的寄存器数量。这个运行代价应当被清楚说明。
+
+\section{调用给寄存器分配带来额外约束}
+\begin{lstlisting}[language=Rustless,caption={局部值需要跨越输出调用继续存在}]
+fn preserve() -> i32 {
+    let x = getInt();
+    printInt(7);
+    x + 1
+}
+\end{lstlisting}
+x 在 printInt 之前形成，之后仍会使用。若将 x 放在调用允许破坏的寄存器里，又没有保存与恢复，调用后读取到的就不是原值。机器层需描述调用破坏哪些物理位置，参数必须进入哪些位置，以及返回值从哪些位置形成。
+
+参考后端采取较容易说明的策略：长期分配只使用需要被调用者保存的 s 类寄存器，将参数、返回值及临时寄存器留给边界和局部计算。该策略简化跨调用约束，却可能产生保存寄存器的栈空间和序言尾声开销。更充分的分配器可以让不跨调用的短期值使用更多寄存器，在调用处施加精确限制。
+
+预分配参数寄存器也不能破坏并行传参。例如两个已有参数的物理位置互换时，准备新调用参数与 Phi 的并行复制会遇到同类循环问题。将调用边界的复制交给一致调度机制，有助于避免分散实现交换特例。
+
+\section{机器验证应先于汇编打印}
+机器 verifier 可以检查每条指令的操作数形状、立即数范围、可用寄存器、块目标、栈槽边界、干涉关系和调用约束。它检查的表示已经区别于 SSA IR，因此需要独立说明允许哪些定义和复制形态。
+
+若汇编打印器同时决定寄存器、补 spill、拆边并选择大立即数路径，测试很难判断是哪一步破坏了关系。较清楚的路线让每次转换产生可观察的机器表示，再让输出只负责指令语法、符号和编码工具所需形式。小规模项目可以合并某些实现函数，但不应因此混淆概念上的职责。
+
+\href{https://llvm.org/docs/CodeGenerator.html}{LLVM 的代码生成器文档}也按机器表示、指令选择和寄存器相关阶段解释后端。这些阶段的共同依据是逐步满足目标约束。下一章把寄存器和对象位置组织成函数栈帧，并解释它们怎样与调用者合作。
+
+\chapter{栈帧、平台 ABI、运行时与输出路线}
+\label{chap:backend-routes}
+\section*{本章导读}
+给值分配了位置，还没有完成一个可调用函数：它必须让调用者知道参数在哪里、结果在哪里，并在退出时恢复应该保留的状态。本章把这些要求组织为栈帧和平台 ABI，再说明运行时、链接及两种输出路线。读者将理解从“合法 IR”走到“可执行程序”之间还有哪些明确的约定。
+
+当前 Rustless 已实现 RV32 目标布局、内部函数分类以及验证后的 LLVM 风格文本输出。本章完整机器生成、运行时连接及可执行程序路线是设计方向。参考源码来自 Rx-Compiler，不代表这些模块已经存在于 Rustless。
+
+\section{栈帧容纳不同来源的存储需求}
+一个函数的栈帧可能包含将要调用函数的栈参数区、spill 槽、局部聚合对象、保存寄存器以及返回地址。前几章中不同算法提出的存储需求，最终要由统一分配过程转为字节区间，而不是让各模块从偏移零各自开始安排。
+
+每个区域需要大小、对齐、寿命和用途。安排时先把游标上调到对象所需对齐，再占据其大小，最终把帧总大小上调到平台要求的边界。检查区间不重叠、偏移不溢出、对象落在帧内，比观察汇编中的若干常量更准确。以后可以依据寿命复用不同时活跃的槽，但那需要额外证明。
+
+下图把各类存储需求放到不重叠区域，呈现函数入口与分配之后的 sp 之间的关系；这是布局示意，区域大小不按比例。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[font=\small]
+\draw[thick] (0,0) rectangle (5,-5.5);
+\foreach \y in {-1,-2,-3.2,-4.3} {\draw (0,\y)--(5,\y);}
+\node at (2.5,-0.5) {返回地址 / 保存寄存器};
+\node at (2.5,-1.5) {局部聚合对象};
+\node at (2.5,-2.6) {spill 槽};
+\node at (2.5,-3.75) {对齐空隙};
+\node at (2.5,-4.9) {outgoing 栈参数};
+\draw[irarrow] (7,0)--(5.1,0) node[pos=0,left]{};
+\node[anchor=west] at (7.1,0) {入口 sp};
+\draw[irarrow] (7,-5.5)--(5.1,-5.5);
+\node[anchor=west] at (7.1,-5.5) {调整后 sp};
+\draw[irarrow] (-0.8,0)--(-0.8,-5.5);
+\node[rotate=90] at (-1.3,-2.75) {向低地址增长};
+\node[align=center] at (8,-2.7) {总大小按平台\\栈对齐要求取整};
+\end{tikzpicture}
+\caption{统一栈帧布局连接各阶段的存储需求}
+\end{figure}
+
+参考 \texttt{src/backend/machine.cpp} 在 spill、对象及保存区域都安排完之后，以 \texttt{aligned(cursor,16)} 得到总大小；\texttt{verify\_machine} 再核对帧内区域。新实现可以采用更明确的 StackSlotId 和帧布局记录，避免把“还未安排的槽”过早伪装成最终立即数偏移。
+
+\section{RISC-V 整数调用约定}
+针对标准 RV32 整数 ABI，a0 至 a7 用于参数，前两个也用于返回值；本教程的单字标量结果使用 a0。s0 至 s11 要跨调用保留，参数和 t 类临时寄存器不承担这种保留义务。ra 保存返回地址，sp 表示栈位置；gp、tp 不作为普通可分配寄存器。标准栈对齐为十六字节，进入函数时的首个栈参数位于入口 sp 的零偏移。规则依据 \href{https://riscv-non-isa.github.io/riscv-elf-psabi-doc/}{RISC-V ABI 规范的整数约定}。
+
+\begin{lstlisting}[language=Rustless,caption={九个单字参数需要使用寄存器之外的位置}]
+fn ninth(a: i32, b: i32, c: i32, d: i32,
+         e: i32, f: i32, g: i32, h: i32, i: i32) -> i32 {
+    a + i
+}
+fn main() { printInt(ninth(1, 2, 3, 4, 5, 6, 7, 8, 9)); }
+\end{lstlisting}
+本例前八个参数进入 a0 至 a7，第九个由调用者放在栈参数位置。若被调用者分配了大小 F 的帧，原入口 sp 等于当前 sp 加 F，因此它读取第九参数的偏移要包含 F。把该参数直接从当前 sp 的零偏移读取，会读到被调用者自己的帧内容。
+
+这些规则约束所有相互合作的函数。caller-saved 表示调用者若需要跨调用保留某值，就应采取措施；callee-saved 表示被调用者使用这些位置时，要在退出前恢复入口内容。名字只是描述责任的简写，算法仍需基于活跃关系和实际使用决定何时保存。
+
+\section{序言与尾声是一对状态转换}
+序言向低地址调整 sp，保存将使用的被调用者保存寄存器，并在必要时保存 ra。若函数内发出普通调用，新的返回地址会覆盖 ra，所以当前函数必须保留自己的返回路径。叶函数若不进行调用，可能避免这项保存；是否仍需要帧则取决于局部对象和 spill。
+
+尾声需要恢复保存寄存器和 ra，然后把 sp 调回入口值，再返回。所有正常 return 应遵循同一恢复规则，可以跳到共享退出块。源程序里有多个 return，不应导致部分路径漏掉恢复。
+
+以下真实片段来自参考 \texttt{src/backend/riscv.cpp} 的输出函数；它把相同布局记录用于保存与恢复。
+\begin{lstlisting}[language=C++,caption={参考序言与尾声使用同一帧记录}]
+if (function_->has_calls)
+  memory("sw", "ra", "sp", function_->return_address_offset);
+for (const auto &[reg, offset] : function_->saved_registers)
+  memory("sw", saved(reg), "sp", offset);
+// Function body and shared return label are omitted here.
+for (const auto &[reg, offset] : function_->saved_registers)
+  memory("lw", saved(reg), "sp", offset);
+if (function_->has_calls)
+  memory("lw", "ra", "sp", function_->return_address_offset);
+\end{lstlisting}
+其中删节注释是为讲解添加，保存和恢复语句保持参考源码原样。实际输出还要在前后调整 sp；偏移过大时需要合法的地址形成路径。序言不能偷偷使用一个仍保存调用者有用值的临时寄存器，又没有遵守约定。
+
+下图显示保存入口状态、准备参数、执行调用和恢复的次序，呈现前章的跨调用活跃值如何受到保护。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm]
+\node[irbox,text width=65mm] (save) {函数入口：建立帧，保存所用 s 寄存器及 ra};
+\node[irbox,text width=65mm,below=of save] (value) {计算 x：分配到已受保护位置};
+\node[irbox,text width=65mm,below=of value] (call) {准备 a0 等参数，调用 printInt};
+\node[irbox,text width=65mm,below=of call] (use) {调用之后：继续使用 x};
+\node[irbox,text width=65mm,below=of use] (restore) {共享退出：恢复入口状态，释放帧，返回};
+\draw[irarrow] (save)--(value); \draw[irarrow] (value)--(call);
+\draw[irarrow] (call)--(use); \draw[irarrow] (use)--(restore);
+\end{tikzpicture}
+\caption{调用边界和函数边界分别承担保存责任}
+\end{figure}
+
+\section{内部聚合约定与平台适配}
+\begin{lstlisting}[language=Rustless,caption={方法的聚合结果与标量参数需要共同分类}]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Packet { ready: bool, count: i32, bits: [bool; 3] }
+impl Packet {
+    fn with_count(&self, count: i32) -> Packet {
+        Packet { ready: self.ready, count: count, bits: self.bits }
+    }
+}
+fn main() {
+    let p = Packet { ready: true, count: 1, bits: [true; 3] };
+    let q = p.with_count(7);
+    printInt(q.count);
+}
+\end{lstlisting}
+第十六章内部 ABI 为所有按值聚合使用地址，并将聚合结果改为隐藏输出地址。按该内部参数顺序，本例的实际调用可以先传结果缓冲区，再传共享 receiver 地址和 count。机器层再给这些已经分类的参数安排寄存器或栈位置。
+
+这份约定使项目内所有函数遵循简单一致规则，却不宣称实现了平台对任意 C 聚合的分类。外部函数可能按平台规则把小聚合拆到寄存器中，或使用其他参数安排。连接外部库时需要单独的适配器，把内部值和外部表示相互转换；不能让内部结构体名字相同就自动认为二进制接口相容。
+
+为避免混淆，可把接口分类拆为两步：源函数类型到 InternalFunctionAbi，外部声明类型到 PlatformFunctionAbi；它们再各自得到机器参数位置。这样增加新目标时，不需要把内部按值语义全部改写，也不会把源引用与“聚合副本地址”混在一起。
+
+\section{运行时应是明确声明的接口}
+输入输出、分配、容器扩容、元素移动、复制与失败处理，都可能通过运行时实现。每个调用必须有与生成代码一致的参数类型、结果类型、符号和约定。一个已有 BuiltinId 只回答操作身份，不能单独保证链接时存在对应函数。
+
+Box 分配需要大小和对齐；Vec 扩容需要字节数溢出检查以及元素迁移规则；remove 需要索引边界和重叠移动处理。若选择通用运行时函数，复杂元素的克隆或释放可以通过类型专用辅助函数连接。若选择为每种类型生成操作函数，也要复用一致分配和失败契约。
+
+当前完整生命周期执行尚未建立，未来加入释放时应说明谁拥有对象、何时转移所有权、离开作用域时哪些已初始化元素需要处理。简单地在每个块末尾插入 free，会在 return、break、部分初始化失败和移动之后产生错误。资源清理往往需要和控制流共同设计。
+
+下图将内建身份、转换生成的声明和链接符号连接起来，呈现语言操作如何成为最终程序中的真实调用。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=11mm and 13mm]
+\node[irbox] (builtin) {BuiltinId\\PrintInt / BoxNew};
+\node[irbox,right=of builtin] (lower) {转换选择\\调用或辅助函数};
+\node[irbox,right=of lower] (decl) {Module 声明\\类型与符号};
+\node[irbox,below=of decl] (lib) {运行时目标文件\\提供符号};
+\node[irbox,left=of lib] (program) {链接后的程序};
+\draw[irarrow] (builtin)--(lower); \draw[irarrow] (lower)--(decl);
+\draw[irarrow] (decl)--(lib); \draw[irarrow] (lib)--(program);
+\draw[irarrow] (lower.south)--(program.north);
+\end{tikzpicture}
+\caption{运行时契约连接语言身份与链接实体}
+\end{figure}
+
+\section{程序入口、目标文件与链接}
+源语言 main 是一个语言函数，启动入口则由执行环境决定。操作系统、裸机和模拟器可能采用不同启动代码和退出机制。启动过程负责建立所需状态，调用语言入口，并把结果交给环境。当前示例中的 main 不足以说明一份裸 RV32 程序如何启动。
+
+汇编器把指令与数据写入目标文件，并为尚未确定的符号地址保留重定位信息；链接器把生成函数、运行时和启动代码组合，解析符号并安排地址。符号名称、可见性和目标文件格式因此也是后端的外部边界。非法字符需要合法转义或名字编码，不能把任意源名字直接拼进汇编。
+
+目标三元组描述目标体系结构及环境，数据布局描述机器表示约束；它们不代替链接脚本、运行时和入口选择。一个指令集相容的文件仍可能因 ABI、库或入口不匹配而不能执行。教学实验应把这些配置固定下来，再研究生成代码自身的行为。
+
+\section{LLVM 输出路线}
+当前 \texttt{ir\_print.cpp} 在验证模块后输出 LLVM 风格文本，使用 TargetLayout 提供的 triple 和 datalayout，并处理符号拼写。这已经为 LLVM 路线建立了表示输出边界，但它还缺少完整源函数 lowering 和运行时连接。
+
+完整路线应先产生合法且准确表达语言规则的 IR，再使用匹配版本的 LLVM 工具验证、优化和生成目标代码。运行时声明与定义需要一致，目标扩展与 ABI 也需明确。LLVM 可以完成机器指令选择、寄存器分配和许多优化，并不承担重建前端漏掉的求值顺序、聚合复制或结构比较规则。
+
+这条路线有利于集中学习语法、类型、语义事实和 lowering。运行效率的改进可以从较准确的 IR 以及既有优化流程获得；教学代价是部分机器算法被成熟框架封装。读者仍应理解边界，才能解释为何某份 IR 合法却没有实现预期语言。
+
+\section{直接 RV32 输出路线}
+直接路线在当前 IR 之后建立机器表示，完成指令选择、Phi 边复制、活跃性、寄存器分配、spill、帧布局和汇编输出。每项算法都需要自己的检查条件与可观察例子。若以后扩展目标，不同寄存器类、指令约束和调用规则会进入这层，而不是散落到源语义检查中。
+
+这条路线适合研究后端算法及其运行代价。小型实现可以先采用保守寄存器策略、统一边块和简单帧布局，以清楚不变量为先，再用测量结果改进代码大小和访存次数。保守并不等于省略边界：大立即数、大帧、超过寄存器数量的参数和复制循环，都需要正确实现。
+
+下图在共同的已检查信息与 lowering 之后分出两条路线，呈现它们分别承担的工作，以及仍然共用的语言转换要求。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm and 16mm]
+\node[irbox,text width=55mm] (checked) {AST + 语义事实 + 目标布局};
+\node[irbox,text width=55mm,below=of checked] (lower) {完整 lowering\\语言行为转为 IR};
+\node[irbox,text width=45mm,below left=of lower] (llvm) {LLVM 路线\\验证 / 优化 / 目标生成};
+\node[irbox,text width=45mm,below right=of lower] (direct) {直接 RV32 路线\\选择 / 分配 / 栈帧 / 汇编};
+\node[irbox,text width=55mm,below=37mm of lower] (link) {运行时 + 启动代码 + 链接环境};
+\draw[irarrow] (checked)--(lower); \draw[irarrow] (lower)--(llvm);
+\draw[irarrow] (lower)--(direct); \draw[irarrow] (llvm)--(link);
+\draw[irarrow] (direct)--(link);
+\end{tikzpicture}
+\caption{两条输出路线共享语言转换，并分担机器生成工作}
+\end{figure}
+
+\section{按学习目标作出选择}
+如果首先希望研究前端设计和语言语义，LLVM 路线能让学习精力较快集中于已检查 AST 到正确 IR 的转换。如果希望亲自推导活跃性、分配与 ABI，直接 RV32 路线能提供更完整的机器学习过程。两条路线可以共用前端及转换契约，逐步建设，不必为了增加后端而复制语义规则。
+
+比较两条路线时，应该固定同一份源程序、同一输入和预期行为。不同输出的指令数量可以不同，但内容相等、短路调用、移位计数和聚合按值参数不能不同。若双方行为不一致，先回到语言契约和阶段边界寻找原因，再判断优化和机器实现。
+
+至此，教程已经从源码、类型与访问走到计算图和机器约束。最后一章把这些设计转化为可检验的承诺，并讨论新增能力需要怎样的信息。
