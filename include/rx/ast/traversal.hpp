@@ -67,31 +67,44 @@ inline constexpr bool TraversalVisitor =
     detail::covers_tree<detail::EnterAdapter<Visitor>> &&
     detail::covers_tree<detail::LeaveAdapter<Visitor>>;
 
-template <TraversalVisitor V> class Walker {
+template <class Visitor> class Walker {
+  static_assert(TraversalVisitor<Visitor>,
+                "A tree visitor needs enter and leave handlers for all nodes");
+
 public:
-  explicit Walker(V &visitor) : visitor_(visitor) {}
-  template <SyntaxRoot T> WalkResult walk(const T &node) {
+  explicit Walker(Visitor &visitor) : visitor_(visitor) {}
+
+  template <class Owner, std::enable_if_t<SyntaxRoot<Owner>, int> = 0>
+  WalkResult walk(const Owner &node) {
     if (stopped_)
       return WalkResult::Stopped;
-    auto control = visit(node, detail::EnterAdapter<V>{visitor_});
-    if (control == WalkControl::Stop)
+    const WalkControl control =
+        visit(node, detail::EnterAdapter<Visitor>{visitor_});
+    if (control == WalkControl::Stop) {
       stopped_ = true;
-    else if (control == WalkControl::Continue)
-      for_each_child(node, [&](const auto &child) { walk(child); });
-    // Balance every successful enter, including skip and stop, on unwinding.
-    visit(node, detail::LeaveAdapter<V>{visitor_});
-    return stopped_ ? WalkResult::Stopped : WalkResult::Completed;
+    } else if (control == WalkControl::Continue) {
+      for_each_child(node, [&](const auto &child) {
+        walk(child);
+      });
+    }
+    visit(node, detail::LeaveAdapter<Visitor>{visitor_});
+    if (stopped_) {
+      return WalkResult::Stopped;
+    }
+    return WalkResult::Completed;
   }
 
 private:
-  V &visitor_;
+  Visitor &visitor_;
   bool stopped_{};
 };
 
-template <SyntaxRoot T, class V>
-  requires TraversalVisitor<std::remove_reference_t<V>>
-WalkResult walk(const T &root, V &&visitor) {
-  Walker<std::remove_reference_t<V>> walker(visitor);
+template <class Owner, class Visitor,
+          std::enable_if_t<SyntaxRoot<Owner> &&
+                               TraversalVisitor<std::remove_reference_t<Visitor>>,
+                           int> = 0>
+WalkResult walk(const Owner &root, Visitor &&visitor) {
+  Walker<std::remove_reference_t<Visitor>> walker(visitor);
   return walker.walk(root);
 }
 
