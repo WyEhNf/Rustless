@@ -317,93 +317,109 @@ void verify_function(const Function &function, const Signatures &signatures,
       const bool is_phi = std::holds_alternative<Phi>(node.data);
       if (is_phi && seen_non_phi) {
         error(block.id, node.origin, "phi must precede ordinary instructions");
-      non_phi |= !phi;
+      }
+      if (!is_phi) {
+        seen_non_phi = true;
+      }
       terminated = std::holds_alternative<Branch>(node.data) ||
                    std::holds_alternative<CondBranch>(node.data) ||
                    std::holds_alternative<Return>(node.data) ||
                    std::holds_alternative<Unreachable>(node.data);
-      if (std::holds_alternative<Alloca>(node.data) &&
-          block.id != function.blocks[0].id)
+      if (std::holds_alternative<Alloca>(node.data) && block.id != function.blocks[0].id) {
         error(block.id, node.origin, "fixed alloca must be in the entry block");
+      }
       for_each_successor(node, [&](BlockId target) {
-        if (!blocks.contains(target))
+        if (blocks.find(target) == blocks.end()) {
           error(block.id, node.origin, "branch targets a missing block");
-        else {
+        } else {
           predecessors[target].insert(block.id);
           incoming_edges[target].insert(block.id);
         }
       });
       if (const auto *ret = std::get_if<Return>(&node.data)) {
         if ((!ret->value && function.result != Type::Void) ||
-            (ret->value && ret->value->type != function.result))
-          error(block.id, node.origin,
-                "return does not match the function result");
+            (ret->value && ret->value->type != function.result)) {
+          error(block.id, node.origin, "return does not match the function result");
+        }
       }
       if (const auto *call = std::get_if<Call>(&node.data)) {
         auto target = signatures.find(call->callee);
-        if (target == signatures.end())
+        if (target == signatures.end()) {
           error(block.id, node.origin, "call target is undeclared");
-        else {
+        } else {
           const auto &signature = target->second;
-          if ((call->result ? call->result->type : Type::Void) !=
-                  signature.result ||
-              call->arguments.size() != signature.parameters.size())
+          Type result_type = Type::Void;
+          if (call->result) {
+            result_type = call->result->type;
+          }
+          if (result_type != signature.result ||
+              call->arguments.size() != signature.parameters.size()) {
             error(block.id, node.origin, "call signature mismatch");
-          for (std::size_t i = 0; i < std::min(call->arguments.size(),
-                                               signature.parameters.size());
-               ++i)
-            if (call->arguments[i].type != signature.parameters[i])
+          }
+          const auto argument_count = std::min(call->arguments.size(), signature.parameters.size());
+          for (std::size_t index = 0; index < argument_count; ++index) {
+            if (call->arguments[index].type != signature.parameters[index]) {
               error(block.id, node.origin, "call argument type mismatch");
+            }
+          }
         }
       }
     }
-    if (!terminated)
+    if (!terminated) {
       error(block.id, {}, "block has no terminator");
+    }
   }
-  if (!predecessors[function.blocks[0].id].empty())
+  if (!predecessors[function.blocks[0].id].empty()) {
     error(function.blocks[0].id, {}, "entry block has predecessors");
-  for (const auto &block : function.blocks)
-    for (const auto &node : block.instructions)
+  }
+  for (const auto &block : function.blocks) {
+    for (const auto &node : block.instructions) {
       if (const auto *phi = std::get_if<Phi>(&node.data)) {
         std::multiset<BlockId> incoming;
-        for (const auto &value : phi->incoming)
+        for (const auto &value : phi->incoming) {
           incoming.insert(value.predecessor);
-        if (incoming != incoming_edges[block.id])
-          error(block.id, node.origin,
-                "phi incoming edges do not match control flow");
+        }
+        if (incoming != incoming_edges[block.id]) {
+          error(block.id, node.origin, "phi incoming edges do not match control flow");
+        }
       }
-  if (errors.size() == initial_errors)
+    }
+  }
+  if (errors.size() == initial_errors) {
     verify_ssa(function, blocks, predecessors, errors);
+  }
 }
-} // namespace
+}
 
 std::vector<VerificationError> verify(const Module &module) {
   std::vector<VerificationError> errors;
   Signatures signatures;
-  auto metadata = [&](const std::string &name, std::optional<SymbolId> symbol,
-                      std::optional<Origin> origin) {
-    if (symbol && !symbol->value)
-      errors.push_back({name, {}, origin, "zero semantic symbol identity"});
-    if (origin && (!origin->node.value || !origin->span.file.value ||
-                   origin->span.begin > origin->span.end))
-      errors.push_back(
-          {name, {}, origin, "invalid declaration syntax provenance"});
-  };
-  auto add = [&](const std::string &name, Type result,
-                 std::vector<Type> parameters) {
-    auto error = [&](const char *message) {
-      errors.push_back({name, {}, {}, message});
-    };
-    if (name.empty())
+  auto metadata =
+      [&](const std::string &name, std::optional<SymbolId> symbol, std::optional<Origin> origin) {
+        if (symbol && !symbol->value) {
+          errors.push_back({name, {}, origin, "zero semantic symbol identity"});
+        }
+        if (origin && (!origin->node.value || !origin->span.file.value ||
+                       origin->span.begin > origin->span.end)) {
+          errors.push_back({name, {}, origin, "invalid declaration syntax provenance"});
+        }
+      };
+  auto add = [&](const std::string &name, Type result, std::vector<Type> parameters) {
+    auto error = [&](const char *message) { errors.push_back({name, {}, {}, message}); };
+    if (name.empty()) {
       error("function name is empty");
-    if (result != Type::Void && !is_value_type(result))
+    }
+    if (result != Type::Void && !is_value_type(result)) {
       error("invalid function result type");
-    for (auto type : parameters)
-      if (!is_value_type(type))
+    }
+    for (auto type : parameters) {
+      if (!is_value_type(type)) {
         error("invalid function parameter type");
-    if (!signatures.emplace(name, Signature{result, std::move(parameters)})
-             .second)
+      }
+    }
+    if (!signatures.emplace(name, Signature{result, std::move(parameters)}).second) {
       error("duplicate function name");
+    }
   };
   for (const auto &declaration : module.declarations) {
     add(declaration.name, declaration.result, declaration.parameters);
@@ -418,8 +434,9 @@ std::vector<VerificationError> verify(const Module &module) {
     add(function.name, function.result, std::move(parameters));
     metadata(function.name, function.symbol, function.origin);
   }
-  for (const auto &function : module.functions)
+  for (const auto &function : module.functions) {
     verify_function(function, signatures, errors);
+  }
   return errors;
 }
-} // namespace rx::ir
+}
