@@ -70,6 +70,21 @@ struct CompoundLowering {
   OperandSemantics target;
   OperandSemantics value;
 };
+struct ScalarUnary {
+  BinaryOp op;
+  Type operand_type;
+  // Both forms emit a binary instruction with this constant on the left.
+  std::uint32_t left_constant;
+};
+struct DereferencePlace {
+  SemanticTypePtr element_type;
+  Layout layout;
+};
+struct UnaryLowering {
+  std::variant<ScalarUnary, DereferencePlace> operation;
+  OperandSemantics operand;
+  SemanticTypePtr result;
+};
 class SemanticBridge {
 public:
   explicit SemanticBridge(const SemanticIndex &semantic,
@@ -89,6 +104,8 @@ public:
                         const ast::BinaryExpr &payload) const;
   CompoundLowering compound(const ast::Expr &node,
                             const ast::CompoundAssignExpr &payload) const;
+  UnaryLowering unary(const ast::Expr &node,
+                      const ast::UnaryExpr &payload) const;
 
 private:
   StructLayout &resolve_structure(SymbolId symbol);
