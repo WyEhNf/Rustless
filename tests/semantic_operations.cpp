@@ -272,13 +272,17 @@ fn main() {
 }
 
 void unary_operand_adjustments() {
+  Program rejected("fn main() { let x = 1; let rr = &&x; let y = !rr; }");
+  assert(rejected.diagnostics.has_errors() && !rejected.checked.success());
+  Program nested("fn main() { let x = 1; let y = &&x + &x; }");
+  assert(nested.diagnostics.has_errors() && !nested.checked.success());
   Program program(R"(
 fn main() {
   let value: i32 = 1;
   let r = &value;
   let rr = &r;
   let negative = -r;
-  let complemented = !rr;
+  let complemented = !r;
   let flag = true;
   let br = &flag;
   let not_flag = !br;
@@ -287,14 +291,14 @@ fn main() {
 )");
   program.accepted();
   rx::SemanticIndex index(*program.parsed.crate, program.checked);
-  for (const auto text : {"-r", "!rr", "!br"}) {
+  for (const auto text : {"-r", "!r", "!br"}) {
     const auto &node = expression(program, text);
     const auto &payload = *ast::get_if<ast::UnaryExpr>(node);
     const auto &fact = index.expression(node);
     assert(fact.unary && fact.unary->operand.node == payload.operand->id);
     const auto &operand = fact.unary->operand;
     auto current = index.expression(*payload.operand).type;
-    const std::size_t count = text == std::string_view("!rr") ? 2 : 1;
+    const std::size_t count = 1;
     assert(operand.adjustments.size() == count);
     for (const auto &adjustment : operand.adjustments) {
       assert(current->kind() == K::Ref);
