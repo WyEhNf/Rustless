@@ -1738,8 +1738,9 @@ private:
     }
     if (container->kind() == Ty::Kind::Vec && !mutable_access)
       locked = true;
-    return {container->element(), true,    mutable_access,        locked,
-            std::nullopt,       "index", std::move(adjustments)};
+    ExprInfo result{container->element(), true, mutable_access, locked, {}, "index"};
+    result.receiver = OperandSemantics{projection.base->id, container, std::move(adjustments)};
+    return result;
   }
 
   ExprInfo check_break(const ast::Expr &node, const ast::BreakExpr &p) {
