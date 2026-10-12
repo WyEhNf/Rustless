@@ -1,0 +1,352 @@
+% Chapters 14--22. Included by the standalone tutorial document.
+\tikzset{irbox/.style={draw,rounded corners,fill=blue!5,align=center,
+  minimum height=8mm,text width=28mm,font=\small},
+  irarrow/.style={-{Stealth},thick},
+  irnote/.style={align=center,font=\small,text width=30mm}}
+
+\chapter{有类型的 IR：值、操作数与指令}
+\label{chap:typed-ir}
+\section*{本章导读}
+抽象语法树保留表达式的嵌套结构，而程序执行还需要明确每一步计算使用哪些值、产生哪个结果。中间表示，即 IR，承担这种重新组织的任务。本章从一段算术表达式出发，阅读当前 Rustless 的 IR 类型、操作数、指令与访问接口。学习重点是理解这些对象之间的关系，以及为什么计算身份不能与语法身份、声明身份混用。本章介绍的是已有表示；将完整源程序转换为这些指令的过程将在后续章节中推导。
+
+\section{表达式树变为定义与使用}
+考虑以下 Rustless 函数：
+\begin{lstlisting}[language=Rustless,caption={嵌套表达式中的计算依赖}]
+fn calculate(a: i32, b: i32, c: i32) -> i32 {
+    a + b * c
+}
+\end{lstlisting}
+语法树的根是加法，右子树是乘法。这里的父子关系同时隐含了一项计算依赖：必须先取得乘法的结果，才能完成加法。IR 将这个依赖写成两个显式步骤：先定义乘积，再将乘积作为加法的操作数。中间结果的名称可以任意选择，其意义来自定义与使用关系。
+
+下图把上述嵌套算术展开为中间结果及其使用，呈现语法树的父子关系如何转成计算的定义与使用关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 13mm]
+\node[irbox,text width=12mm] (add) {$+$};
+\node[irbox,text width=12mm,below left=of add] (a) {$a$};
+\node[irbox,text width=12mm,below right=of add] (mul) {$\times$};
+\node[irbox,text width=12mm,below left=of mul] (b) {$b$};
+\node[irbox,text width=12mm,below right=of mul] (c) {$c$};
+\draw[irarrow] (add)--(a);\draw[irarrow] (add)--(mul);
+\draw[irarrow] (mul)--(b);\draw[irarrow] (mul)--(c);
+\node[irbox,right=32mm of mul,text width=40mm] (p) {$v_1=\operatorname{mul}(b,c)$};
+\node[irbox,below=of p,text width=40mm] (r) {$v_2=\operatorname{add}(a,v_1)$};
+\draw[irarrow] (p)--node[right,font=\small]{使用 $v_1$}(r);
+\end{tikzpicture}
+\caption{语法结构与显式计算依赖}\label{fig:ir-tree-values}
+\end{figure}
+
+这一转换没有要求每个 AST 节点对应一条指令。括号只影响语法结构，通常不需要独立指令；结构体构造可能产生多个字段写入；短路表达式可能产生多个基本块。建立两种表示，使语法上的准确性和计算上的显式性分别得到适当的表达。若强求二者一一对应，语法树容易混入机器细节，IR 也会保留不必要的语法层次。
+
+显式结果还有维护上的价值。某项分析若要寻找乘积的所有使用，可以围绕其值身份工作，而不必在每个语法形状中重新寻找嵌套位置。相应代价是需要维护定义、使用与类型的一致性；SSA 验证器将在下一章承担这一职责。
+
+\section{语义类型投影到 IR 类型}
+当前 \texttt{include/rx/ir.hpp} 中的机器值类型集合很小：
+\begin{lstlisting}[language=C++,caption={当前 IR 的类型集合}]
+enum class Type { Void, I1, I8, I32, Ptr };
+\end{lstlisting}
+小集合并不表示源语言类型也只有五种。语义类型描述程序中的整数、引用、数组和结构体；IR 类型描述某一步计算所需的表示。\texttt{i32} 与 \texttt{u32} 都占三十二位，但除法、比较和右移必须保留有符号性。因而当前桥接将二者投影到 \texttt{I32}，再分别选择有符号或无符号指令。
+\begin{lstlisting}[language=Rustless,caption={同一位宽上的不同语义}]
+let signed: i32 = -8;
+let unsigned: u32 = 8;
+let a = signed / 2;
+let b = unsigned / 2;
+let c = signed >> 1;
+let d = unsigned >> 1;
+\end{lstlisting}
+四个结果不能仅凭 IR 类型区分含义。前两项需要 \texttt{SDiv} 与 \texttt{UDiv}，后两项需要算术右移 \texttt{AShr} 与逻辑右移 \texttt{LShr}。这种设计把位宽和运算解释分开，避免为每一种整数符号性重复定义整套指令。
+
+下图呈现多个语义类型投影到同一 IR 类型的关系，同时标出投影之后仍由操作保存的信息。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 18mm]
+\node[irbox] (s) {\texttt{i32 / isize}};
+\node[irbox,below=of s] (u) {\texttt{u32 / usize}};
+\node[irbox,right=of s,yshift=-8mm] (i) {\texttt{I32}\\三十二位值};
+\node[irbox,right=of i] (op) {符号性保留在\\除法、比较、右移};
+\draw[irarrow] (s)--(i);\draw[irarrow] (u)--(i);\draw[irarrow] (i)--(op);
+\node[irbox,below=15mm of u] (ref) {引用、Box、函数项};
+\node[irbox,right=of ref] (ptr) {\texttt{Ptr}};\draw[irarrow] (ref)--(ptr);
+\end{tikzpicture}
+\caption{语义分类与计算表示的分离}
+\end{figure}
+
+\texttt{Ptr} 与 \texttt{I32} 在 RV32 上同为四字节，也仍然是不同类型。地址可以用于读取对象，整数可以用于算术；将二者区分，可以在指令构造时排除许多错误组合。\texttt{I1} 表示布尔值的一位逻辑结果，而布尔对象在内存中占一个字节。\texttt{I8} 为字节级存储及转换提供表示，不能据此推断 Rustless 已经支持完整的源语言八位整数体系。
+
+\texttt{Void} 表示指令或函数不产生机器值。Unit 与 Never 都可能不产生机器值，但前者正常继续，后者没有正常续行。这个语义区别必须在控制流转换中保留，不能因机器类型相同而消失。
+
+\section{值身份、基本块身份与来源}
+语法节点回答“这段写法是哪一个节点”，符号回答“这个名字指向哪一项声明”，IR 值回答“这次计算的结果是哪一个值”。当前实现使用不同的 ID 类型表达这些问题。\texttt{ir\_ids.hpp} 中的节选为：
+\begin{lstlisting}[language=C++,caption={计算身份与语法来源}]
+struct ValueTag;
+struct BlockTag;
+using ValueId = ast::Id<ValueTag>;
+using BlockId = ast::Id<BlockTag>;
+struct Origin {
+  ast::NodeId node;
+  Span span;
+};
+\end{lstlisting}
+即使某个 NodeId 和 ValueId 的整数部分碰巧相等，也不能互换。一个语法表达式可能产生多个值，一个源变量可能经历多次赋值，而每次赋值产生的值可以具有不同的 ValueId。显示名称只帮助阅读，不负责建立这些关系。
+
+指令的可选 \texttt{Origin} 将计算重新连接到源程序。当验证器发现一个使用不受定义支配，除了指出函数与基本块，也可以保留产生这条指令的源码范围。这种元信息不改变计算结果，却避免后续诊断只能报告难以理解的内部编号。
+
+ValueId 还不是物理寄存器编号。它在一个函数的中间表示中标识计算值；后端可以把若干不同时活跃的值安排到同一物理寄存器，也可以把值保存到栈上。过早把 ValueId 理解为寄存器，会使前端承担不属于它的机器约束。
+
+\section{三种操作数及其构造规则}
+当前操作数由常量、局部值和全局地址三种载荷组成：
+\begin{lstlisting}[language=C++,caption={当前操作数的具体载荷}]
+struct ConstantOperand { std::uint32_t bits; };
+struct LocalOperand { ValueId id; };
+struct GlobalOperand { std::string symbol; };
+struct Operand {
+  using Data = std::variant<ConstantOperand,
+                            LocalOperand, GlobalOperand>;
+  Operand(Type type, Data data)
+      : type(type), data(std::move(data)) {}
+  Type type;
+  Data data;
+  static Operand constant(Type type, std::uint32_t bits);
+  static Operand local(Type type, ValueId id);
+  static Operand global(std::string name);
+};
+\end{lstlisting}
+常量保存位模式，而符号解释由类型检查与具体运算决定。三十二位全一既可以解释为有符号的负一，也可以解释为无符号的最大值。局部操作数只引用一个 ValueId，定义本身位于参数或某条指令中。全局操作数在当前 IR 中表示已命名函数的地址，模块验证还会检查该符号是否存在。
+
+工厂排除明显的无效输入：例如 I1 常量不能保存数值二，局部值不能使用保留的零编号。这样的局部检查不能证明局部值已经被定义，也不能证明定义位于合法路径上，后两项需要函数级验证。将不同范围的约束放到适当层次，既能及时发现错误，也避免让单个操作数对象承担整个程序分析。
+
+操作数没有默认的“空值”。若某条指令不需要操作数，载荷就不提供该字段；若返回值可以缺失，使用 optional。这样可避免一项通用的空操作数约定在多个消费者之间传播。
+
+\section{十三种指令载荷}
+当前 IR 的指令形状由 \texttt{Instruction::Data} 集中列出：
+\begin{lstlisting}[language=C++,caption={当前指令的闭合集合}]
+using Data = std::variant<Alloca, Load, Store, Gep,
+                          Binary, Compare, Cast, Call,
+                          Phi, Branch, CondBranch,
+                          Return, Unreachable>;
+\end{lstlisting}
+这些载荷可分为五组。Alloca、Load、Store、Gep 表达存储与地址；Binary、Compare、Cast 表达标量计算；Call 表达函数调用；Phi 表达路径合流；其余四种表达控制转移。此处的 Gep 采用字节偏移，它并不隐式承担源语言数组或字段的类型推断。
+
+下图对照 Binary、Store 与 CondBranch 的字段，呈现具体载荷怎样限制没有含义的字段组合。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 6mm]
+\node[irbox,text width=39mm] (b) {Binary\\结果、操作、左值、右值};
+\node[irbox,right=of b,text width=35mm] (s) {Store\\写入值、地址、对齐};
+\node[irbox,right=of s,text width=35mm] (c) {CondBranch\\条件、两个目标};
+\node[irnote,below=of b,text width=39mm] {有结果，要求整数类型};
+\node[irnote,below=of s,text width=35mm] {无结果，地址必须为 Ptr};
+\node[irnote,below=of c,text width=35mm] {无结果，条件必须为 I1};
+\end{tikzpicture}
+\caption{三类指令的字段与约束}
+\end{figure}
+
+\texttt{Result} 同时保存结果身份和类型。Compare 的结果类型固定为 I1，Alloca 和 Gep 的结果类型固定为 Ptr，因此它们只需保存结果身份。Store 不产生结果；Call 用 \texttt{optional<Result>} 区分有结果与无结果调用。不同指令能够共享访问过程，同时各自保留明确的数据形状。
+
+与早期“一个 op 加若干通用 vector”的表示相比，具体载荷使读取哪一个字段成为可检查的 C++ 操作。它仍允许存在类型不相容的 Binary，因而还需要验证器。类型安全在这里首先保证形状安全；跨操作数的关系由另一层约束完成。
+
+\section{模块、函数、基本块与声明}
+模块保存函数声明与函数定义。声明描述外部或尚无函数体的调用接口；定义包含参数和基本块；每个基本块包含顺序排列的指令。参数与普通指令结果共同构成函数中的值定义。
+
+这种层次不是目录结构的映射，而是作用域和验证范围的映射。ValueId 在函数内解释，BlockId 在函数内定位，调用名称在模块的签名集合中解释。把这些范围分清，可以让验证器准确说明“缺失的是一个块”还是“缺失的是一个被调用的函数”。
+
+函数与参数还可以连接到 SymbolId。一个源语言参数被转换成机器参数后，其来源仍可以查询；聚合返回引入的隐藏参数则需要单独标明其用途，不能伪造一个源语言声明。在后续 ABI 设计中，源参数数量与机器参数数量可能不同。
+
+\section{IR Visitor 与集中关系枚举}
+IR 使用与 AST 相同的访问形式：访问者同时收到具有身份与来源的外层对象，以及具体载荷。\texttt{ir\_visit.hpp} 中的覆盖概念要求所有载荷均可调用，并要求返回类型一致：
+\begin{lstlisting}[language=C++,caption={当前 IR 访问入口的节选}]
+template <class V, class T>
+concept ExhaustiveVisitor =
+    (std::same_as<T, Instruction> || std::same_as<T, Operand>) &&
+    detail::Coverage<V, T, typename T::Data>::value;
+
+template <class T, class V>
+  requires ExhaustiveVisitor<V, T>
+decltype(auto) visit(const T &node, V &&visitor) {
+  return std::visit(
+      [&](const auto &p) -> decltype(auto) {
+        return std::invoke(visitor, node, p);
+      }, node.data);
+}
+\end{lstlisting}
+访问者不必再把外层对象重新解包才能取得载荷。新增一种指令时，严格访问者会指出缺失分支，这有助于维护打印、验证和属性查询的一致性。它并不保证处理分支内部的算法正确，也不排除访问者用通用分支主动选择默认行为。
+
+\texttt{for\_each\_operand} 集中描述一条指令使用哪些值；\texttt{for\_each\_successor} 集中描述控制流后继。定义查询由载荷推导，不另维护容易与载荷矛盾的结果标签。后续分析可以利用这些关系，不必各自重写十三种指令的字段枚举。
+
+当前 variant 是闭合集合，适合指令种类由语言实现统一控制的情形。虚函数继承同样可以表达具体指令，两者的性能差异必须由对象大小、分配和分派方式测量。优雅设计的重点在于关系集中表达，而不是先验地宣称某一种 C++ 机制更快。
+
+\section{文本输出是表示的展示}
+当前打印器把项目 IR 转换为 LLVM 文本，并在输出前调用模块验证。函数名称若包含冒号等特殊字符，会被引用和转义，因此 \texttt{Packet::get} 可以稳定显示为 LLVM 可接受的符号形式。
+
+文本是可阅读的结果，而内存中的 typed IR 才是构造和分析的对象。字符串拼接不能替代结果类型、操作数身份或控制流目标。相应地，一份看似整齐的文本也不能证明程序执行含义正确。
+
+打印器从 TargetLayout 取得目标三元组与数据布局。它描述当前 RV32IM、ILP32 输出方向；修改文本中的目标名称并不能自动改变指针大小或函数 ABI。下一章先解决函数内部的值流和控制流合法性，第十六章再解释数据布局。
+
+\chapter{控制流、SSA、Builder 与验证器}
+\label{chap:cfg-ssa}
+\section*{本章导读}
+计算有时沿不同分支继续，有时返回循环起点。单条指令的字段正确，还不足以说明这些路径上的使用都有定义。本章先建立基本块和控制流图，再解释 SSA 和 Phi，最后将局部构造与整体验证联系起来。学习者应能判断一条使用为什么合法，并能说明 Builder 与 Verifier 各自检查的范围。
+
+\section{基本块与终结指令}
+基本块是从一个入口顺序执行到终结指令的指令序列。普通指令可以产生值或修改内存，终结指令决定是否继续以及沿哪条路径继续。当前 Branch 有一个后继，CondBranch 有两个，Return 离开函数，Unreachable 表示该位置不能正常执行。
+\begin{lstlisting}[language=Rustless,caption={产生结果的条件表达式}]
+fn choose(flag: bool) -> i32 {
+    if flag { 10 } else { 20 }
+}
+\end{lstlisting}
+这个函数可以由入口、两个分支和一个合流块组成。if 在语法上只有一个节点，在控制流上却需要几个块。终结指令把这些块连接成图。
+
+下图将上述 if 展开为条件、两个分支与合流块，显示终结指令怎样确定执行路径。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 18mm]
+\node[irbox] (e) {entry\\检查 flag};
+\node[irbox,below left=of e] (l) {then\\产生 10};
+\node[irbox,below right=of e] (r) {else\\产生 20};
+\node[irbox,below=20mm of e] (j) {join\\选择结果并返回};
+\draw[irarrow] (e)--node[left,font=\small]{真}(l);
+\draw[irarrow] (e)--node[right,font=\small]{假}(r);
+\draw[irarrow] (l)--(j);\draw[irarrow] (r)--(j);
+\end{tikzpicture}
+\caption{条件表达式的控制流图}
+\end{figure}
+
+终结之后不得在同一块追加普通指令。否则这些指令没有明确的执行位置，也会使后继关系含糊。源程序在 return 后可能仍包含需要诊断的语法，但诊断继续分析与当前块继续生成指令是两个不同问题。
+
+\section{SSA 与源语言可变变量}
+SSA 的核心约定是每个值身份只定义一次。它不要求源程序的变量不可变，也不意味着一个变量只能赋值一次：
+\begin{lstlisting}[language=Rustless,caption={一个可变变量的多次赋值}]
+let mut x = 1;
+x = x + 2;
+printInt(x);
+\end{lstlisting}
+一种直接表示是给 x 分配存储位置，先 store 1，再 load 旧值，计算并 store 新值。另一种表示使用值版本：初始值为 $x_0$，计算结果为 $x_1=x_0+2$，输出使用 $x_1$。后者每个值只定义一次，却保留了源变量的赋值含义。
+
+下图对照位置保持不变与值版本不断产生的关系，说明变量身份和计算值身份各自保持什么。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=7mm and 14mm]
+\node[irbox] (slot) {位置 p\\属于变量 x};
+\node[irbox,right=of slot] (old) {$x_0=1$};
+\node[irbox,below=of old] (new) {$x_1=x_0+2$};
+\draw[irarrow] (old)--(new);
+\draw[irarrow] (old)--node[above,font=\small]{第一次写入}(slot);
+\draw[irarrow] (new)--node[below,font=\small]{第二次写入}(slot);
+\end{tikzpicture}
+\caption{存储位置与一次定义的值}
+\end{figure}
+
+SSA 使使用可以直接连接到定义，减少分析时反复追踪“这个名字最近在哪里被赋值”的工作。分支和循环带来的多个可能定义则通过 Phi 处理。若先采用存储位置表示，后续还可以在满足条件时将栈槽提升到 SSA；这种顺序适合把正确 lowering 与优化复杂度分开。
+
+\section{Phi 的边语义}
+当前 Phi 将结果与若干 incoming 对联系起来：
+\begin{lstlisting}[language=C++,caption={当前 Phi 的数据形状}]
+struct PhiIncoming {
+  Operand value;
+  BlockId predecessor;
+};
+struct Phi {
+  Result result;
+  std::vector<PhiIncoming> incoming;
+};
+\end{lstlisting}
+在 choose 中，Phi 的结果取决于刚刚到达 join 的路径：从 then 到达时取 10，从 else 到达时取 20。它不是先执行一项比较再按顺序读取两个操作数，而是描述到达边上的值选择。
+
+输入的使用被视为发生在对应边上。因此，在 then 中定义的一个值，可以成为 then 到 join 的 incoming，却不能直接成为 join 中普通加法的操作数，因为 else 路径没有经过该定义。
+
+下图把 Phi 输入放在相应边上，并与 join 内的非法普通使用对照，说明两类使用为何需要不同验证位置。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=13mm and 22mm]
+\node[irbox] (l) {then\\定义 $v$};
+\node[irbox,right=of l] (r) {else\\没有定义 $v$};
+\node[irbox,below=of l,xshift=25mm,text width=44mm] (j) {join\\$z=\phi(v,20)$ 合法\\$z=v+1$ 不合法};
+\draw[irarrow] (l)--node[left,font=\small]{输入 $v$}(j);
+\draw[irarrow] (r)--node[right,font=\small]{输入 20}(j);
+\end{tikzpicture}
+\caption{Phi 输入发生在到达边上}
+\end{figure}
+
+多个 Phi 在逻辑上同时选择各自的 incoming。不能将它们解释为串行赋值，否则交换两个旧值时会覆盖其中一个。它们还必须出现在块的普通指令之前，以保持入口选择与块内计算的区分。后端将 Phi 消除为边上的并行复制，这一过程在第二十章继续展开。
+
+\section{支配关系}
+若从函数入口到某个使用的所有路径都经过某个定义所在块，就称该块支配使用所在块。同块中还需要定义位于使用之前。这个条件把“先定义后使用”从一条线推广到了控制流图。
+
+参数在进入函数时已经定义，可以被后续块使用。一个条件分支中的定义通常不能支配合流块，因为另一条路径绕过它；入口中的定义通常可以支配两个分支。Phi 的 incoming 则在相应前驱边的位置检查。
+
+当前验证器先收集参数和指令的定义，再检查每个 LocalOperand 是否存在、类型是否相同，以及定义是否支配使用。它还区分同块的指令位置，避免接受一条指令引用自己的结果。检查不是只比较编号大小：编号由构造过程分配，不构成控制流证明。
+
+支配集合通过迭代交集得到。对一个可达非入口块，其严格前驱支配集合的交集，加上块自身，形成新的支配集合。规模较小时，集合版本清楚且便于检查；若分析成为性能热点，再考虑更高效的支配算法，而不必在最初就引入难以阅读的实现。
+
+\section{边重数与不可达块}
+前驱块集合与前驱边集合不是同一概念。一个 CondBranch 的两个目标可能恰好相同。这时只有一个不同的前驱块，却有两条到达边。
+
+下图呈现具有相同起止块的两条分支边，说明唯一前驱集合能够表达来源，却不能表达边的数量。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=28mm]
+\node[irbox] (e) {entry\\条件分支};
+\node[irbox,right=of e] (j) {join\\Phi 输入两次};
+\draw[irarrow,bend left=23] (e) to node[above,font=\small]{真边}(j);
+\draw[irarrow,bend right=23] (e) to node[below,font=\small]{假边}(j);
+\end{tikzpicture}
+\caption{块身份相同但边的重数不同}
+\end{figure}
+
+当前验证器已经分别保存两种关系：
+\begin{lstlisting}[language=C++,caption={当前前驱与到达边的不同表示}]
+using Predecessors = std::map<BlockId, std::set<BlockId>>;
+using IncomingEdges =
+    std::map<BlockId, std::multiset<BlockId>>;
+\end{lstlisting}
+支配分析只关心是否存在绕过定义的路径，唯一前驱足够；Phi 核对需要保留边重数。重复来源的 incoming 必须携带相同值，且数量与实际到达边一致。另一种可能设计是构造时把同目标条件分支规范化为普通分支，但必须同步改变 Phi，不能只修改图的一侧。
+
+不可达块也需要明确策略。当前验证器对入口可达部分计算通常的支配集合，对不可达块采用保守的自支配集合。它仍检查基本结构和局部使用。这个策略可能拒绝某些在不可达区域中形式上更宽松的 IR；作为教学实现的明确限制，比偶然放过未定义关系更容易解释。
+
+\section{Builder 的局部构造}
+Builder 保存所借用的函数和当前 BlockId，不长期保存 vector 元素的引用。创建新块可能使 vector 扩容，而 BlockId 仍可以重新定位当前块。这个选择防止一个与编译原理无关的 C++ 对象失效问题污染 lowering。
+
+以下是 \texttt{ir\_builder.cpp} 中追加流程的节选，省略了 Phi 排列检查：
+\begin{lstlisting}[language=C++,caption={当前 Builder 的局部保护}]
+void Builder::append(Instruction::Data data) {
+  Instruction node{std::move(data), origin_};
+  auto errors = verify_instruction(node);
+  if (!errors.empty())
+    throw std::invalid_argument(errors.front());
+  auto &block = current();
+  if (!block.instructions.empty() &&
+      is_terminator(block.instructions.back()))
+    throw std::logic_error("cannot append after a terminator");
+  // The implementation also checks Phi placement here.
+  block.instructions.push_back(std::move(node));
+}
+\end{lstlisting}
+这是对当前流程的带省略摘录，注释只说明被省略的分支，不代表另一份可替代源码。Builder 在插入前检查单条指令的类型与结构，拒绝终结之后的追加，并保持 Phi 在前。固定大小 Alloca 被限制到入口，这是项目当前构造策略，有利于后续栈布局；它不是所有 LLVM IR 必须遵循的普遍规则。
+
+Builder 还能把源节点设置为当前 Origin，随后生成的指令携带这一来源。值编号耗尽或没有选定插入块都会明确报错。失败的构造可能留下编号间隙，但间隙不改变值身份的含义；验证需要的是唯一与有效，而不是编号连续。
+
+\section{Verifier 的整体关系}
+单条指令检查只认识自身载荷。完整模块还需核对块目标、函数声明、调用与返回类型、定义唯一性、类型一致性和支配关系。因而 Builder 与 Verifier 是互补的。
+
+下图按指令、块、函数与模块展开约束范围，说明构造入口和发布边界分别检查哪些关系。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=7mm]
+\node[irbox,text width=95mm] (i) {指令：类型、必需操作数、对齐};
+\node[irbox,below=of i,text width=95mm] (b) {基本块：Phi 顺序、终结位置};
+\node[irbox,below=of b,text width=95mm] (f) {函数：目标、SSA 定义、使用与支配};
+\node[irbox,below=of f,text width=95mm] (m) {模块：声明、调用签名、全局名称};
+\draw[irarrow] (i)--(b);\draw[irarrow] (b)--(f);\draw[irarrow] (f)--(m);
+\end{tikzpicture}
+\caption{从局部形状到整体关系的验证}
+\end{figure}
+
+验证器先排除错误 CFG，再进行依赖合法后继的 SSA 检查。若缺失目标仍被当成存在的块访问，验证器自己反而会崩溃，无法给出原来的错误。按依赖顺序验证，同样体现了清楚的设计：后一个证明建立在前一个已确认的条件上。
+
+验证器报告函数、可选块和可选来源。诊断范围与约束范围对应，使错误定位更有意义。它不会证明源码和 IR 等价；一份完全合法的 IR 仍可能使用了错误的算术操作。结构验证与 lowering 的语义正确性必须分开检验。
+
+\section{构造中间状态与发布边界}
+构造函数时，某个块可能暂时没有终结，Phi 的目标块也可能尚未写完。这些是受控的中间状态。模块最终交给打印器、优化器或后端时，则必须满足完整不变量。
+
+将局部构造限制得过严，会迫使构造过程采用别扭的顺序；将最终验证完全取消，又会把错误推给后端。当前设计允许用明确载荷直接构造，再在模块边界验证，也提供 Builder 作为更便于使用的入口。
+
+学习时可以故意制造错误 IR：将一个 I32 操作数替换为 I1，删除一个分支目标，在两个指令中重复定义同一 ValueId，或让 then 中的值出现在 join 的普通运算中。每个反例应违反一条可解释的关系，而不是只断言“验证器返回错误”。这样的练习能够检验不变量是否足够准确。
+
+\section{内部验证与 LLVM 验证}
+项目验证器保证项目 IR 的约定，外部 LLVM 验证器检查生成文本是否满足 LLVM 的结构与指令定义。二者一致并不自动证明源码语义正确，但不一致可以揭示映射或内部约束的缺口。
+
+多重 Phi 边就是合适的独立检验：内部图保留两条同目标分支边，输出两个相同 incoming，外部验证应接受；只输出一次则应拒绝。期望来自边语义，而不是来自打印器当前恰好输出什么。关于 LLVM 的整体合法性与 Phi 定义，可以查阅其\href{https://llvm.org/docs/LangRef.html#well-formedness}{合法性说明}与\href{https://llvm.org/docs/LangRef.html#phi-instruction}{Phi 指令说明}。
+
+本章建立了“计算发生在哪里、值从哪里来”的关系。下一章将补上另一项知识：一个对象占多少空间，以及函数边界如何安排这些值。
