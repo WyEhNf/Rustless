@@ -976,7 +976,7 @@ private:
     }
     if (path.segments.size() == 1) {
       if (auto *binding = lookup(name))
-        return {binding->type,   true, binding->is_mutable(), false,
+        return {binding->type,   true, binding->is_mutable, false,
                 binding->symbol, name};
       if (auto it = constants_.find(name); it != constants_.end())
         return {it->second.type,
