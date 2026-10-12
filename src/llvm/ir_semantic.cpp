@@ -29,21 +29,18 @@ SemanticBridge::SemanticBridge(const SemanticIndex &semantic, TargetLayout targe
     ast::visit(
         item,
         ast::Overloaded{[&](const ast::Struct &node, const ast::Struct &) {
-                          structures_.emplace(node.name.text,
-                                              semantic.declaration(node.id).id);
+                          resolve_structure(semantic.declaration(node.id).id);
                         },
                         [](const ast::Use &, const ast::Use &) {},
                         [](const ast::Function &, const ast::Function &) {},
                         [](const ast::Constant &, const ast::Constant &) {},
                         [](const ast::Impl &, const ast::Impl &) {}});
-  for (const auto &[_, symbol] : structures_)
-    resolve_structure(symbol);
 }
 std::optional<Type>
 SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
   if (!type)
     throw std::invalid_argument("missing checked type");
-  switch (type->kind) {
+  switch (type->kind()) {
   case K::Unit:
   case K::Never:
     return Type::Void;
@@ -70,7 +67,7 @@ SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
 Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
   if (!type)
     throw std::invalid_argument("missing checked type");
-  switch (type->kind) {
+  switch (type->kind()) {
   case K::Unit:
   case K::Never:
     return target_.unit();
@@ -79,9 +76,9 @@ Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
   case K::Vec:
     return target_.vector().storage;
   case K::Array:
-    return array_layout(layout(type->element), type->length, target_);
+    return array_layout(layout(type->element()), type->length(), target_);
   case K::Struct:
-    return layouts_.at(structures_.at(type->name)).layout;
+    return layouts_.at(type->symbol()).layout;
   case K::I32:
   case K::U32:
   case K::Isize:
@@ -99,10 +96,10 @@ Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
 Layout SemanticBridge::compute_layout(const SemanticTypePtr &type) {
   if (!type)
     throw std::invalid_argument("missing checked type");
-  if (type->kind == K::Struct)
-    return resolve_structure(structures_.at(type->name)).layout;
-  if (type->kind == K::Array)
-    return array_layout(compute_layout(type->element), type->length, target_);
+  if (type->kind() == K::Struct)
+    return resolve_structure(type->symbol()).layout;
+  if (type->kind() == K::Array)
+    return array_layout(compute_layout(type->element()), type->length(), target_);
   return layout(type);
 }
 StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {

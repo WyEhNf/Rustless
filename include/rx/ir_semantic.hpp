@@ -17,6 +17,8 @@ struct StructLayout {
   Layout layout;
   std::vector<FieldLayout> fields;
 };
+// Indirect is an address of by-value aggregate storage, not a source reference.
+// This internal convention is independent of the platform's C aggregate ABI.
 enum class Passing { Direct, Indirect };
 struct AbiValue {
   Type type;
@@ -66,7 +68,6 @@ private:
   AbiValue abi(const SemanticTypePtr &type) const;
   const SemanticIndex &semantic_;
   const TargetLayout target_;
-  std::map<std::string, SymbolId> structures_;
   std::map<SymbolId, StructLayout> layouts_;
   std::set<SymbolId> resolving_;
 };
