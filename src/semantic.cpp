@@ -181,7 +181,9 @@ private:
     }
   }
   TyPtr structure_type(const std::string &name) {
-    return types_.structure(symbol_for(structures_.at(name).ast->id), name);
+    if (auto found = structures_.find(name); found != structures_.end())
+      return types_.structure(symbol_for(found->second.ast->id), name);
+    return ty(Ty::Kind::Error);
   }
   void report(Span span, std::string message) {
     diagnostics_.error(span, std::move(message));
@@ -974,6 +976,8 @@ private:
   ExprInfo check_path(const ast::Expr &node, const ast::PathExpr &value) {
     const auto &path = value.path;
     auto name = ast::path_name(path);
+    if (!type_arguments(path).empty() && !constructor_path(path))
+      report(node.span, "functions have no type parameters");
     if (path.segments.size() > 1 &&
         std::string(ast::name_text(path.segments.front().name)) == "Self" &&
         current_function_ && !current_function_->owner.empty()) {
@@ -1352,15 +1356,17 @@ private:
   }
 
   OperandSemantics operand_use(const ast::Expr &node, const ExprInfo &info,
-                               bool references = true) {
+                               bool references = true, unsigned depth_limit = 1,
+                               bool mutable_references = false) {
     OperandSemantics use{node.id, info.type, {}};
     // Contextual coercions have already been recorded by check_expr.
     for (const auto &adjustment : info.adjustments) {
       use.adjustments.push_back(adjustment);
       use.effective_type = adjustment.target;
     }
-    while (references && use.effective_type->kind() == Ty::Kind::Ref &&
-           !use.effective_type->is_mutable()) {
+    for (unsigned depth = 0; references && depth < depth_limit &&
+           use.effective_type->kind() == Ty::Kind::Ref &&
+           (mutable_references || !use.effective_type->is_mutable()); ++depth) {
       use.effective_type = use.effective_type->element();
       use.adjustments.push_back({Adjustment::Kind::Dereference, use.effective_type});
     }
@@ -1372,12 +1378,13 @@ private:
     auto right = check_expr(binary.right, left.type);
     const bool logical = binary.op == ast::BinaryOp::LogicalAnd ||
                          binary.op == ast::BinaryOp::LogicalOr;
-    auto lhs = operand_use(*binary.left, left, !logical);
-    auto rhs = operand_use(*binary.right, right, !logical);
     const bool ordering = binary.op == ast::BinaryOp::Lt ||
                           binary.op == ast::BinaryOp::Le ||
                           binary.op == ast::BinaryOp::Gt ||
                           binary.op == ast::BinaryOp::Ge;
+    const auto depth = ordering ? std::numeric_limits<unsigned>::max() : 1;
+    auto lhs = operand_use(*binary.left, left, !logical, depth, ordering);
+    auto rhs = operand_use(*binary.right, right, !logical, depth, ordering);
     if (ordering) {
       auto l = left.type;
       auto r = right.type;
