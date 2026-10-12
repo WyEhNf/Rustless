@@ -19,9 +19,13 @@ def main():
         19: "由计算走向机器", 22: "检验与扩展设计",
     }
     count = 0
-    for name in ("part-front.tex", "part-semantic.tex", "part-ir.tex"):
+    chapters = (("part-front.tex", 8), ("part-semantic.tex", 5),
+                ("part-ir.tex", 9))
+    for name, expected in chapters:
         chapter_source = (parts / name).read_text(encoding="utf-8")
         sections = re.split(r"(?=\\chapter\{)", chapter_source)
+        if len(sections) - 1 != expected and not args.allow_partial:
+            raise SystemExit(f"{name}: expected {expected} chapters")
         text += "\n" + sections[0]
         for section in sections[1:]:
             count += 1
