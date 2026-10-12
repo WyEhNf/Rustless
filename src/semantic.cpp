@@ -22,37 +22,18 @@ namespace {
 using Ty = SemanticType;
 using TyPtr = SemanticTypePtr;
 
-TyPtr ty(Ty::Kind kind) {
-  auto value = std::make_shared<Ty>();
-  value->kind = kind;
-  return value;
-}
-
-TyPtr compound(Ty::Kind kind, TyPtr element, bool is_mutable = false) {
-  auto value = ty(kind);
-  value->element = std::move(element);
-  value->is_mutable = is_mutable;
+TyPtr error_type() {
+  static const auto value = [] {
+    TypeContext context;
+    return context.primitive(Ty::Kind::Error);
+  }();
   return value;
 }
 
 bool same(const TyPtr &lhs, const TyPtr &rhs) {
-  // Error types compare successfully to suppress follow-on diagnostics.
-  if (!lhs || !rhs)
-    return false;
-  if (lhs->kind == Ty::Kind::Error || rhs->kind == Ty::Kind::Error)
-    return true;
-  if (lhs->kind != rhs->kind)
-    return false;
-  if (lhs->kind == Ty::Kind::Struct || lhs->kind == Ty::Kind::Function)
-    return lhs->name == rhs->name;
-  if (lhs->kind == Ty::Kind::Array)
-    return lhs->length == rhs->length && same(lhs->element, rhs->element);
-  if (lhs->kind == Ty::Kind::Box || lhs->kind == Ty::Kind::Vec)
-    return same(lhs->element, rhs->element);
-  if (lhs->kind == Ty::Kind::Ref)
-    return lhs->is_mutable == rhs->is_mutable &&
-           same(lhs->element, rhs->element);
-  return true;
+  // Recovery compatibility is distinct from strict type identity.
+  return lhs && rhs && (lhs->kind() == Ty::Kind::Error ||
+                        rhs->kind() == Ty::Kind::Error || same_type(lhs, rhs));
 }
 
 bool integer(const TyPtr &value) {
@@ -64,44 +45,6 @@ bool integer(const TyPtr &value) {
 bool signed_integer(const TyPtr &value) {
   return value &&
          (value->kind == Ty::Kind::I32 || value->kind == Ty::Kind::Isize);
-}
-
-std::string type_name(const TyPtr &value) {
-  if (!value)
-    return "<missing>";
-  switch (value->kind) {
-  case Ty::Kind::Error:
-    return "<error>";
-  case Ty::Kind::Never:
-    return "!";
-  case Ty::Kind::Unit:
-    return "()";
-  case Ty::Kind::Bool:
-    return "bool";
-  case Ty::Kind::I32:
-    return "i32";
-  case Ty::Kind::U32:
-    return "u32";
-  case Ty::Kind::Isize:
-    return "isize";
-  case Ty::Kind::Usize:
-    return "usize";
-  case Ty::Kind::Struct:
-    return value->name;
-  case Ty::Kind::Box:
-    return "Box<" + type_name(value->element) + ">";
-  case Ty::Kind::Vec:
-    return "Vec<" + type_name(value->element) + ">";
-  case Ty::Kind::Array:
-    return "[" + type_name(value->element) + "; " +
-           std::to_string(value->length) + "]";
-  case Ty::Kind::Ref:
-    return std::string("&") + (value->is_mutable ? "mut " : "") +
-           type_name(value->element);
-  case Ty::Kind::Function:
-    return "fn " + value->name;
-  }
-  return "<?>";
 }
 
 struct ConstantInfo {
@@ -139,7 +82,7 @@ struct FunctionInfo {
 };
 
 struct ExprInfo {
-  ExprInfo(TyPtr type = ty(Ty::Kind::Error), bool is_place = false,
+  ExprInfo(TyPtr type = error_type(), bool is_place = false,
            bool is_mutable = false, bool access_locked = false,
            std::optional<SymbolId> symbol = {}, std::string target = {},
            std::vector<Adjustment> adjustments = {})
@@ -205,10 +148,27 @@ public:
     std::sort(result_.constants.begin(), result_.constants.end(),
               [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
     result_.success = !diagnostics_.has_errors();
-    return std::move(result_);
+    return result_.success
+               ? SemanticResult::publish(crate_, std::move(result_))
+               : SemanticResult::rejected(crate_, std::move(result_));
   }
 
 private:
+  TyPtr ty(Ty::Kind kind) { return types_.primitive(kind); }
+  TyPtr compound(Ty::Kind kind, TyPtr element, bool mutable_ref = false) {
+    switch (kind) {
+    case Ty::Kind::Box: return types_.box(std::move(element));
+    case Ty::Kind::Vec: return types_.vector(std::move(element));
+    case Ty::Kind::Array: return types_.array(std::move(element), 0);
+    case Ty::Kind::Ref:
+      return types_.reference(std::move(element), mutable_ref
+          ? ast::Mutability::Mutable : ast::Mutability::Immutable);
+    default: throw std::logic_error("invalid compound type factory");
+    }
+  }
+  TyPtr structure_type(const std::string &name) {
+    return types_.structure(symbol_for(structures_.at(name).ast->id), name);
+  }
   void report(Span span, std::string message) {
     diagnostics_.error(span, std::move(message));
   }
@@ -1813,7 +1773,8 @@ private:
   std::vector<std::unordered_map<std::string, Binding>> scopes_;
   std::vector<LoopInfo> loops_;
   const FunctionInfo *current_function_{};
-  SemanticResult result_;
+  TypeContext types_;
+  SemanticData result_;
   SymbolId next_symbol_{1};
   std::map<ast::NodeId, SymbolId> declaration_symbols_;
   std::unordered_set<SymbolId> recorded_symbols_;
@@ -1840,7 +1801,8 @@ SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics) {
   return Analyzer(crate, diagnostics).run();
 }
 
-std::string dump_semantic(const SemanticResult &result) {
+std::string dump_semantic(const SemanticResult &checked) {
+  const auto &result = checked.data();
   std::ostringstream out;
   out << "Semantic\n"
       << "  Summary functions=" << result.summary.functions
