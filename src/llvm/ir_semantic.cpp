@@ -4,123 +4,126 @@
 
 namespace rx::ir {
 namespace {
-using K = SemanticType::Kind;
+using TypeKind = SemanticType::Kind;
 std::uint32_t checked_size(std::uint64_t size, const TargetLayout &target) {
-  if (size > target.max_object_size())
+  if (size > target.max_object_size()) {
     throw std::overflow_error("type layout exceeds RV32 address space");
+  }
   return static_cast<std::uint32_t>(size);
 }
-std::uint32_t align_size(std::uint32_t size, std::uint32_t alignment,
-                         const TargetLayout &target) {
-  return checked_size(
-      (std::uint64_t{size} + alignment - 1) / alignment * alignment, target);
+std::uint32_t align_size(std::uint32_t size, std::uint32_t alignment, const TargetLayout &target) {
+  return checked_size((std::uint64_t{size} + alignment - 1) / alignment * alignment, target);
 }
-Layout array_layout(Layout element, std::uint64_t count,
-                    const TargetLayout &target) {
-  if (element.bytes && count > target.max_object_size() / element.bytes)
+Layout array_layout(Layout element, std::uint64_t count, const TargetLayout &target) {
+  if (element.bytes && count > target.max_object_size() / element.bytes) {
     throw std::overflow_error("array layout exceeds RV32 address space");
+  }
   return {static_cast<std::uint32_t>(element.bytes * count), element.alignment};
 }
-} // namespace
-SemanticBridge::SemanticBridge(const SemanticIndex &semantic,
-                               TargetLayout target)
-    : semantic_(semantic), target_(target) {
-  for (const auto &item : semantic.crate().items)
-    ast::visit(item, ast::Overloaded{
-                         [&](const ast::Struct &node, const ast::Struct &) {
-                           resolve_structure(semantic.declaration(node).id);
-                         },
-                         [](const ast::Use &, const ast::Use &) {},
-                         [](const ast::Function &, const ast::Function &) {},
-                         [](const ast::Constant &, const ast::Constant &) {},
-                         [](const ast::Impl &, const ast::Impl &) {}});
 }
-std::optional<Type>
-SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
-  if (!type)
+SemanticBridge::SemanticBridge(const SemanticIndex &semantic, TargetLayout target)
+    : semantic_(semantic), target_(target) {
+  auto collect_layout = ast::Overloaded{
+      [&](const ast::Struct &node, const ast::Struct &) {
+        resolve_structure(semantic.declaration(node).id);
+      },
+      [](const ast::Use &, const ast::Use &) {},
+      [](const ast::Function &, const ast::Function &) {},
+      [](const ast::Constant &, const ast::Constant &) {},
+      [](const ast::Impl &, const ast::Impl &) {},
+  };
+  for (const auto &item : semantic.crate().items) {
+    ast::visit(item, collect_layout);
+  }
+}
+std::optional<Type> SemanticBridge::scalar_type(const SemanticTypePtr &type) const {
+  if (!type) {
     throw std::invalid_argument("missing checked type");
+  }
   switch (type->kind()) {
-  case K::Unit:
-  case K::Never:
+  case TypeKind::Unit:
+  case TypeKind::Never:
     return Type::Void;
-  case K::Bool:
+  case TypeKind::Bool:
     return Type::I1;
-  case K::I32:
-  case K::U32:
-  case K::Isize:
-  case K::Usize:
+  case TypeKind::I32:
+  case TypeKind::U32:
+  case TypeKind::Isize:
+  case TypeKind::Usize:
     return Type::I32;
-  case K::Ref:
-  case K::Box:
-  case K::Function:
-  case K::BuiltinFunction:
+  case TypeKind::Ref:
+  case TypeKind::Box:
+  case TypeKind::Function:
+  case TypeKind::BuiltinFunction:
     return Type::Ptr;
-  case K::Array:
-  case K::Struct:
-  case K::Vec:
+  case TypeKind::Array:
+  case TypeKind::Struct:
+  case TypeKind::Vec:
     return {};
-  case K::Error:
+  case TypeKind::Error:
     break;
   }
   throw std::invalid_argument("cannot lower an invalid semantic type");
 }
 Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
-  if (!type)
+  if (!type) {
     throw std::invalid_argument("missing checked type");
+  }
   switch (type->kind()) {
-  case K::Unit:
-  case K::Never:
+  case TypeKind::Unit:
+  case TypeKind::Never:
     return target_.unit();
-  case K::Bool:
+  case TypeKind::Bool:
     return target_.boolean();
-  case K::Vec:
+  case TypeKind::Vec:
     return target_.vector().storage;
-  case K::Array:
+  case TypeKind::Array:
     return array_layout(layout(type->element()), type->length(), target_);
-  case K::Struct:
+  case TypeKind::Struct:
     return layouts_.at(type->symbol()).layout;
-  case K::I32:
-  case K::U32:
-  case K::Isize:
-  case K::Usize:
+  case TypeKind::I32:
+  case TypeKind::U32:
+  case TypeKind::Isize:
+  case TypeKind::Usize:
     return target_.integer();
-  case K::Ref:
-  case K::Box:
-  case K::Function:
-  case K::BuiltinFunction:
+  case TypeKind::Ref:
+  case TypeKind::Box:
+  case TypeKind::Function:
+  case TypeKind::BuiltinFunction:
     return target_.pointer();
-  case K::Error:
+  case TypeKind::Error:
     break;
   }
   throw std::invalid_argument("cannot lay out an invalid semantic type");
 }
 Layout SemanticBridge::compute_layout(const SemanticTypePtr &type) {
-  if (!type)
+  if (!type) {
     throw std::invalid_argument("missing checked type");
-  if (type->kind() == K::Struct)
+  }
+  if (type->kind() == TypeKind::Struct) {
     return resolve_structure(type->symbol()).layout;
-  if (type->kind() == K::Array)
-    return array_layout(compute_layout(type->element()), type->length(),
-                        target_);
+  }
+  if (type->kind() == TypeKind::Array) {
+    return array_layout(compute_layout(type->element()), type->length(), target_);
+  }
   return layout(type);
 }
 StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {
-  if (auto found = layouts_.find(symbol); found != layouts_.end())
+  if (auto found = layouts_.find(symbol); found != layouts_.end()) {
     return found->second;
-  if (!resolving_.insert(symbol).second)
+  }
+  if (!resolving_.insert(symbol).second) {
     throw std::invalid_argument("inline recursive layout");
+  }
   StructLayout result{symbol, target_.unit(), {}};
   for (auto field : semantic_.structure(symbol).fields) {
     auto value = compute_layout(semantic_.symbol_type(field));
     auto offset = align_size(result.layout.bytes, value.alignment, target_);
     result.fields.push_back({field, offset, value});
-    result.layout.bytes =
-        checked_size(std::uint64_t{offset} + value.bytes, target_);
-    result.layout.alignment =
-        std::max(result.layout.alignment, value.alignment);
+    result.layout.bytes = checked_size(std::uint64_t{offset} + value.bytes, target_);
+    result.layout.alignment = std::max(result.layout.alignment, value.alignment);
   }
-  result.layout.bytes =
-      align_size(result.layout.bytes, result.layout.alignment, target_);
+  result.layout.bytes = align_size(result.layout.bytes, result.layout.alignment, target_);
   resolving_.erase(symbol);
   return layouts_.emplace(symbol, std::move(result)).first->second;
 }
