@@ -4,12 +4,12 @@
 namespace rx::ir {
 namespace {
 bool signed_integer(const SemanticTypePtr &type) {
-  if (!type)
+  if (!type) {
     throw std::invalid_argument("missing resolved operand type");
-  return type->kind() == SemanticType::Kind::I32 ||
-         type->kind() == SemanticType::Kind::Isize;
+  }
+  return type->kind() == SemanticType::Kind::I32 || type->kind() == SemanticType::Kind::Isize;
 }
-BinaryOp arithmetic(ArithmeticOp op, bool sign) {
+BinaryOp arithmetic(ArithmeticOp op, bool is_signed) {
   switch (op) {
   case ArithmeticOp::Add:
     return BinaryOp::Add;
@@ -18,9 +18,15 @@ BinaryOp arithmetic(ArithmeticOp op, bool sign) {
   case ArithmeticOp::Mul:
     return BinaryOp::Mul;
   case ArithmeticOp::Div:
-    return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
+    if (is_signed) {
+      return BinaryOp::SDiv;
+    }
+    return BinaryOp::UDiv;
   case ArithmeticOp::Rem:
-    return sign ? BinaryOp::SRem : BinaryOp::URem;
+    if (is_signed) {
+      return BinaryOp::SRem;
+    }
+    return BinaryOp::URem;
   }
   throw std::invalid_argument("invalid resolved arithmetic operation");
 }
@@ -35,20 +41,32 @@ BinaryOp bitwise(BitwiseOp op) {
   }
   throw std::invalid_argument("invalid resolved bitwise operation");
 }
-Predicate comparison(Relation relation, bool sign) {
+Predicate comparison(Relation relation, bool is_signed) {
   switch (relation) {
   case Relation::Eq:
     return Predicate::Eq;
   case Relation::Ne:
     return Predicate::Ne;
   case Relation::Lt:
-    return sign ? Predicate::SLt : Predicate::ULt;
+    if (is_signed) {
+      return Predicate::SLt;
+    }
+    return Predicate::ULt;
   case Relation::Le:
-    return sign ? Predicate::SLe : Predicate::ULe;
+    if (is_signed) {
+      return Predicate::SLe;
+    }
+    return Predicate::ULe;
   case Relation::Gt:
-    return sign ? Predicate::SGt : Predicate::UGt;
+    if (is_signed) {
+      return Predicate::SGt;
+    }
+    return Predicate::UGt;
   case Relation::Ge:
-    return sign ? Predicate::SGe : Predicate::UGe;
+    if (is_signed) {
+      return Predicate::SGe;
+    }
+    return Predicate::UGe;
   }
   throw std::invalid_argument("invalid resolved comparison");
 }
@@ -61,55 +79,58 @@ ShortCircuit short_circuit(LogicalOp op) {
   }
   throw std::invalid_argument("invalid resolved logical operation");
 }
-} // namespace
-BinaryLowering
-SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
+}
+BinaryLowering SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
   const auto operand = scalar_type(resolved.left.effective_type);
   const auto result = scalar_type(resolved.result);
-  if (!result || *result == Type::Void)
+  if (!result || *result == Type::Void) {
     throw std::invalid_argument("resolved operation has no scalar result");
-  const bool sign = signed_integer(resolved.left.effective_type);
+  }
+  const bool is_signed = signed_integer(resolved.left.effective_type);
   auto require_scalar = [&](bool integer_only = false) {
-    if (!operand || *operand == Type::Void ||
-        (integer_only && *operand != Type::I32))
+    if (!operand || *operand == Type::Void || (integer_only && *operand != Type::I32)) {
       throw std::invalid_argument("resolved scalar operand type is invalid");
+    }
     return *operand;
   };
   auto operation = std::visit(
       ast::Overloaded{
-          [&](const IntegerArithmetic &p) -> LoweredOperation {
-            return ScalarArithmetic{
-                arithmetic(p.op, sign), require_scalar(true), {}};
+          [&](const IntegerArithmetic &payload) -> LoweredOperation {
+            return ScalarArithmetic{arithmetic(payload.op, is_signed), require_scalar(true), {}};
           },
-          [&](const BitwiseOperation &p) -> LoweredOperation {
+          [&](const BitwiseOperation &payload) -> LoweredOperation {
             const auto type = require_scalar();
-            if (type != Type::I1 && type != Type::I32)
+            if (type != Type::I1 && type != Type::I32) {
               throw std::invalid_argument("bitwise operands must be integers");
-            return ScalarArithmetic{bitwise(p.op), type, {}};
+            }
+            return ScalarArithmetic{bitwise(payload.op), type, {}};
           },
-          [&](const ShiftOperation &p) -> LoweredOperation {
-            if (p.count_policy != ShiftCountPolicy::MaskToWidth)
+          [&](const ShiftOperation &payload) -> LoweredOperation {
+            if (payload.count_policy != ShiftCountPolicy::MaskToWidth) {
               throw std::invalid_argument("unsupported shift count policy");
+            }
             BinaryOp op;
-            switch (p.direction) {
+            switch (payload.direction) {
             case ShiftDirection::Left:
               op = BinaryOp::Shl;
               break;
             case ShiftDirection::Right:
-              op = sign ? BinaryOp::AShr : BinaryOp::LShr;
+              if (is_signed) {
+                op = BinaryOp::AShr;
+              } else {
+                op = BinaryOp::LShr;
+              }
               break;
             default:
               throw std::invalid_argument("invalid shift direction");
             }
-            return ScalarArithmetic{op, require_scalar(true),
-                                    target_.shift_count_mask()};
+            return ScalarArithmetic{op, require_scalar(true), target_.shift_count_mask()};
           },
-          [&](const rx::ScalarComparison &p) -> LoweredOperation {
-            return ScalarComparison{comparison(p.relation, sign),
-                                    require_scalar()};
+          [&](const rx::ScalarComparison &payload) -> LoweredOperation {
+            return ScalarComparison{comparison(payload.relation, is_signed), require_scalar()};
           },
-          [&](const rx::StructuralEquality &p) -> LoweredOperation {
-            switch (p.op) {
+          [&](const rx::StructuralEquality &payload) -> LoweredOperation {
+            switch (payload.op) {
             case EqualityOp::Eq:
               return StructuralEquality{resolved.left.effective_type, false};
             case EqualityOp::Ne:
@@ -117,44 +138,46 @@ SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
             }
             throw std::invalid_argument("invalid structural equality");
           },
-          [&](const LogicalOperation &p) -> LoweredOperation {
-            if (require_scalar() != Type::I1)
+          [&](const LogicalOperation &payload) -> LoweredOperation {
+            if (require_scalar() != Type::I1) {
               throw std::invalid_argument("logical operands must be bool");
-            return short_circuit(p.op);
-          }},
+            }
+            return short_circuit(payload.op);
+          },
+      },
       resolved.operation);
   return {std::move(operation), resolved.left, resolved.right, *result};
 }
-BinaryLowering SemanticBridge::binary(const ast::Expr &node,
-                                      const ast::BinaryExpr &payload) const {
-  if (std::get_if<ast::BinaryExpr>(&node.data) != &payload)
-    throw std::invalid_argument(
-        "binary payload does not belong to this AST node");
+BinaryLowering SemanticBridge::binary(const ast::Expr &node, const ast::BinaryExpr &payload) const {
+  if (std::get_if<ast::BinaryExpr>(&node.data) != &payload) {
+    throw std::invalid_argument("binary payload does not belong to this AST node");
+  }
   const auto &resolved = semantic_.expression(node).binary;
-  if (!resolved)
+  if (!resolved) {
     throw std::invalid_argument("binary expression lacks a resolved operation");
+  }
   return lower_binary(*resolved);
 }
-CompoundLowering
-SemanticBridge::compound(const ast::Expr &node,
-                         const ast::CompoundAssignExpr &payload) const {
-  if (std::get_if<ast::CompoundAssignExpr>(&node.data) != &payload)
-    throw std::invalid_argument(
-        "assignment payload does not belong to this AST node");
+CompoundLowering SemanticBridge::compound(const ast::Expr &node,
+                                          const ast::CompoundAssignExpr &payload) const {
+  if (std::get_if<ast::CompoundAssignExpr>(&node.data) != &payload) {
+    throw std::invalid_argument("assignment payload does not belong to this AST node");
+  }
   const auto &resolved = semantic_.expression(node).compound;
-  if (!resolved)
+  if (!resolved) {
     throw std::invalid_argument("assignment lacks a resolved operation");
+  }
   auto lowered = lower_binary(*resolved);
   const auto *operation = std::get_if<ScalarArithmetic>(&lowered.operation);
-  if (!operation)
+  if (!operation) {
     throw std::invalid_argument("assignment requires scalar arithmetic");
+  }
   return {*operation, std::move(lowered.left), std::move(lowered.right)};
 }
-UnaryLowering SemanticBridge::unary(const ast::Expr &node,
-                                    const ast::UnaryExpr &payload) const {
-  if (std::get_if<ast::UnaryExpr>(&node.data) != &payload)
-    throw std::invalid_argument(
-        "unary payload does not belong to this AST node");
+UnaryLowering SemanticBridge::unary(const ast::Expr &node, const ast::UnaryExpr &payload) const {
+  if (std::get_if<ast::UnaryExpr>(&node.data) != &payload) {
+    throw std::invalid_argument("unary payload does not belong to this AST node");
+  }
   const auto &resolved = semantic_.expression(node).unary;
   if (!resolved)
     throw std::invalid_argument("unary expression lacks a resolved operation");
