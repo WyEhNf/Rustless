@@ -345,8 +345,136 @@ void Printer::conditional(const IfExpr &value, int level) {
   }
 }
 void Printer::expression(const ExprPtr &value, int level) {
-  auto label = [&](const Expr &node, std::string text) {
-    heading(text, node, level);
+  auto label = [&](const Expr &node, std::string text) { heading(text, node, level); };
+  auto child = [&](const ExprPtr &payload) { expression(payload, level + 1); };
+  auto print_expression = Overloaded{
+      [&](const Expr &node, const IntegerExpr &payload) {
+        label(node, "Integer " + payload.literal.spelling);
+      },
+      [&](const Expr &node, const BooleanExpr &payload) {
+        if (payload.value)
+          label(node, "Boolean true");
+        else
+          label(node, "Boolean false");
+      },
+      [&](const Expr &node, const UnitExpr &) { label(node, "Unit"); },
+      [&](const Expr &node, const PathExpr &payload) {
+        label(node, "Path");
+        indent(level + 1);
+        path(payload.path);
+        out_ << '\n';
+      },
+      [&](const Expr &node, const ParenExpr &payload) {
+        label(node, "Paren");
+        child(payload.inner);
+      },
+      [&](const Expr &node, const ArrayExpr &payload) {
+        label(node, "Array");
+        for (const auto &element : payload.elements)
+          child(element);
+      },
+      [&](const Expr &node, const RepeatArrayExpr &payload) {
+        label(node, "RepeatArray");
+        child(payload.element);
+        child(payload.count);
+      },
+      [&](const Expr &node, const StructExpr &payload) {
+        label(node, "StructExpr");
+        indent(level + 1);
+        path(payload.path);
+        out_ << '\n';
+        for (const auto &field : payload.fields) {
+          heading("FieldInit " + field.name.text, field, level + 1);
+          expression(field.value, level + 2);
+        }
+      },
+      [&](const Expr &node, const BlockExpr &payload) {
+        label(node, "BlockExpr");
+        block(*payload.block, level + 1);
+      },
+      [&](const Expr &node, const IfExpr &payload) {
+        label(node, "If");
+        conditional(payload, level + 1);
+      },
+      [&](const Expr &node, const LoopExpr &payload) {
+        label(node, "Loop");
+        block(*payload.body, level + 1);
+      },
+      [&](const Expr &node, const WhileExpr &payload) {
+        label(node, "While");
+        child(payload.condition);
+        block(*payload.body, level + 1);
+      },
+      [&](const Expr &node, const UnaryExpr &payload) {
+        label(node, "Unary " + std::string(spelling(payload.op)));
+        child(payload.operand);
+      },
+      [&](const Expr &node, const BorrowExpr &payload) {
+        if (payload.mutability == Mutability::Mutable)
+          label(node, "Borrow &mut");
+        else
+          label(node, "Borrow &");
+        child(payload.operand);
+      },
+      [&](const Expr &node, const BinaryExpr &payload) {
+        label(node, "Binary " + std::string(spelling(payload.op)));
+        child(payload.left);
+        child(payload.right);
+      },
+      [&](const Expr &node, const AssignExpr &payload) {
+        label(node, "Assign =");
+        child(payload.target);
+        child(payload.value);
+      },
+      [&](const Expr &node, const CompoundAssignExpr &payload) {
+        label(node, "CompoundAssign " + std::string(spelling(payload.op)));
+        child(payload.target);
+        child(payload.value);
+      },
+      [&](const Expr &node, const CastExpr &payload) {
+        label(node, "Cast");
+        child(payload.value);
+        indent(level + 1);
+        type(payload.target_type);
+        out_ << '\n';
+      },
+      [&](const Expr &node, const CallExpr &payload) {
+        label(node, "Call");
+        child(payload.callee);
+        for (const auto &argument : payload.arguments)
+          child(argument);
+      },
+      [&](const Expr &node, const MethodCallExpr &payload) {
+        label(node, "MethodCall " + payload.method.text);
+        child(payload.receiver);
+        if (payload.generic_args) {
+          indent(level + 1);
+          arguments(*payload.generic_args);
+          out_ << '\n';
+        }
+        for (const auto &argument : payload.arguments)
+          child(argument);
+      },
+      [&](const Expr &node, const FieldExpr &payload) {
+        label(node, "Field " + payload.field.text);
+        child(payload.base);
+      },
+      [&](const Expr &node, const IndexExpr &payload) {
+        label(node, "Index");
+        child(payload.base);
+        child(payload.index);
+      },
+      [&](const Expr &node, const BreakExpr &payload) {
+        label(node, "Break");
+        if (payload.value)
+          child(*payload.value);
+      },
+      [&](const Expr &node, const ContinueExpr &) { label(node, "Continue"); },
+      [&](const Expr &node, const ReturnExpr &payload) {
+        label(node, "Return");
+        if (payload.value)
+          child(*payload.value);
+      },
   };
   auto child = [&](const ExprPtr &p) { expression(p, level + 1); };
   visit(*value,
