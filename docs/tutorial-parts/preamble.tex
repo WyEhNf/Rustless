@@ -1,0 +1,62 @@
+% Standalone document preamble; assembled with the chapter fragments.
+\documentclass[UTF8,fontset=fandol,11pt,openany]{ctexbook}
+\usepackage[a4paper,margin=25mm,headheight=15pt]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,array}
+\usepackage{xcolor,listings,tikz,graphicx,caption}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc,trees}
+\usepackage[unicode,colorlinks=true,linkcolor=blue!50!black,
+  urlcolor=blue!50!black]{hyperref}
+\definecolor{codebg}{RGB}{247,248,250}
+\lstdefinelanguage{Rustless}{
+  sensitive=true,
+  morekeywords={fn,let,mut,const,struct,impl,use,Self,self,if,else,loop,
+    while,break,continue,return,as,true,false,where,derive,bool,i32,u32,
+    isize,usize,Box,Vec,Clone,Copy,PartialEq,Eq},
+  morecomment=[l]{//},morecomment=[s]{/*}{*/},morestring=[b]"
+}
+\lstset{basicstyle=\ttfamily\small,keywordstyle=\color{blue!65!black},
+  commentstyle=\color{green!35!black},stringstyle=\color{red!50!black},
+  backgroundcolor=\color{codebg},frame=single,rulecolor=\color{black!15},
+  breaklines=true,breakatwhitespace=false,columns=fullflexible,
+  keepspaces=true,showstringspaces=false,tabsize=2,
+  aboveskip=9pt,belowskip=9pt,captionpos=b}
+\captionsetup{font=small,labelfont=bf}
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+\setlength{\emergencystretch}{2em}
+\title{Rustless 编译器设计教程\\[8pt]
+  \large 从类型安全的语法树到清楚的语义与中间表示}
+\author{以 Rustless 项目为学习对象}
+\date{2026 年 10 月}
+\begin{document}
+\frontmatter
+\maketitle
+\chapter*{写在前面}
+\addcontentsline{toc}{chapter}{写在前面}
+一个清楚的编译器设计，应当使读者能够回答三个问题：程序的结构保存在哪里，
+程序的含义由谁决定，这些决定如何约束后续计算。本教程以这些问题组织对
+Rustless 的学习。我们逐步阅读具体的 Rustless 程序与项目 C++ 实现，解释
+每一种表示所保留的关系，并以反例检验这些关系是否足够明确。
+
+这里的“优雅”包含可以观察的条件：不同形状有恰当的字段，身份不会混用，
+判断结果可以复用，阶段的输入有明确条件，改变一种处理过程不会要求修改所有
+节点。运行代价与维护成本也应被说明。不可变类型需要构造与缓存，独占的树
+结构仍有分配代价，访问模式需要权衡节点扩展与过程扩展；任何一种机制都不因
+为具有熟悉的名称而自动成为最好的选择。
+
+全书首先建立文本、语法结构与含义的区别，随后阅读 AST 的专属载荷、
+\texttt{variant}、Visitor 和遍历规则，再研究名字、类型、位置与有序转换。
+语义分析的成功结果经完整性检查后形成冻结快照，已有 IR 由这份结果取得
+操作、调用身份与布局知识。后续章节推导完整 lowering、优化与机器生成。
+
+\textbf{阅读约定。} 标为“项目摘录”的代码来自当前 Rustless 文件，删节处
+会明确说明；用于解释算法的示意接口与推导代码另行标明。Rustless 示例只
+使用本项目的语言子集。IR 操作描述、布局、构建器与验证器已有实现；完整
+源程序 lowering、容器运行时、所有权析构以及机器后端仍是后续设计方向。
+一个描述能够表达正确要求，与程序已经完成正确执行，是不同的学习结论。
+
+每章导读先说明本章的问题及它与前后章的联系。每幅图前的文字说明它呈现
+哪一种已经讨论的关系；读者宜先理解该关系，再沿图中的边追踪信息。
+附录提供源码阅读地图与可运行的测试方式，方便将概念回到实际定义中核对。
+\tableofcontents
+\mainmatter
