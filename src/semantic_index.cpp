@@ -11,7 +11,7 @@ void insert(Map &map, Id id, const Fact &fact) {
   if (!id.value || !map.emplace(id, &fact).second)
     throw std::invalid_argument("duplicate or zero semantic identity");
 }
-} // namespace
+}
 SemanticIndex::SemanticIndex(const ast::Crate &crate,
                              const SemanticResult &result)
     : SemanticIndex(crate, result.snapshot(), ValidationTag{}) {}
@@ -96,25 +96,30 @@ void SemanticIndex::validate_links() const {
   require_type = [&](const SemanticTypePtr &type) {
     if (!type || type->kind() == SemanticType::Kind::Error)
       throw std::invalid_argument("checked semantic fact has no valid type");
-    if (checked_types.contains(type.get()))
+    if (checked_types.find(type.get()) != checked_types.end())
       return;
     if (!active_types.insert(type.get()).second)
       throw std::invalid_argument("cyclic semantic type object graph");
     rx::visit(*type, [&](const SemanticType &, const auto &payload) {
-      using T = std::remove_cvref_t<decltype(payload)>;
-      if constexpr (requires { payload.element; })
+      using Payload = std::decay_t<decltype(payload)>;
+      if constexpr (std::is_same_v<Payload, BoxType> ||
+                    std::is_same_v<Payload, VecType> ||
+                    std::is_same_v<Payload, ArrayType> ||
+                    std::is_same_v<Payload, RefType>)
         require_type(payload.element);
-      if constexpr (requires { payload.owner; })
+      if constexpr (std::is_same_v<Payload, BuiltinFunctionType>)
         if (payload.owner)
           require_type(payload.owner);
-      if constexpr (std::same_as<T, StructType> ||
-                    std::same_as<T, FunctionType>) {
+      if constexpr (std::is_same_v<Payload, StructType> ||
+                    std::is_same_v<Payload, FunctionType>) {
         const auto &record = symbol(payload.symbol);
-        const bool correct_kind =
-            std::same_as<T, StructType>
-                ? record.kind == SymbolKind::Struct
-                : (record.kind == SymbolKind::Function ||
-                   record.kind == SymbolKind::AssociatedFunction);
+        bool correct_kind;
+        if constexpr (std::is_same_v<Payload, StructType>) {
+          correct_kind = record.kind == SymbolKind::Struct;
+        } else {
+          correct_kind = record.kind == SymbolKind::Function ||
+                         record.kind == SymbolKind::AssociatedFunction;
+        }
         if (!correct_kind || record.name != payload.name)
           throw std::invalid_argument(
               "semantic nominal type identity mismatch");
@@ -229,8 +234,7 @@ void SemanticIndex::validate_tree() {
   std::unordered_set<ast::NodeId> identities;
   std::unordered_set<ast::NodeId> expression_nodes;
   std::unordered_set<ast::NodeId> type_nodes;
-  // The first traversal also includes preserved, not-yet-interpreted
-  // constraints.
+
   ast::walk(*crate_, [&](const ast::Node &node, const auto &) {
     if (!node.id.value || !identities.insert(node.id).second ||
         node.span.file != crate_->source.id ||
@@ -241,23 +245,24 @@ void SemanticIndex::validate_tree() {
   });
   auto check_ids = [&](const auto &facts) {
     for (const auto &[id, _] : facts)
-      if (!identities.contains(id))
+      if (identities.find(id) == identities.end())
         throw std::invalid_argument("semantic fact refers outside its AST");
   };
   check_ids(declarations_);
   check_ids(expressions_);
   check_ids(types_);
   ast::walk(*crate_, [&](const auto &owner, const auto &) {
-    using T = std::remove_cvref_t<decltype(owner)>;
-    // Lifetime constraints are preserved syntax; current analysis skips them.
-    if constexpr (std::same_as<T, ast::TypePredicate>)
+    using Payload = std::decay_t<decltype(owner)>;
+
+    if constexpr (std::is_same_v<Payload, ast::TypePredicate>)
       return ast::WalkControl::SkipChildren;
-    if constexpr (std::same_as<T, ast::Expr> || std::same_as<T, ast::Block> ||
-                  std::same_as<T, ast::IfBranch>) {
+    if constexpr (std::is_same_v<Payload, ast::Expr> ||
+                  std::is_same_v<Payload, ast::Block> ||
+                  std::is_same_v<Payload, ast::IfBranch>) {
       (void)expression(owner.id);
       expression_nodes.insert(owner.id);
     }
-    if constexpr (std::same_as<T, ast::TypeSyntax>) {
+    if constexpr (std::is_same_v<Payload, ast::TypeSyntax>) {
       (void)type(owner.id);
       type_nodes.insert(owner.id);
     }
@@ -274,53 +279,58 @@ void require_equivalent(const SemanticTypePtr &left,
     throw std::invalid_argument("semantic declaration type mismatch");
 }
 ast::BinaryOp source_operator(const ResolvedOperation &operation) {
-  using B = ast::BinaryOp;
+  using BinaryOp = ast::BinaryOp;
   return std::visit(
       ast::Overloaded{
-          [](const IntegerArithmetic &p) {
-            constexpr std::array values{B::Add, B::Sub, B::Mul, B::Div, B::Rem};
-            return values.at(static_cast<std::size_t>(p.op));
+          [](const IntegerArithmetic &payload) {
+            constexpr std::array values{BinaryOp::Add, BinaryOp::Sub,
+                                        BinaryOp::Mul, BinaryOp::Div,
+                                        BinaryOp::Rem};
+            return values.at(static_cast<std::size_t>(payload.op));
           },
-          [](const BitwiseOperation &p) {
-            constexpr std::array values{B::BitAnd, B::BitOr, B::BitXor};
-            return values.at(static_cast<std::size_t>(p.op));
+          [](const BitwiseOperation &payload) {
+            constexpr std::array values{BinaryOp::BitAnd, BinaryOp::BitOr,
+                                        BinaryOp::BitXor};
+            return values.at(static_cast<std::size_t>(payload.op));
           },
-          [](const ShiftOperation &p) {
-            if (p.count_policy != ShiftCountPolicy::MaskToWidth)
+          [](const ShiftOperation &payload) {
+            if (payload.count_policy != ShiftCountPolicy::MaskToWidth)
               throw std::invalid_argument("invalid shift count policy");
-            constexpr std::array values{B::Shl, B::Shr};
-            return values.at(static_cast<std::size_t>(p.direction));
+            constexpr std::array values{BinaryOp::Shl, BinaryOp::Shr};
+            return values.at(static_cast<std::size_t>(payload.direction));
           },
-          [](const ScalarComparison &p) {
-            constexpr std::array values{B::Eq, B::Ne, B::Lt,
-                                        B::Le, B::Gt, B::Ge};
-            return values.at(static_cast<std::size_t>(p.relation));
+          [](const ScalarComparison &payload) {
+            constexpr std::array values{BinaryOp::Eq, BinaryOp::Ne,
+                                        BinaryOp::Lt, BinaryOp::Le,
+                                        BinaryOp::Gt, BinaryOp::Ge};
+            return values.at(static_cast<std::size_t>(payload.relation));
           },
-          [](const StructuralEquality &p) {
-            constexpr std::array values{B::Eq, B::Ne};
-            return values.at(static_cast<std::size_t>(p.op));
+          [](const StructuralEquality &payload) {
+            constexpr std::array values{BinaryOp::Eq, BinaryOp::Ne};
+            return values.at(static_cast<std::size_t>(payload.op));
           },
-          [](const LogicalOperation &p) {
-            constexpr std::array values{B::LogicalAnd, B::LogicalOr};
-            return values.at(static_cast<std::size_t>(p.op));
+          [](const LogicalOperation &payload) {
+            constexpr std::array values{BinaryOp::LogicalAnd,
+                                        BinaryOp::LogicalOr};
+            return values.at(static_cast<std::size_t>(payload.op));
           }},
       operation);
 }
 void validate_operand(const SemanticIndex &index,
                       const OperandSemantics &operand) {
-  using K = SemanticType::Kind;
+  using TypeKind = SemanticType::Kind;
   auto current = index.expression(operand.node).type;
   for (const auto &adjustment : operand.adjustments) {
     const auto &target = adjustment.target;
     switch (adjustment.kind) {
     case Adjustment::Kind::Dereference:
-      if (current->kind() != K::Ref && current->kind() != K::Box)
+      if (current->kind() != TypeKind::Ref && current->kind() != TypeKind::Box)
         throw std::invalid_argument("dereference adjustment has no referent");
       require_equivalent(current->element(), target);
       break;
     case Adjustment::Kind::BorrowShared:
     case Adjustment::Kind::BorrowMutable:
-      if (target->kind() != K::Ref ||
+      if (target->kind() != TypeKind::Ref ||
           target->is_mutable() !=
               (adjustment.kind == Adjustment::Kind::BorrowMutable))
         throw std::invalid_argument(
@@ -328,13 +338,13 @@ void validate_operand(const SemanticIndex &index,
       require_equivalent(current, target->element());
       break;
     case Adjustment::Kind::MutToShared:
-      if (current->kind() != K::Ref || !current->is_mutable() ||
-          target->kind() != K::Ref || target->is_mutable())
+      if (current->kind() != TypeKind::Ref || !current->is_mutable() ||
+          target->kind() != TypeKind::Ref || target->is_mutable())
         throw std::invalid_argument("mutable-to-shared adjustment mismatch");
       require_equivalent(current->element(), target->element());
       break;
     case Adjustment::Kind::NeverToAny:
-      if (current->kind() != K::Never)
+      if (current->kind() != TypeKind::Never)
         throw std::invalid_argument("never coercion has non-never source");
       break;
     default:
@@ -381,7 +391,7 @@ bool same_target(const CallTarget &left, const CallTarget &right) {
                       }},
       left);
 }
-} // namespace
+}
 void SemanticIndex::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
   auto require_symbol = [&](const ast::Node &node, SymbolKind kind,
@@ -400,33 +410,38 @@ void SemanticIndex::validate_declarations() const {
     const auto &fact = structure(id);
     if (fact.fields.size() != node.fields.size())
       throw std::invalid_argument("semantic struct field count mismatch");
-    for (std::size_t i = 0; i < node.fields.size(); ++i) {
-      const auto &field = node.fields[i];
+    for (std::size_t index = 0; index < node.fields.size(); ++index) {
+      const auto &field = node.fields[index];
       const auto field_id =
           require_symbol(field, SymbolKind::Field, id, field.name.text);
-      if (fact.fields[i] != field_id)
+      if (fact.fields[index] != field_id)
         throw std::invalid_argument("semantic struct field order mismatch");
       require_equivalent(symbol_type(field_id), type(*field.type));
     }
   };
   auto check_function = [&](const ast::Function &node,
                             std::optional<SymbolId> owner = {}) {
-    const auto id = require_symbol(
-        node, owner ? SymbolKind::AssociatedFunction : SymbolKind::Function,
-        owner,
-        owner ? symbol(*owner).name + "::" + node.name.text : node.name.text);
+    auto kind = SymbolKind::Function;
+    auto name = node.name.text;
+    if (owner) {
+      kind = SymbolKind::AssociatedFunction;
+      name = symbol(*owner).name + "::" + name;
+    }
+    const auto id = require_symbol(node, kind, owner, name);
     const auto &fact = function(id);
     if (fact.parameters.size() != node.signature.parameters.size() ||
         fact.receiver.has_value() != node.signature.receiver.has_value())
       throw std::invalid_argument("semantic function signature count mismatch");
-    for (std::size_t i = 0; i < node.signature.parameters.size(); ++i) {
-      const auto &parameter = node.signature.parameters[i];
+    for (std::size_t index = 0; index < node.signature.parameters.size();
+         ++index) {
+      const auto &parameter = node.signature.parameters[index];
       const auto parameter_id = require_symbol(parameter, SymbolKind::Parameter,
                                                id, parameter.binding.name.text);
-      if (fact.parameters[i].symbol != parameter_id)
+      if (fact.parameters[index].symbol != parameter_id)
         throw std::invalid_argument("semantic parameter order mismatch");
-      require_equivalent(fact.parameters[i].type, type(*parameter.type));
-      require_equivalent(fact.parameters[i].type, symbol_type(parameter_id));
+      require_equivalent(fact.parameters[index].type, type(*parameter.type));
+      require_equivalent(fact.parameters[index].type,
+                         symbol_type(parameter_id));
     }
     if (fact.receiver) {
       const auto &receiver = *node.signature.receiver;
