@@ -194,6 +194,14 @@ fn main() {
     assert(false);
   });
   static_assert(std::is_const_v<rx::SemanticTypePtr::element_type>);
+  static_assert(
+      std::is_constructible_v<rx::SemanticIndex, const rx::ast::Crate &,
+                              const rx::SemanticResult &>);
+  static_assert(!std::is_constructible_v<rx::SemanticIndex, rx::ast::Crate &&,
+                                         const rx::SemanticResult &>);
+  static_assert(
+      !std::is_constructible_v<rx::SemanticIndex, const rx::ast::Crate &&,
+                               const rx::SemanticResult &>);
   std::unique_ptr<rx::SemanticIndex> retained;
   {
     auto temporary = rx::SemanticResult::publish(*parsed.crate, original);

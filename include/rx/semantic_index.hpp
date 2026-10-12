@@ -10,6 +10,7 @@ class SemanticIndex {
 public:
   SemanticIndex(const ast::Crate &crate, const SemanticResult &result);
   SemanticIndex(ast::Crate &&, const SemanticResult &) = delete;
+  SemanticIndex(const ast::Crate &&, const SemanticResult &) = delete;
   const ast::Crate &crate() const { return *crate_; }
   const SymbolRecord &symbol(SymbolId id) const;
   const SymbolRecord &declaration(ast::NodeId id) const;
