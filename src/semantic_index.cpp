@@ -85,6 +85,11 @@ const StructSemantics &SemanticIndex::structure(SymbolId id) const {
 const ConstantValue &SemanticIndex::constant(SymbolId id) const {
   return *constants_.at(id);
 }
+void SemanticIndex::require_node(const ast::Node &node) const {
+  const auto found = nodes_.find(node.id);
+  if (found == nodes_.end() || found->second != &node)
+    throw std::invalid_argument("semantic query uses a foreign AST node");
+}
 void SemanticIndex::validate_links() const {
   std::unordered_set<const SemanticType *> checked_types;
   std::unordered_set<const SemanticType *> active_types;
@@ -202,7 +207,7 @@ void SemanticIndex::validate_links() const {
           "constant fact links to a non-constant symbol");
   }
 }
-void SemanticIndex::validate_tree() const {
+void SemanticIndex::validate_tree() {
   std::unordered_set<ast::NodeId> identities;
   std::unordered_set<ast::NodeId> expression_nodes;
   std::unordered_set<ast::NodeId> type_nodes;
@@ -214,6 +219,7 @@ void SemanticIndex::validate_tree() const {
         node.span.begin > node.span.end ||
         node.span.end > crate_->source.text.size())
       throw std::invalid_argument("invalid AST identity or source span");
+    nodes_.emplace(node.id, &node);
   });
   auto check_ids = [&](const auto &facts) {
     for (const auto &[id, _] : facts)

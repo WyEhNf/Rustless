@@ -37,7 +37,7 @@ struct SymbolRecord {
 };
 
 struct ExpressionSemantics {
-  // Method-call adjustments describe how its receiver is passed.
+  // Adjustments here convert this expression's result at its use site.
   ast::NodeId node{};
   SemanticTypePtr type;
   bool is_place{};
@@ -49,6 +49,9 @@ struct ExpressionSemantics {
   std::optional<CallTarget> callable;
   std::optional<ResolvedBinary> binary;
   std::optional<ResolvedBinary> compound;
+  std::optional<ResolvedUnary> unary;
+  // Projections and methods convert their input, separately from their result.
+  std::optional<OperandSemantics> receiver;
 };
 
 struct SemanticSummary {

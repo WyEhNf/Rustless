@@ -105,6 +105,8 @@ struct ExprInfo {
   std::optional<CallTarget> callable;
   std::optional<ResolvedBinary> binary;
   std::optional<ResolvedBinary> compound;
+  std::optional<ResolvedUnary> unary;
+  std::optional<OperandSemantics> receiver;
 };
 
 struct Binding {
@@ -865,7 +867,7 @@ private:
         node.id,           result.type,          result.is_place,
         result.is_mutable, result.access_locked, result.symbol,
         result.target,     result.adjustments, result.callable,
-        result.binary,     result.compound};
+        result.binary,     result.compound, result.unary, result.receiver};
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
     return check_expr(*expression, std::move(expected));
@@ -888,6 +890,8 @@ private:
               inner.adjustments.clear();
               inner.binary.reset();
               inner.compound.reset();
+              inner.unary.reset();
+              inner.receiver.reset();
               return inner;
             },
             [&](const ast::Expr &node, const ast::PathExpr &path) {

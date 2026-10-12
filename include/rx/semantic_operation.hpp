@@ -48,6 +48,12 @@ struct ResolvedBinary {
   OperandSemantics right;
   SemanticTypePtr result;
 };
+enum class UnaryOperation { Negate, Complement, Dereference };
+struct ResolvedUnary {
+  UnaryOperation operation;
+  OperandSemantics operand;
+  SemanticTypePtr result;
+};
 struct FunctionTarget { SymbolId symbol; };
 struct BuiltinTarget { BuiltinId builtin; };
 using CallTarget = std::variant<FunctionTarget, BuiltinTarget>;

@@ -20,15 +20,19 @@ public:
   const StructSemantics &structure(SymbolId id) const;
   const ConstantValue &constant(SymbolId id) const;
   const SemanticTypePtr &type(const ast::TypeSyntax &node) const {
+    require_node(node);
     return type(node.id);
   }
   const ExpressionSemantics &expression(const ast::Expr &node) const {
+    require_node(node);
     return expression(node.id);
   }
   const ExpressionSemantics &expression(const ast::Block &node) const {
+    require_node(node);
     return expression(node.id);
   }
   const ExpressionSemantics &expression(const ast::IfBranch &node) const {
+    require_node(node);
     return expression(node.id);
   }
 
@@ -38,11 +42,13 @@ private:
   SemanticIndex(const ast::Crate &crate,
                 std::shared_ptr<const SemanticData> snapshot, ValidationTag);
   void validate_links() const;
-  void validate_tree() const;
+  void validate_tree();
   void validate_declarations() const;
   void validate_shapes() const;
+  void require_node(const ast::Node &node) const;
   const ast::Crate *crate_;
   std::shared_ptr<const SemanticData> snapshot_;
+  std::unordered_map<ast::NodeId, const ast::Node *> nodes_;
   std::unordered_map<SymbolId, const SymbolRecord *> symbols_;
   std::unordered_map<ast::NodeId, const SymbolRecord *> declarations_;
   std::unordered_map<ast::NodeId, const ExpressionSemantics *> expressions_;
