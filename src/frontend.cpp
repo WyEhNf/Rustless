@@ -481,62 +481,52 @@ private:
     if (primary->CONTINUE())
       return make_expr(primary, ast::ContinueExpr{});
     if (primary->expression())
-      return make_expr(primary,
-                       ast::ParenExpr{build_expression(primary->expression())});
+      return make_expr(primary, ast::ParenExpr{build_expression(primary->expression())});
     return make_expr(primary, ast::UnitExpr{});
   }
 
-  std::vector<ast::ExprPtr>
-  call_arguments(rxgrammar::RxParser::CallArgumentsContext *context) {
+  std::vector<ast::ExprPtr> call_arguments(rxgrammar::RxParser::CallArgumentsContext *context) {
     std::vector<ast::ExprPtr> values;
     for (auto *value : context->expression())
       values.push_back(build_expression(value));
     return values;
   }
-  ast::ExprPtr apply_call(ast::ExprPtr base,
-                          rxgrammar::RxParser::CallArgumentsContext *context) {
+  ast::ExprPtr apply_call(ast::ExprPtr base, rxgrammar::RxParser::CallArgumentsContext *context) {
     auto span = merge(base->span, source_span(context));
-    auto call = make_expr(
-        context, ast::CallExpr{std::move(base), call_arguments(context)});
+    auto call = make_expr(context, ast::CallExpr{std::move(base), call_arguments(context)});
     call->span = span;
     return call;
   }
-  ast::ExprPtr apply_dot(ast::ExprPtr base,
-                         rxgrammar::RxParser::DotSuffixContext *context) {
+  ast::ExprPtr apply_dot(ast::ExprPtr base, rxgrammar::RxParser::DotSuffixContext *context) {
     auto span = merge(base->span, source_span(context));
     if (!context->callArguments()) {
       auto field =
-          make_expr(context, ast::FieldExpr{std::move(base),
-                                            identifier(context->identifier())});
+          make_expr(context, ast::FieldExpr{std::move(base), identifier(context->identifier())});
       field->span = span;
       return field;
     }
     auto *segment = context->pathExprSegment();
-    auto method = make_expr(
-        context, ast::MethodCallExpr{std::move(base),
-                                     identifier(segment->pathIdentSegment()),
-                                     build_arguments(segment->genericArgs()),
-                                     call_arguments(context->callArguments())});
+    auto method = make_expr(context, ast::MethodCallExpr{std::move(base),
+                                                         identifier(segment->pathIdentSegment()),
+                                                         build_arguments(segment->genericArgs()),
+                                                         call_arguments(context->callArguments())});
     method->span = span;
     return method;
   }
-  ast::ExprPtr
-  apply_postfix(ast::ExprPtr base,
-                rxgrammar::RxParser::PostfixSuffixContext *context) {
+  ast::ExprPtr apply_postfix(ast::ExprPtr base,
+                             rxgrammar::RxParser::PostfixSuffixContext *context) {
     if (context->callArguments())
       return apply_call(std::move(base), context->callArguments());
     if (context->dotSuffix())
       return apply_dot(std::move(base), context->dotSuffix());
     auto span = merge(base->span, source_span(context));
     auto index = make_expr(
-        context, ast::IndexExpr{std::move(base),
-                                build_expression(context->expression())});
+        context, ast::IndexExpr{std::move(base), build_expression(context->expression())});
     index->span = span;
     return index;
   }
 
   ast::ExprPtr build_postfix(ParseContext *context) {
-    // Context order preserves the source order of a chained postfix expression.
     std::optional<ast::ExprPtr> result;
     for (auto *child : context->children) {
       auto *child_context = as_context(child);
@@ -546,14 +536,12 @@ private:
       if (!result) {
         result.emplace(build_expression(child_context));
       } else if (name == "postfixSuffix") {
-        result = apply_postfix(
-            std::move(*result),
-            static_cast<rxgrammar::RxParser::PostfixSuffixContext *>(
-                child_context));
+        result =
+            apply_postfix(std::move(*result),
+                          static_cast<rxgrammar::RxParser::PostfixSuffixContext *>(child_context));
       } else if (name == "dotSuffix") {
         result = apply_dot(std::move(*result),
-                           static_cast<rxgrammar::RxParser::DotSuffixContext *>(
-                               child_context));
+                           static_cast<rxgrammar::RxParser::DotSuffixContext *>(child_context));
       }
     }
     if (!result)
@@ -565,25 +553,24 @@ private:
     ParseContext *operator_context = nullptr;
     std::optional<ast::ExprPtr> operand;
     for (auto *child : context->children) {
-      auto *part = as_context(child);
-      if (!part)
+      auto *child_context = as_context(child);
+      if (!child_context)
         continue;
-      if (rule(part) == "unaryOperator")
-        operator_context = part;
-      else if (is_expression_context(part))
-        operand.emplace(build_expression(part));
+      if (rule(child_context) == "unaryOperator")
+        operator_context = child_context;
+      else if (is_expression_context(child_context))
+        operand.emplace(build_expression(child_context));
     }
     if (!operand)
       throw std::logic_error("missing unary operand");
     if (!operator_context)
       return std::move(*operand);
-    auto op = operator_context->getText();
-    if (op.starts_with("&")) {
+    const auto operator_text = operator_context->getText();
+    if (has_prefix(operator_text, "&")) {
       auto inner =
-          make_expr(context, ast::BorrowExpr{mutability(op.ends_with("mut")),
-                                             source_span(operator_context),
-                                             std::move(*operand)});
-      if (op.starts_with("&&")) {
+          make_expr(context, ast::BorrowExpr{mutability(has_suffix(operator_text, "mut")),
+                                             source_span(operator_context), std::move(*operand)});
+      if (has_prefix(operator_text, "&&")) {
         ++inner->span.begin;
         ++inner->span.column;
         ++std::get<ast::BorrowExpr>(inner->data).operator_span.begin;
@@ -591,30 +578,28 @@ private:
         auto outer_span = source_span(operator_context);
         outer_span.end = outer_span.begin + 1;
         return make_expr(context,
-                         ast::BorrowExpr{ast::Mutability::Immutable, outer_span,
-                                         std::move(inner)});
+                         ast::BorrowExpr{ast::Mutability::Immutable, outer_span, std::move(inner)});
       }
       return inner;
     }
-    return make_expr(context, ast::UnaryExpr{ast::unary_operator(op),
-                                             source_span(operator_context),
-                                             std::move(*operand)});
+    return make_expr(context, ast::UnaryExpr{ast::unary_operator(operator_text),
+                                             source_span(operator_context), std::move(*operand)});
   }
   ast::ExprPtr build_cast(ParseContext *context) {
     std::optional<ast::ExprPtr> result;
     for (auto *child : context->children) {
-      auto *part = as_context(child);
-      if (!part)
+      auto *child_context = as_context(child);
+      if (!child_context)
         continue;
-      auto name = rule(part);
-      if (is_expression_context(part))
-        result.emplace(build_expression(part));
+      auto name = rule(child_context);
+      if (is_expression_context(child_context))
+        result.emplace(build_expression(child_context));
       else if (name == "typeRef" || name == "closedCastType") {
         if (!result)
           throw std::logic_error("missing cast operand");
-        auto span = merge((*result)->span, source_span(part));
-        auto cast = make_expr(
-            context, ast::CastExpr{std::move(*result), build_type(part)});
+        auto span = merge((*result)->span, source_span(child_context));
+        auto cast =
+            make_expr(context, ast::CastExpr{std::move(*result), build_type(child_context)});
         cast->span = span;
         result = std::move(cast);
       }
@@ -624,7 +609,6 @@ private:
     return std::move(*result);
   }
   ast::ExprPtr fold_binary(ParseContext *context) {
-    // Precedence is already encoded by the generated parser rule hierarchy.
     std::optional<ast::ExprPtr> result;
     std::string operator_text;
     Span operator_span;
@@ -634,26 +618,25 @@ private:
         operator_span = token_span(terminal->getSymbol());
         continue;
       }
-      auto *part = as_context(child);
-      if (!part)
+      auto *child_context = as_context(child);
+      if (!child_context)
         continue;
-      if (is_operator_rule(rule(part))) {
-        operator_text = part->getText();
-        operator_span = source_span(part);
+      if (is_operator_rule(rule(child_context))) {
+        operator_text = child_context->getText();
+        operator_span = source_span(child_context);
         continue;
       }
-      if (!is_expression_context(part))
+      if (!is_expression_context(child_context))
         continue;
-      auto operand = build_expression(part);
+      auto operand = build_expression(child_context);
       if (!result) {
         result.emplace(std::move(operand));
         continue;
       }
       auto span = merge((*result)->span, operand->span);
-      auto binary = make_expr(
-          context,
-          ast::BinaryExpr{ast::binary_operator(operator_text), operator_span,
-                          std::move(*result), std::move(operand)});
+      auto binary =
+          make_expr(context, ast::BinaryExpr{ast::binary_operator(operator_text), operator_span,
+                                             std::move(*result), std::move(operand)});
       binary->span = span;
       result = std::move(binary);
     }
@@ -662,19 +645,20 @@ private:
     return std::move(*result);
   }
   ast::ExprPtr build_assignment(ParseContext *context) {
-    std::optional<ast::ExprPtr> left, right;
+    std::optional<ast::ExprPtr> left;
+    std::optional<ast::ExprPtr> right;
     ParseContext *operator_context = nullptr;
     for (auto *child : context->children) {
-      auto *part = as_context(child);
-      if (!part)
+      auto *child_context = as_context(child);
+      if (!child_context)
         continue;
-      if (is_operator_rule(rule(part)))
-        operator_context = part;
-      else if (is_expression_context(part)) {
+      if (is_operator_rule(rule(child_context)))
+        operator_context = child_context;
+      else if (is_expression_context(child_context)) {
         if (!left)
-          left.emplace(build_expression(part));
+          left.emplace(build_expression(child_context));
         else
-          right.emplace(build_expression(part));
+          right.emplace(build_expression(child_context));
       }
     }
     if (!left)
