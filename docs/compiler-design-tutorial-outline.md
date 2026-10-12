@@ -339,7 +339,7 @@
 
 **Rustless 示例。** `const N: usize = M; const M: usize = 3;`；`fn sum(values: &[i32; N]) -> i32 { values[0] }`；`let x = 1`、`let x: u32 = 1`、`let x = 1usize`；常量环作为明确的错误例子。
 
-**实现摘录。** S03—S04：`SemanticType/TypeResolution/same/resolve_type_impl/literal_type/integer_magnitude/evaluate_constant/constant_value`。建议 TypeContext 使用短小示意，注明未实现。
+**实现摘录。** S03—S04：`SemanticType/TypeResolution/same/resolve_type_impl/literal_type/integer_magnitude/evaluate_constant/constant_value`。加入 semantic_type.hpp/.cpp 的 TypeContext 工厂与唯一化键真实摘录。
 
 **图示。**
 
@@ -424,7 +424,7 @@
 
 **Rustless 示例。** `let x = missing; printInt(x);`；函数参数与结构体字段的完整导出；`let g = f; g()` 用于解释函数项身份、局部绑定身份和调用目标不能混同。
 
-**实现摘录。** S10—S11：完整结果分组、`SemanticIndex` 的构造与查询、声明链接检查、事实覆盖检查。建议接口分别标注，避免承诺现状已经深层不可变。
+**实现摘录。** S10—S11：完整结果分组、`SemanticIndex` 的构造与查询、声明链接检查、事实覆盖检查。加入受控发布和使用事实的真实接口；未来语义层另行标注。
 
 **图示。**
 
@@ -846,9 +846,13 @@
 | [diagnostic.hpp](E:/RComplier/Rustless/include/rx/diagnostic.hpp) | FileId、Span、Diagnostic、DiagnosticEngine | 2、13 |
 | [frontend.hpp](E:/RComplier/Rustless/include/rx/frontend.hpp) | FrontendResult、parse_source/parse_syntax/lex_source、只读 AST 发布 | 1—3 |
 | [symbol.hpp](E:/RComplier/Rustless/include/rx/symbol.hpp) | 与 NodeId 独立的 SymbolId | 9、13 |
-| [semantic.hpp](E:/RComplier/Rustless/include/rx/semantic.hpp) | 类型、转换、符号、表达式事实、声明结果与分析接口 | 9—13 |
+| [semantic.hpp](E:/RComplier/Rustless/include/rx/semantic.hpp) | 符号、表达式事实、草稿、冻结结果与分析接口 | 9—13 |
+| [semantic_type.hpp](E:/RComplier/Rustless/include/rx/semantic_type.hpp) | 专属不可变类型、Visitor、TypeContext | 10、13 |
+| [semantic_operation.hpp](E:/RComplier/Rustless/include/rx/semantic_operation.hpp) | 有序转换、输入使用、操作与调用身份 | 11—13、17—18 |
+| [builtin.hpp](E:/RComplier/Rustless/include/rx/builtin.hpp) | 内建语言身份 | 12、18 |
+| [target_layout.hpp](E:/RComplier/Rustless/include/rx/target_layout.hpp) | RV32布局、Vec偏移、移位mask、目标元数据 | 16、17、21 |
 | [semantic_literal.hpp](E:/RComplier/Rustless/include/rx/semantic_literal.hpp) | 字面量量值解码与有效性 | 10 |
-| [semantic_index.hpp](E:/RComplier/Rustless/include/rx/semantic_index.hpp) | 稳定查询、借用关系与完整性 | 13、17 |
+| [semantic_index.hpp](E:/RComplier/Rustless/include/rx/semantic_index.hpp) | 冻结快照、AST借用与精确完整性 | 13、17 |
 | [ir_ids.hpp](E:/RComplier/Rustless/include/rx/ir_ids.hpp) | ValueId、BlockId、Origin | 14 |
 | [ir.hpp](E:/RComplier/Rustless/include/rx/ir.hpp) | Type、Operand、十三类指令、Module 与属性查询 | 14、15 |
 | [ir_visit.hpp](E:/RComplier/Rustless/include/rx/ir_visit.hpp) | IR 覆盖约束、操作数/后继枚举 | 14、19 |
@@ -915,7 +919,7 @@
 | I08 | [ir_semantic.hpp:9](E:/RComplier/Rustless/include/rx/ir_semantic.hpp:9)、`:23`、`:46` | Layout、ABI 与桥接入口 |
 | I09 | [ir_semantic.cpp:69](E:/RComplier/Rustless/src/llvm/ir_semantic.cpp:69)、`:106`、`:130` | 布局计算、缓存与函数参数分类 |
 | I10 | [ir_print.cpp:145](E:/RComplier/Rustless/src/llvm/ir_print.cpp:145)、`:168` | 名称转义、目标信息与验证后输出 |
-| I11 | [ir_operators.cpp:10](E:/RComplier/Rustless/src/llvm/ir_operators.cpp:10)、`:18` | 标量运算、谓词与短路描述；边界缺口 |
+| I11 | [ir_operators.cpp:10](E:/RComplier/Rustless/src/llvm/ir_operators.cpp:10)、`:18` | 已解析运算、一元位置、内容相等、移位mask与有序输入转换 |
 | I12 | [ir_semantic.cpp 测试](E:/RComplier/Rustless/tests/ir_semantic.cpp)、[ir_alignment.cpp](E:/RComplier/Rustless/tests/ir_alignment.cpp)、[ir_smoke.cpp](E:/RComplier/Rustless/tests/ir_smoke.cpp) | 布局、构造与不变量的独立预期 |
 
 ### C.4 Rx-Compiler 参考实现（R）
