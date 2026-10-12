@@ -569,14 +569,14 @@ void SemanticIndex::validate_shapes() const {
               !function(target->symbol).receiver)
             throw std::invalid_argument("method target does not match receiver");
         } else {
-          const auto target = std::get<BuiltinTarget>(*fact.callable).builtin;
+          const auto builtin_target = std::get<BuiltinTarget>(*fact.callable).builtin;
           const auto name = payload.method.text;
           const bool matches =
-              (name == "clone" && target == BuiltinId::Clone) ||
-              (name == "len" && target == BuiltinId::Len) ||
-              (name == "is_empty" && target == BuiltinId::IsEmpty) ||
-              (name == "push" && target == BuiltinId::Push) ||
-              (name == "remove" && target == BuiltinId::Remove);
+              (name == "clone" && builtin_target == BuiltinId::Clone) ||
+              (name == "len" && builtin_target == BuiltinId::Len) ||
+              (name == "is_empty" && builtin_target == BuiltinId::IsEmpty) ||
+              (name == "push" && builtin_target == BuiltinId::Push) ||
+              (name == "remove" && builtin_target == BuiltinId::Remove);
           if (!matches)
             throw std::invalid_argument("builtin method target name mismatch");
         }
