@@ -143,8 +143,59 @@ fn main() {
   }
 }
 
+void callable_aliases() {
+  Program program(R"(
+fn f(x: i32) -> i32 { x + 1 }
+fn main() {
+  let g = f;
+  let result = g(2);
+  let out = printInt;
+  out(result);
+  let new_vec = Vec::<i32>::new;
+  let values = new_vec();
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  const auto &function =
+      std::get<ast::Function>(program.parsed.crate->items[0]);
+  const auto function_symbol = index.declaration(function.id).id;
+  const auto &call = expression(program, "g(2)");
+  const auto &callee = *ast::get_if<ast::CallExpr>(call)->callee;
+  const auto &callee_fact = index.expression(callee);
+  assert(callee_fact.symbol && *callee_fact.symbol != function_symbol);
+  assert(index.symbol(*callee_fact.symbol).kind == rx::SymbolKind::Local);
+  assert(std::get<rx::FunctionTarget>(*callee_fact.callable).symbol ==
+         function_symbol);
+  const auto &call_fact = index.expression(call);
+  assert(call_fact.type->kind() == K::I32);
+  assert(std::get<rx::FunctionTarget>(*call_fact.callable).symbol ==
+         function_symbol);
+  assert(call_fact.symbol == function_symbol);
+  const auto &io_call = expression(program, "out(result)");
+  const auto &io_callee = *ast::get_if<ast::CallExpr>(io_call)->callee;
+  const auto &io_fact = index.expression(io_call);
+  assert(io_fact.type->kind() == K::Unit);
+  assert(std::get<rx::BuiltinTarget>(*io_fact.callable).builtin ==
+         rx::BuiltinId::PrintInt);
+  assert(rx::get_if<rx::BuiltinFunctionType>(*index.expression(io_callee).type)
+             ->builtin == rx::BuiltinId::PrintInt);
+  const auto &vec_call = expression(program, "new_vec()");
+  const auto &vec_callee = *ast::get_if<ast::CallExpr>(vec_call)->callee;
+  const auto &vec_fact = index.expression(vec_call);
+  const auto &builtin =
+      *rx::get_if<rx::BuiltinFunctionType>(*index.expression(vec_callee).type);
+  assert(builtin.builtin == rx::BuiltinId::VecNew && builtin.owner);
+  assert(builtin.owner->kind() == K::Vec &&
+         builtin.owner->element()->kind() == K::I32);
+  assert(rx::same_type(vec_fact.type, builtin.owner));
+  assert(std::get<rx::BuiltinTarget>(*vec_fact.callable).builtin ==
+         rx::BuiltinId::VecNew);
+}
+
 int main() {
   boolean_assignments();
   reference_operand_adjustments();
   box_equality();
+  callable_aliases();
 }
