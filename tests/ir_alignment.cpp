@@ -60,8 +60,47 @@ ir::Module diamond() {
   assert(function.blocks[0].instructions[0].origin->node == source.id);
   return module;
 }
+ir::Module parallel_edges() {
+  ir::Function function{"parallel_edges", ir::Type::I32};
+  ir::Builder builder(function);
+  auto entry = builder.create_block("entry");
+  auto join = builder.create_block("join");
+  builder.select(entry);
+  auto value = builder.binary(ir::BinaryOp::Add,
+                              ir::Operand::constant(ir::Type::I32, 3),
+                              ir::Operand::constant(ir::Type::I32, 4));
+  builder.cond_branch(ir::Operand::constant(ir::Type::I1, 1), join, join);
+  builder.select(join);
+  auto merged = builder.phi(ir::Type::I32, {{value, entry}, {value, entry}});
+  builder.ret(merged);
+  return {{}, {std::move(function)}};
+}
+void check_parallel_edges() {
+  auto module = parallel_edges();
+  assert(ir::verify(module).empty());
+  assert(ir::print(module).find("phi i32") != std::string::npos);
+  auto &phi = std::get<ir::Phi>(module.functions[0].blocks[1].instructions[0].data);
+  auto second = phi.incoming.back();
+  phi.incoming.pop_back();
+  assert(!ir::verify(module).empty()); // One incoming cannot cover two edges.
+  phi.incoming.push_back(second);
+  phi.incoming.back().value = ir::Operand::constant(ir::Type::I32, 8);
+  assert(!ir::verify(module).empty()); // Duplicate edges cannot select two values.
+  phi.incoming.back() = second;
+  phi.incoming.push_back(second);
+  assert(!ir::verify(module).empty()); // Three incoming values exceed two edges.
+  phi.incoming.pop_back();
+  auto &branch =
+      std::get<ir::CondBranch>(module.functions[0].blocks[0].instructions.back().data);
+  module.functions[0].blocks[0].instructions.back().data =
+      ir::Branch{branch.consequent};
+  assert(!ir::verify(module).empty()); // Two incoming values cannot cover one edge.
+  phi.incoming.pop_back();
+  assert(ir::verify(module).empty());
+}
 } // namespace
 int main(int argc, char **argv) {
+  check_parallel_edges();
   auto module = diamond();
   assert(ir::verify(module).empty());
   auto llvm = ir::print(module);
