@@ -35,6 +35,7 @@ public:
 private:
   void validate_links() const;
   void validate_tree() const;
+  void validate_declarations() const;
   const ast::Crate *crate_;
   std::unordered_map<SymbolId, const SymbolRecord *> symbols_;
   std::unordered_map<ast::NodeId, const SymbolRecord *> declarations_;

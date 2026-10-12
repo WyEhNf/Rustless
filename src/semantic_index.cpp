@@ -35,6 +35,7 @@ SemanticIndex::SemanticIndex(const ast::Crate &crate,
     insert(constants_, fact.symbol, fact);
   validate_links();
   validate_tree();
+  validate_declarations();
 }
 const SymbolRecord &SemanticIndex::symbol(SymbolId id) const {
   return *symbols_.at(id);
@@ -161,5 +162,63 @@ void SemanticIndex::validate_tree() const {
       (void)type(owner.id);
     return ast::WalkControl::Continue;
   });
+}
+namespace {
+bool equivalent(const SemanticTypePtr &left, const SemanticTypePtr &right) {
+  if (!left || !right || left->kind != right->kind)
+    return false;
+  using Kind = SemanticType::Kind;
+  switch (left->kind) {
+  case Kind::Struct:
+  case Kind::Function:
+    return left->name == right->name;
+  case Kind::Array:
+    return left->length == right->length &&
+           equivalent(left->element, right->element);
+  case Kind::Ref:
+    return left->is_mutable == right->is_mutable &&
+           equivalent(left->element, right->element);
+  case Kind::Box:
+  case Kind::Vec:
+    return equivalent(left->element, right->element);
+  default:
+    return left->kind != Kind::Error;
+  }
+}
+void require_equivalent(const SemanticTypePtr &left,
+                        const SemanticTypePtr &right) {
+  if (!equivalent(left, right))
+    throw std::invalid_argument("semantic declaration type mismatch");
+}
+} // namespace
+void SemanticIndex::validate_declarations() const {
+  std::unordered_set<ast::NodeId> expected;
+  auto require_symbol = [&](const ast::Node &node, SymbolKind kind,
+                            std::optional<SymbolId> owner = {}) -> SymbolId {
+    const auto &record = declaration(node.id);
+    if (record.kind != kind || record.owner != owner)
+      throw std::invalid_argument("AST declaration kind or owner mismatch");
+    expected.insert(node.id);
+    return record.id;
+  };
+  auto check_struct = [&](const ast::Struct &node) {
+    const auto id = require_symbol(node, SymbolKind::Struct);
+    const auto &fact = structure(id);
+    if (fact.fields.size() != node.fields.size())
+      throw std::invalid_argument("semantic struct field count mismatch");
+    for (std::size_t i = 0; i < node.fields.size(); ++i) {
+      const auto &field = node.fields[i];
+      const auto field_id = require_symbol(field, SymbolKind::Field, id);
+      if (fact.fields[i] != field_id)
+        throw std::invalid_argument("semantic struct field order mismatch");
+      require_equivalent(symbol_type(field_id), type(*field.type));
+    }
+  };
+  for (const auto &item : crate_->items)
+    ast::visit(item, [&](const ast::Node &, const auto &payload) {
+      if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
+                                 ast::Struct>)
+        check_struct(payload);
+    });
 }
 } // namespace rx
