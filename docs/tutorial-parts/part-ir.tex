@@ -1241,18 +1241,19 @@ struct MachineInstruction {
 
 如果前驱只有这一个后继，复制可以放在其终结指令之前；如果后继只有这一个前驱，也可能放在后继开头。若前驱有多个后继且后继有多个前驱，这条边称为关键边。放在前驱会使复制在其他离开路径上也执行，放在后继会使复制在其他到达路径上也执行。拆出一个专用边块能准确限定执行条件。
 
-下图把一个 Phi 输入转移到专用边块，呈现关键边拆分怎样保留复制只在该边上执行的含义。
+下图将原有 Phi 的两个输入展开为到达边上的赋值：从 P 取得 a，从 Q 取得 b。专用边块保证 P 的复制只在通往 J 的路径上执行；图中 Q 只有一个后继，因此可以在 Q 末尾复制。转换后的 J 使用已经写入的 result，不再保留原 Phi。
 \begin{figure}[htbp]\centering
 \begin{tikzpicture}
 \node[irbox] (p) at (0,0) {P\\两个后继};
-\node[irbox] (q) at (0,-2) {Q};
-\node[irbox] (join) at (4,-1) {J\\Phi(a from P, b from Q)};
+\node[irbox] (q) at (0,-2) {Q\\result := b};
+\node[irbox] (join) at (4,-1) {J\\使用 result};
 \node[irbox] (other) at (4,1) {另一后继};
 \draw[irarrow] (p)--(other); \draw[irarrow] (q)--(join);
-\draw[irarrow,dashed] (p)--node[above,font=\small]{原关键边}(join);
+\draw[irarrow,dashed] (p)--(join);
 \node[irbox] (edge) at (8.1,0) {新边块 E\\result := a};
 \draw[irarrow] (p.north) to[bend left=35] (edge.north);
 \draw[irarrow] (edge)--(join);
+\node[irnote,text width=75mm] at (4,-2.9) {虚线表示已经删除的 P 到 J 边};
 \end{tikzpicture}
 \caption{把 Phi 的一个输入实现为受路径限制的复制}
 \end{figure}

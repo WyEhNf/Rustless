@@ -2008,7 +2008,7 @@ fn scoped() -> i32 {
 \draw[->] (expr)--(type); \draw[->] (literal)--(operators);
 \draw[->] (type)--(path); \draw[->] (path)--(names);
 \draw[->] (names)--(node); \draw[->] (node)--(diagnostic);
-\draw[->] (generics.south)--(-3,-8.8)--(path.west);
+\draw[->] (generics.south)--(-3,-6)--(-3.5,-6)--(-3.5,-8.8)--(path.west);
 \draw[->] (use.south)--(6,-10)--(names.east);
 \draw[->] (source.south)--(node.north);
 \end{tikzpicture}
