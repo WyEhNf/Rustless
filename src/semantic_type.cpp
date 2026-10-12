@@ -3,6 +3,7 @@
 #include <map>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_set>
 
 namespace rx {
 SemanticType::Kind SemanticType::kind() const noexcept {
@@ -77,6 +78,8 @@ struct TypeContext::Impl {
     }
   };
   std::map<Key, SemanticTypePtr> types;
+  std::map<SymbolId, std::pair<SemanticType::Kind, std::string>> declarations;
+  std::unordered_set<const SemanticType *> owned;
 };
 
 TypeContext::TypeContext() : impl_(std::make_unique<Impl>()) {}
@@ -86,8 +89,16 @@ SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
   using K = SemanticType::Kind;
   SemanticType value(std::move(data));
   Impl::Key key{value.kind()};
-  if (key.kind == K::Struct || key.kind == K::Function)
+  if (key.kind == K::Struct || key.kind == K::Function) {
     key.symbol = value.symbol();
+    if (!key.symbol.value || value.name().empty())
+      throw std::invalid_argument("nominal types need an identity and name");
+    const auto declaration = std::pair{key.kind, value.name()};
+    const auto found = impl_->declarations.find(key.symbol);
+    if (found != impl_->declarations.end() && found->second != declaration)
+      throw std::invalid_argument("declaration identity has conflicting types");
+    impl_->declarations.emplace(key.symbol, declaration);
+  }
   if (key.kind == K::Box || key.kind == K::Vec || key.kind == K::Array ||
       key.kind == K::Ref)
     key.element = value.element().get();
@@ -104,6 +115,7 @@ SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
   }
   SemanticTypePtr result(new const SemanticType(std::move(value.data_)));
   impl_->types.emplace(key, result);
+  impl_->owned.insert(result.get());
   return result;
 }
 
@@ -128,6 +140,54 @@ SemanticTypePtr TypeContext::primitive(SemanticType::Kind kind) {
     return intern(UsizeType{});
   default:
     throw std::invalid_argument("primitive factory needs an atomic type");
+  }
+}
+
+SemanticTypePtr TypeContext::structure(SymbolId symbol, std::string name) {
+  return intern(StructType{symbol, std::move(name)});
+}
+SemanticTypePtr TypeContext::function(SymbolId symbol, std::string name) {
+  return intern(FunctionType{symbol, std::move(name)});
+}
+SemanticTypePtr TypeContext::box(SemanticTypePtr element) {
+  return intern(BoxType{canonical(std::move(element))});
+}
+SemanticTypePtr TypeContext::vector(SemanticTypePtr element) {
+  return intern(VecType{canonical(std::move(element))});
+}
+SemanticTypePtr TypeContext::array(SemanticTypePtr element,
+                                   std::uint64_t length) {
+  return intern(ArrayType{canonical(std::move(element)), length});
+}
+SemanticTypePtr TypeContext::reference(SemanticTypePtr element,
+                                       ast::Mutability mutability) {
+  if (mutability != ast::Mutability::Immutable &&
+      mutability != ast::Mutability::Mutable)
+    throw std::invalid_argument("invalid reference mutability");
+  return intern(RefType{canonical(std::move(element)), mutability});
+}
+
+SemanticTypePtr TypeContext::canonical(SemanticTypePtr value) {
+  if (!value)
+    throw std::invalid_argument("semantic type elements cannot be null");
+  if (impl_->owned.contains(value.get()))
+    return value;
+  using K = SemanticType::Kind;
+  switch (value->kind()) {
+  case K::Struct:
+    return structure(value->symbol(), value->name());
+  case K::Function:
+    return function(value->symbol(), value->name());
+  case K::Box:
+    return box(value->element());
+  case K::Vec:
+    return vector(value->element());
+  case K::Array:
+    return array(value->element(), value->length());
+  case K::Ref:
+    return reference(value->element(), get_if<RefType>(*value)->mutability);
+  default:
+    return primitive(value->kind());
   }
 }
 } // namespace rx
