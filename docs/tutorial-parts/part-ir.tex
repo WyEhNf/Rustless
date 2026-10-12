@@ -350,3 +350,382 @@ Builder 还能把源节点设置为当前 Origin，随后生成的指令携带�
 多重 Phi 边就是合适的独立检验：内部图保留两条同目标分支边，输出两个相同 incoming，外部验证应接受；只输出一次则应拒绝。期望来自边语义，而不是来自打印器当前恰好输出什么。关于 LLVM 的整体合法性与 Phi 定义，可以查阅其\href{https://llvm.org/docs/LangRef.html#well-formedness}{合法性说明}与\href{https://llvm.org/docs/LangRef.html#phi-instruction}{Phi 指令说明}。
 
 本章建立了“计算发生在哪里、值从哪里来”的关系。下一章将补上另一项知识：一个对象占多少空间，以及函数边界如何安排这些值。
+
+\chapter{数据布局与函数的内部 ABI}
+\label{chap:layout-abi}
+\section*{本章导读}
+一个类型有明确含义，还不等于它已经有明确的存储方式。结构体的字段偏移、数组的元素间距、函数的参数与返回值，都需要把类型知识落实到具体机器。本章阅读当前 TargetLayout 与 SemanticBridge，逐步推导大小、对齐和内部调用约定。学习者应能手工计算一个小结构的布局，并能解释通过地址传递一个值为什么没有把它变成源语言引用。
+
+\section{大小、对齐与补齐}
+使用以下结构作为本章的贯穿例子：
+\begin{lstlisting}[language=Rustless,caption={包含不同对齐要求的 Packet}]
+struct Packet {
+    flag: bool,
+    count: i32,
+    bits: [bool; 3]
+}
+\end{lstlisting}
+当前内部布局保持声明字段顺序。flag 的大小和对齐均为一，因此位于偏移零。count 需要四字节对齐，下一个满足条件的偏移是四。bits 需要三个字节，位于偏移八。字段最后结束于偏移十一，但整个结构需要满足最大字段对齐四，因此总大小补齐到十二。
+
+若已使用空间为 $s$，下一字段对齐为 $a$，其偏移为
+\[
+  \operatorname{align}(s,a)=\left\lceil\frac{s}{a}\right\rceil a.
+\]
+字段放置后更新已使用空间，所有字段完成后再按结构对齐补齐。尾部补齐的意义在数组中尤其明确：第二个 Packet 的起点若是十一，其 count 就不再处于四字节对齐位置。
+
+下图把这些计算落实到 Packet 的十二个字节，标出字段、内部补齐和尾部补齐。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[font=\small]
+\draw[fill=blue!15] (0,0) rectangle (.6,.8);
+\draw[fill=gray!15] (.6,0) rectangle (2.4,.8);
+\draw[fill=green!15] (2.4,0) rectangle (4.8,.8);
+\draw[fill=orange!18] (4.8,0) rectangle (6.6,.8);
+\draw[fill=gray!15] (6.6,0) rectangle (7.2,.8);
+\node at (.3,.4) {flag};\node at (1.5,.4) {补齐};
+\node at (3.6,.4) {count};\node at (5.7,.4) {bits};
+\node[above] at (6.9,.8) {补齐};
+\foreach \x in {0,1,4,8,11,12} {
+  \draw (\x*.6,0)--(\x*.6,-.15);
+  \node[below] at (\x*.6,-.15) {\x};
+}
+\node[below] at (3.6,-.65) {字段偏移为 0、4、8；总大小 12，对齐 4};
+\end{tikzpicture}
+\caption{声明字段与补齐共同形成布局}
+\end{figure}
+
+补齐区域不属于源语言字段。布局保持源码顺序是当前 Rustless 的内部选择，不能借用这一例子宣称完整 Rust 的默认结构布局也固定如此。将内部选择准确陈述出来，才能知道以后改变布局时会影响哪些接口。
+
+\section{RV32 的标量与容器布局}
+\texttt{target\_layout.hpp} 集中描述当前目标。整数和指针的存储大小与对齐均为四，布尔存储为一，Unit 为大小零、对齐一。Vec 的对象描述包含数据地址、长度和容量三项，当前占十二字节。
+\begin{lstlisting}[language=C++,caption={当前目标布局的代表性方法}]
+constexpr unsigned integer_bits() const { return 32; }
+constexpr Layout integer() const {
+  return {integer_bits() / 8, integer_bits() / 8};
+}
+constexpr Layout pointer() const { return integer(); }
+constexpr Layout boolean() const { return {1, 1}; }
+constexpr Layout unit() const { return {0, 1}; }
+constexpr std::uint32_t shift_count_mask() const {
+  return integer_bits() - 1;
+}
+\end{lstlisting}
+同一目标描述还提供 LLVM 数据布局和目标三元组，避免打印器和语义桥接分别写入互不相符的常数。Vec 字段偏移由 pointer 与 integer 的布局计算，而不是在多个消费者中重复写零、四、八。
+
+这样的集中描述改善维护，也明确了目前的范围：TargetLayout 只提供 RV32 实例，IR 的指针转换也受三十二位约束。它不是已经支持任意目标的通用框架。若以后增加 RV64，应同时检查源整数宽度、指针运算、布局、调用分类与输出信息，不能只将一个常数改成六十四。
+
+\section{数组与嵌套结构}
+数组元素连续存储。若元素大小已经包含其尾部补齐，则元素间距就是该大小，数组大小为元素大小乘长度，数组对齐继承元素对齐。
+\begin{lstlisting}[language=Rustless,caption={数组、零长度数组与间接递归}]
+let values: [i32; 3] = [1, 2, 3];
+let empty: [i32; 0] = [];
+struct Link { next: Box<Link> }
+\end{lstlisting}
+前两个声明用于讨论数组；Link 用于讨论类型布局，并不是可凭此构造一个有限终止链的完整程序。内嵌递归 \texttt{struct Bad \{ next: Bad \}} 会要求无限展开，必须拒绝；Box 提供固定大小的指针表示，因此布局不需要展开其指向对象。
+
+下图对照连续数组元素与由固定大小指针连接的递归对象，呈现元素间距和间接边的不同作用。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=6mm and 4mm]
+\node[irbox,text width=22mm] (a) {元素 0\\偏移 0};
+\node[irbox,right=of a,text width=22mm] (b) {元素 1\\偏移 4};
+\node[irbox,right=of b,text width=22mm] (c) {元素 2\\偏移 8};
+\node[irbox,below=14mm of a,text width=22mm] (n) {Link\\一个指针};
+\node[irbox,right=15mm of n,text width=22mm] (m) {另一 Link\\一个指针};
+\draw[irarrow] (n)--node[above,font=\small]{间接访问}(m);
+\node[irnote,right=10mm of m] {每个对象的布局有限};
+\end{tikzpicture}
+\caption{连续存储与间接递归}
+\end{figure}
+
+布局计算还要防止算术溢出。当前实现先比较长度与允许最大对象大小除以元素大小，再执行乘法。零大小元素要单独处理，否则除以零；它们的数组即使长度很大，存储大小仍可为零。零长度数组同样不能因为没有元素就丢失其类型和对齐知识。
+
+对嵌套结构，计算沿内嵌字段递归，并用正在解析的符号集合检测环。大小错误属于表示边界的错误，不应等到生成一个截断的偏移后才发现。缓存已完成布局还避免对相同字段类型反复展开。
+
+\section{SemanticBridge 怎样取得布局}
+布局消费已检查的字段类型和声明顺序。当前结构体类型携带 SymbolId，桥接按该身份取得结构体语义，再按字段 SymbolId 查询类型。显示名称不承担布局索引的职责。
+\begin{lstlisting}[language=C++,caption={当前结构体布局计算的核心节选}]
+StructLayout result{symbol, target_.unit(), {}};
+for (auto field : semantic_.structure(symbol).fields) {
+  auto value = compute_layout(semantic_.symbol_type(field));
+  auto offset = align_size(result.layout.bytes,
+                           value.alignment, target_);
+  result.fields.push_back({field, offset, value});
+  result.layout.bytes =
+      checked_size(std::uint64_t{offset} + value.bytes, target_);
+  result.layout.alignment =
+      std::max(result.layout.alignment, value.alignment);
+}
+\end{lstlisting}
+这段来自 \texttt{ir\_semantic.cpp}，前后还有缓存、递归检测与最终补齐。每个 FieldLayout 保存字段身份、偏移及布局，使后续 \texttt{packet.count} 可以通过已经解析的字段查找存储信息，而不重新在源码名称列表中猜测位置。
+
+完整字段导出是这一算法的前提。若两字段结构只导出一个字段，循环本身仍可得到一个看似合理的大小，但含义已经错误。因此前一篇讲述的完整对应验证，是布局正确性的一部分。下游不宜在每次访问时重新遍历 AST 核对；受控发布一次验证，随后使用冻结事实，既清楚又降低重复成本。
+
+\section{直接与间接传递}
+ABI 约定函数边界上的值如何表示。当前内部约定直接传递标量，把数组、结构体和 Vec 作为间接聚合传递。\texttt{AbiValue} 保留机器类型、传递类别和存储布局：
+\begin{lstlisting}[language=C++,caption={当前内部 ABI 的值描述}]
+enum class Passing { Direct, Indirect };
+struct AbiValue {
+  Type type;
+  Passing passing;
+  Layout layout;
+};
+\end{lstlisting}
+Indirect 表示聚合值的存储地址，不等同于源语言的引用类型。两者可能使用同一种机器 Ptr，但一个负责实现值传递，一个表达程序显式借用。它们的可变性、别名和复制要求需要继续保留在语义描述中。
+
+Unit 参数在语义签名中仍然存在，可以要求调用者提供对应的表达式；该表达式还可能包含副作用。但 Unit 不需要机器值，因此不会占据机器参数位置。省略机器参数绝不能顺便省略参数表达式的求值。
+
+\section{隐藏返回缓冲区}
+以以下函数为例：
+\begin{lstlisting}[language=Rustless,caption={包含 Unit 参数的聚合返回}]
+fn take(unit: (), value: Packet) -> Packet {
+    value
+}
+\end{lstlisting}
+其当前内部声明是一个返回 Void 的函数，首先接收输出地址，随后接收 Packet 参数的地址。Unit 的源参数位置仍由语义签名保留，但机器参数列表中省略它。
+
+下图按位置展示源签名怎样变成内部签名，说明隐藏返回参数、接收者和普通参数为何需要明确排序。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm]
+\node[irbox,text width=104mm] (s) {源签名：\texttt{take((), Packet) -> Packet}};
+\node[irbox,below=of s,text width=104mm] (d) {内部签名：\texttt{take(output: Ptr, value: Ptr) -> Void}};
+\draw[irarrow] (s)--node[right,font=\small]{分类与重排}(d);
+\node[irnote,below=of d,text width=104mm] {一般顺序：隐藏输出地址、接收者、普通非 Unit 参数};
+\end{tikzpicture}
+\caption{语义签名与内部机器签名}
+\end{figure}
+
+当前 \texttt{declaration()} 将间接结果改为 Void，并将 Ptr 加入参数开头；若存在接收者，再加入接收者，最后加入普通参数。它使用已解析的 FunctionSemantics，而不是再次解析 AST 中的类型写法。方法和关联函数的名称也来自语义符号。
+
+隐藏参数是表示转换产生的知识，需要在调试输出和调用构造中可识别。它不改变源语言函数有几个参数，却改变机器接口如何传递结果。把这两层数量分开，是避免调用签名错位的关键。
+
+\section{间接参数仍需遵循值语义}
+若调用 \texttt{take((), packet)}，把 packet 地址交给被调用者，并不自动证明按值调用已正确实现。被调用者若修改其参数，是否应影响调用者对象，取决于源语言值语义；需要复制时，调用转换必须创建适当的副本或快照。
+
+下图显示调用者对象、必要参数副本和返回缓冲区，呈现间接传递实现值语义所需的不同存储身份。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=10mm and 14mm]
+\node[irbox] (p) {调用者 packet};
+\node[irbox,right=of p] (q) {参数副本};
+\node[irbox,right=of q] (f) {被调用函数};
+\node[irbox,below=of q] (o) {返回缓冲区};
+\draw[irarrow] (p)--node[above,font=\small]{需要时复制}(q);
+\draw[irarrow] (q)--node[above,font=\small]{传地址}(f);
+\draw[irarrow] (f)--node[right,font=\small]{写结果}(o);
+\end{tikzpicture}
+\caption{地址传递与源语言值传递}
+\end{figure}
+
+直接在最终目标构造可以消除某些临时副本，但需要保证没有改变求值顺序，也没有使原本独立的对象共享可变存储。只有确认这些条件后，减少复制才是合法改进。当前桥接只描述布局和 ABI，尚未生成这些复制或快照，不能把描述存在视为可执行行为已经完成。
+
+\section{内部 ABI 与平台 ABI}
+内部 ABI 可以选择简单、一致的聚合规则；平台 ABI 则决定与其他编译器、运行时和系统函数的互操作。当前“全部聚合间接传递”是内部约定。RISC-V 平台整数调用规则会按大小和分类处理聚合，不能将二者直接等同。
+
+同一源程序可能同时调用内部 Rustless 函数和外部运行时函数。前者遵守内部声明，后者必须有明确外部签名和必要适配。将平台 ABI 规则混入源语义类型，会让同一类型因调用对象不同而难以解释；将其放在函数边界分类中，则能保持源类型稳定。
+
+平台调用细节以 \href{https://riscv-non-isa.github.io/riscv-elf-psabi-doc/}{RISC-V ABI 规范}为准。本章只建立分离原则，具体寄存器和栈规则在第二十一章展开。
+
+\section{目标布局与调用分类的分离}
+目前 TargetLayout 已经集中机器宽度、存储对齐、Vec 字段和移位计数掩码。SemanticBridge 在其上计算具体类型的布局和内部函数 ABI。两个对象分别回答“机器怎样存储”与“这个函数怎样传递”。
+
+后续若出现多目标、外部聚合调用或不同调用约定，可进一步引入专门的 ABI 分类对象。它可以把一个语义参数分解为多个机器位置，或者明确输出缓冲区属性。增加这一层应由真实的分类差异推动，而不是为了模仿大型编译器的类名。
+
+本章给出了地址计算与调用所需的存储知识。下一章将结合已检查的语法，推导如何生成显式指令、位置操作和控制流。
+
+\chapter{lowering：值、位置与控制流}
+\label{chap:lowering}
+\section*{本章导读}
+已有 IR 可以容纳计算，语义结果可以解释语法，布局可以确定地址。本章把三者连接起来，推导 lowering，即向较低层表示的转换。学习重点是区分计算值、存储位置和是否正常继续，避免让一个 Operand 配合几个含糊标志承担所有含义。当前项目已经提供运算描述和桥接；完整表达式与语句 lowering 尚未完成，本章的转换算法属于设计推导。
+
+\section{lowering 的稳定输入}
+转换需要 AST 的具体载荷，以及已成功发布的语义事实。AST 告诉转换器一个节点是 BinaryExpr 还是 FieldExpr；语义事实告诉它操作数的有效类型、需要哪些转换、名字指向哪个符号；布局告诉它字段偏移和元素间距。
+
+下图呈现这三组知识共同进入 lowering 的关系，说明转换器不需要重新推断源码含义。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm and 10mm]
+\node[irbox] (a) {AST\\形状与顺序};
+\node[irbox,right=of a] (s) {冻结语义事实\\类型与选择};
+\node[irbox,right=of s] (l) {目标布局\\偏移与间距};
+\node[irbox,below=14mm of s] (g) {lowering};
+\node[irbox,below=of g] (i) {typed IR};
+\draw[irarrow] (a)--(g);\draw[irarrow] (s)--(g);\draw[irarrow] (l)--(g);
+\draw[irarrow] (g)--(i);
+\end{tikzpicture}
+\caption{结构、含义与存储共同决定转换}
+\end{figure}
+
+当前 SemanticIndex 拥有冻结语义快照，借用原始 AST；SemanticBridge 借用索引。结果包装对象可以较早销毁，索引仍持有快照，但 AST 必须保持存活和不变，桥接所借用的索引也必须存活。对象查询还核对原 AST 地址，防止另一棵树中相同数值的 NodeId 冒用事实。
+
+这一边界有运行效率上的意义：语义决定只作一次，发布时完整检查，转换时使用索引。若 lowering 不断依据字符串重复名字解析或自行剥离引用，它就逐渐成为第二个不一致的类型检查器。
+
+\section{Value、Place 与转换结果}
+\texttt{packet.count} 可以表示可写位置，也可以在算术中读取成一个值；\texttt{packet.count + 1} 只能表示计算结果。二者若都返回 Ptr，再由一个 bool 解释“是不是地址”，后续每个消费者都会重复辨认其含义。
+
+建议采用下列教学接口。它尚未加入当前项目，用于展示结果类别怎样表达：
+\begin{lstlisting}[language=C++,caption={设计推导：值、位置与发散结果}]
+struct ScalarValue { ir::Operand value; };
+struct Place {
+  ir::Operand address;
+  SemanticTypePtr type;
+  ir::Layout layout;
+};
+struct AggregateValue { Place storage; };
+struct UnitValue {};
+struct Diverged {};
+using Lowered = std::variant<ScalarValue, AggregateValue,
+                             UnitValue, Diverged>;
+// lower_place(...) returns Place only for a valid place expression.
+\end{lstlisting}
+Place 和 ScalarValue 分开，使读取成为显式操作；AggregateValue 表示一个源语言聚合值由某处存储承载，并不表示它是引用。Diverged 说明该路径已经终止。一个专门的 lower-place 入口只接受语义上确认的位置，减少“请求一个值却意外得到地址”的情况。
+
+表示不必一次容纳完整语言。最初可以只支持标量、Unit 和简单聚合存储，逐步增加对象寿命知识。但应从开始就避免把结果类型、表示类别和控制流状态压缩成同一个空 Operand。
+
+\section{标量读取与写入}
+路径表达式已经绑定 SymbolId，转换器可维护 SymbolId 到本地存储或参数值的映射。读取一个存储变量产生 load，赋值产生 store，借用位置取得地址，显式解引用则从引用值得到新的 Place。
+\begin{lstlisting}[language=Rustless,caption={读取、借用、解引用与写入}]
+let mut x = 1;
+let r = &mut x;
+*r = 2;
+let result = x + 3;
+\end{lstlisting}
+这里 r 的机器值是地址；读取 r 取得该地址，并不会立刻读取 x。\texttt{*r} 将地址解释为 x 的位置；作为赋值目标时使用 store，作为算术操作数时才进一步 load。清楚区分这些步骤，可以避免多读一次引用或少读一次引用。
+
+bool 读取的逻辑结果为 I1，内存布局为一字节，对齐为一。Builder 的 load/store 默认对齐是四，lowering 必须依据实际 Layout 显式传入正确对齐。一个方便的默认值不能替代对象知识。
+
+\section{字段与索引投影}
+沿用 Packet，考虑：
+\begin{lstlisting}[language=Rustless,caption={由字段和索引组成的位置}]
+packet.count += 2;
+packet.bits[1] = true;
+\end{lstlisting}
+count 地址为 Packet 基址加四。bits 的基址为 Packet 基址加八；第二个 bool 的地址再加一个元素间距。当前 Gep 接收字节偏移，因此字段和元素的语义计算必须在 lowering 中完成。
+
+下图把 \texttt{packet.bits[1]} 分解为对象基址、字段偏移和元素偏移，再显示该地址可以用于读或写。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 8mm]
+\node[irbox,text width=23mm] (p) {Packet 基址 p};
+\node[irbox,right=of p,text width=27mm] (f) {bits 基址\\$p+8$};
+\node[irbox,right=of f,text width=27mm] (e) {元素 1\\$p+8+1$};
+\node[irbox,below=of e,text width=27mm] (r) {load / store};
+\draw[irarrow] (p)--(f);\draw[irarrow] (f)--(e);\draw[irarrow] (e)--(r);
+\end{tikzpicture}
+\caption{投影得到地址，使用方式决定读写}
+\end{figure}
+
+Field 和 Index 的 receiver 可能需要自动解引用。当前语义结果把接收对象的转换单独保存在 receiver 用途中，不能把这些转换误用到字段或索引的最终值上。例如对一个含整数元素的共享引用数组，先解引用数组得到元素位置；最终整数仍是整数，不能继续把它当成引用。
+
+索引越界的行为属于语言约定。转换器应据此生成检查或依赖已经证明的条件，不能只因为地址计算能够完成就默认为访问合法。LLVM 指针指令的属性也必须有对应证明，不能任意加入更强的 inbounds 等承诺。
+
+\section{一元、二元、cast 与有序转换}
+当前语义事实把每次使用保存为 \texttt{OperandSemantics}，包含节点身份、有效类型和有序 adjustments。以下是实际类型：
+\begin{lstlisting}[language=C++,caption={当前操作数使用事实}]
+struct OperandSemantics {
+  ast::NodeId node;
+  SemanticTypePtr effective_type;
+  std::vector<Adjustment> adjustments;
+};
+\end{lstlisting}
+对于 \texttt{\&x + \&x}，表达式本身是引用，使用时的有效操作数是整数。转换器先计算两个操作数表达式，再按照规定的使用顺序执行解引用等转换。原始类型不被覆盖，因而同一个事实仍可说明“值从何种对象得到”。
+
+当前 UnaryLowering 已区分标量运算与解引用位置：负号描述为零减操作数；bool 取反描述为 I1 与一异或；整数取反描述为 I32 与全一异或；显式解引用描述为 DereferencePlace，保留元素类型和布局。\texttt{*boxed} 即使得到结构体，也不需要伪装成普通指针比较值。
+
+二元描述区分 ScalarArithmetic、ScalarComparison、ShortCircuit 和 StructuralEquality，并保留两侧使用事实。桥接只把语义层已经选择的运算类别映射到机器操作，不再用 AST 运算符独立解释类型规则。
+
+源语言 cast 当前接受整数间转换与 bool 到整数转换。RV32 整数间三十二位 cast 常只改变语义解释；bool 到整数需要扩展。IR 还提供 PtrToInt 与 IntToPtr，但它们属于底层指令能力，不意味着源语言已允许任意指针 cast。
+
+\section{运算映射必须保留语言语义}
+三十二位移位需要按当前子集的低五位计数规则处理。例如计数三十二经掩码后为零。若直接输出超出位宽的 LLVM 移位，会得到不符合这一约定的 poison 行为。桥接因此不仅返回 Shl、AShr 或 LShr，还携带 shift-count-mask 意图。
+
+下图呈现源移位转换前的计数规范化，说明替换操作码之后仍有一项必须落实的计算。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm and 8mm]
+\node[irbox,text width=23mm] (n) {计数 n\\例如 32};
+\node[irbox,right=of n,text width=31mm] (m) {$k=n\mathbin{\&}31$\\例如 0};
+\node[irbox,right=of m,text width=31mm] (s) {$x\mathbin{\gg}k$\\选择 AShr / LShr};
+\draw[irarrow] (n)--(m);\draw[irarrow] (m)--(s);
+\end{tikzpicture}
+\caption{移位计数规则在 lowering 中显式落实}
+\end{figure}
+
+\begin{lstlisting}[language=C++,caption={当前标量运算描述中的移位意图}]
+struct ScalarArithmetic {
+  BinaryOp op;
+  Type operand_type;
+  std::optional<std::uint32_t> shift_count_mask;
+};
+\end{lstlisting}
+这项描述已经实现；自动生成掩码指令的完整表达式 lowering 尚未实现。未来转换器应在输出移位前发出 And，不能只读取 op 而忽略 optional。复合移位使用同一描述，常量求值也必须遵守同一计数规则。
+
+除零、最小有符号整数除以负一、算术溢出等边界也需要明确语言预期。不能通过“后端提供这条指令”推导源程序的规定行为。若规定运行时错误，就需要检查与错误路径；若规定位模式运算，就不能任意加入不溢出标志。\href{https://llvm.org/docs/LangRef.html#shl-instruction}{LLVM 移位定义}可以用于核对目标操作的具体边界，而语言预期仍须由 Rustless 规则和独立测试确定。
+
+\section{赋值与复合赋值的求值}
+目标只应定位一次。例如 \texttt{a[index()] += value} 若调用 index 两次，可能修改副作用或得到不同位置。转换器应保存目标 Place，读旧值，进行已解析运算，再写回同一 Place。
+
+普通赋值还需要处理左右两侧的执行次序。现有测试材料明确检验普通赋值右侧先执行，因此 \texttt{*destination(\&mut x) = mark()} 应先调用 mark，再定位 destination。语法中的“目标在左、值在右”不等于运行顺序。
+
+参考 Rx-Compiler 将普通与复合赋值放在一个旧分支中，并选择先右侧后目标。现有相关测试没有锁定复合两操作数的相对次序，不能从这一测试空白推出任意重排合法。新 lowering 应按明确的子集约定选择顺序，并为带副作用情形建立独立预期。
+
+赋值表达式的结果为 Unit。复合赋值的内部算术结果用于写回，不能误当成整个表达式的结果。当前 ResolvedBinary 作为 compound 事实保存写回类型，而 ExpressionSemantics 的表达式类型仍为 Unit；这种区分防止二者在返回或参数上下文中混用。
+
+\section{短路逻辑与条件结果}
+\begin{lstlisting}[language=Rustless,caption={不能用 eager 位运算代替的逻辑式}]
+fn check() -> bool { printInt(1); true }
+fn main() {
+    let valid = false;
+    let ready = valid && check();
+}
+\end{lstlisting}
+valid 为假时 check 不应执行。转换器先判断左侧，再决定是否进入右侧块，最后合流产生 bool。若用普通 And 同时计算两个操作数，结果可能相同，输出却已经不同。
+
+下图先呈现 RHS 的有条件执行，再呈现一个 return 分支退出函数，说明合流只收集实际到达它的路径。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm and 15mm]
+\node[irbox,text width=23mm] (l) {左侧条件};
+\node[irbox,below left=of l,text width=23mm] (false) {直接为 false};
+\node[irbox,below right=of l,text width=23mm] (rhs) {计算 RHS};
+\node[irbox,below=22mm of l,text width=23mm] (j) {结果合流};
+\draw[irarrow] (l)--(false);\draw[irarrow] (l)--(rhs);
+\draw[irarrow] (false)--(j);\draw[irarrow] (rhs)--(j);
+\node[irbox,right=34mm of l,text width=23mm] (if) {if 条件};
+\node[irbox,below=of if,text width=23mm] (ret) {return\\退出函数};
+\node[irbox,right=14mm of ret,text width=23mm] (normal) {正常分支\\到达后续};
+\draw[irarrow] (if)--(ret);\draw[irarrow] (if)--(normal);
+\end{tikzpicture}
+\caption{条件执行与终止路径}
+\end{figure}
+
+if 的结果可由 Phi 汇集。若一条分支 return，它没有到达 join，就不能贡献一个虚假的零值或空值 incoming。若两条分支都终止，整个 if 不存在正常结果，也无需建立可执行的空合流块。生成控制流时先记录哪些分支实际续行，再选择结果合流方式，会使代码与 Never 语义对应。
+
+\section{循环与跳转上下文}
+\begin{lstlisting}[language=Rustless,caption={两种循环的不同结果与目标}]
+let answer: i32 = loop {
+    break 7;
+};
+let mut i = 0;
+while i < 3 {
+    i += 1;
+    if i == 2 { continue; }
+}
+\end{lstlisting}
+loop 的 break 值可以形成表达式结果；while 的结果为 Unit。转换器需要保存当前循环的继续目标、退出目标和结果收集方式。嵌套循环用栈保存这些上下文，break 和 continue 使用最近一层，不能只维护一个全局 exit 编号。
+
+下图区分循环条件、循环体、continue 与 break 的边，呈现上下文必须保存的目标。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=11mm and 18mm]
+\node[irbox] (h) {header\\while 检查条件};
+\node[irbox,below=of h] (b) {body};
+\node[irbox,right=of b] (e) {exit\\接收 break 结果};
+\draw[irarrow] (h)--node[left,font=\small]{真}(b);
+\draw[irarrow] (h)--node[above,font=\small]{假}(e);
+\draw[irarrow,bend left=45] (b) to node[left,font=\small]{迭代 / continue}(h);
+\draw[irarrow] (b)--node[above,font=\small]{break}(e);
+\end{tikzpicture}
+\caption{循环转换中的不同控制目标}
+\end{figure}
+
+while 的 continue 必须返回条件检查，而不是跳到本轮 body 开头。loop 没有条件检查，继续目标可以是其迭代入口。break 值在离开边上形成结果，多个退出来源可由 Phi 或聚合输出存储汇集。结果表示应与第十六章的标量、聚合分类保持一致。
+
+\section{Never 与终结之后的转换}
+Never 描述没有正常完成的表达式，例如 return、continue 或不退出的循环。转换器遇到 Diverged 后应停止当前路径的普通指令构造。它不应把 Never 替换为一个随意常量，再继续执行后面的加法。
+
+源语义检查可能继续访问后续语法，以发现未定义名字或错误类型；lowering 则不为不存在的正常路径生成执行步骤。两个阶段遍历同一 AST，却有不同目标，这也说明通用树 walk 不能代替每个阶段的上下文算法。
+
+至此，标量计算、位置投影和控制转移已经有清楚的转换方向。下一章把聚合构造、内容语义和调用放回这一框架，并讨论它们怎样连接到运行时。
