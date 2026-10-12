@@ -71,4 +71,55 @@ void atomic_shapes() {
   assert(rx::type_name({}) == "<missing>");
 }
 
-int main() { atomic_shapes(); }
+void composite_shapes() {
+  rx::TypeContext types, other;
+  const auto integer = types.primitive(K::I32);
+  const auto box = types.box(integer);
+  const auto vector = types.vector(integer);
+  const auto array = types.array(integer, 3);
+  const auto reference = types.reference(integer, ast::Mutability::Immutable);
+  const auto mutable_ref = types.reference(integer, ast::Mutability::Mutable);
+  assert(box->kind() == K::Box && box->element() == integer);
+  assert(vector->kind() == K::Vec && vector->element() == integer);
+  assert(array->kind() == K::Array && array->length() == 3);
+  assert(reference->kind() == K::Ref && !reference->is_mutable());
+  assert(mutable_ref->is_mutable() && mutable_ref != reference);
+  assert(rx::type_name(box) == "Box<i32>");
+  assert(rx::type_name(vector) == "Vec<i32>");
+  assert(rx::type_name(array) == "[i32; 3]");
+  assert(rx::type_name(reference) == "&i32");
+  assert(rx::type_name(mutable_ref) == "&mut i32");
+  assert(box == types.box(integer) && vector == types.vector(integer));
+  assert(array == types.array(integer, 3));
+  assert(reference == types.reference(integer, ast::Mutability::Immutable));
+  assert(!rx::same_type(array, types.array(integer, 4)));
+  assert(!rx::same_type(box, vector));
+  assert(!rx::same_type(reference, mutable_ref));
+  assert(!rx::same_type(box, types.box(types.primitive(K::Error))));
+  rejects<std::invalid_argument>([&] { types.box({}); });
+  rejects<std::invalid_argument>([&] { types.vector({}); });
+  rejects<std::invalid_argument>([&] { types.array({}, 0); });
+  rejects<std::invalid_argument>(
+      [&] { types.reference({}, ast::Mutability::Immutable); });
+  rejects<std::invalid_argument>(
+      [&] { types.reference(integer, static_cast<ast::Mutability>(999)); });
+  rejects<std::logic_error>([&] { vector->length(); });
+  rejects<std::logic_error>([&] { array->is_mutable(); });
+  const auto foreign = other.array(other.vector(other.primitive(K::I32)), 3);
+  const auto local = types.array(vector, 3);
+  assert(foreign != local && rx::same_type(foreign, local));
+  assert(types.box(foreign) == types.box(local));
+  assert(types.box(foreign)->element() == local);
+  rx::SemanticTypePtr survivor;
+  {
+    rx::TypeContext temporary;
+    survivor = temporary.box(temporary.primitive(K::U32));
+  }
+  assert(rx::type_name(survivor) == "Box<u32>");
+  assert(types.box(survivor)->element() == types.box(types.primitive(K::U32)));
+}
+
+int main() {
+  atomic_shapes();
+  composite_shapes();
+}
