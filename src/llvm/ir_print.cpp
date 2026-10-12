@@ -77,73 +77,81 @@ void print_instruction(std::ostringstream &out, const Instruction &instruction) 
   out << "  ";
   if (auto result = definition(instruction)) {
     out << "%v" << result->id << " = ";
-  visit(
-      instruction,
-      ast::Overloaded{
-          [&](const Instruction &, const Alloca &p) {
-            out << "alloca i8, i32 " << p.bytes << ", align " << p.alignment;
-          },
-          [&](const Instruction &, const Load &p) {
-            out << "load " << type_name(p.result.type) << ", "
-                << typed(p.address) << ", align " << p.alignment;
-          },
-          [&](const Instruction &, const Store &p) {
-            out << "store " << typed(p.value) << ", " << typed(p.address)
-                << ", align " << p.alignment;
-          },
-          [&](const Instruction &, const Gep &p) {
-            out << "getelementptr i8, " << typed(p.base) << ", "
-                << typed(p.offset);
-          },
-          [&](const Instruction &node, const Binary &p) {
-            out << binary_opcode(opcode(node)) << ' ' << typed(p.left) << ", "
-                << value(p.right);
-          },
-          [&](const Instruction &, const Compare &p) {
-            out << "icmp " << predicate_name(p.predicate) << ' '
-                << typed(p.left) << ", " << value(p.right);
-          },
-          [&](const Instruction &, const Cast &p) {
-            constexpr std::array names{"zext", "trunc", "ptrtoint", "inttoptr"};
-            out << names.at(static_cast<std::size_t>(p.op)) << ' '
-                << typed(p.operand) << " to " << type_name(p.result.type);
-          },
-          [&](const Instruction &, const Call &p) {
-            out << "call " << type_name(p.result ? p.result->type : Type::Void)
-                << " @" << symbol_name(p.callee) << '(';
-            for (std::size_t i = 0; i < p.arguments.size(); ++i) {
-              if (i)
-                out << ", ";
-              out << typed(p.arguments[i]);
-            }
-            out << ')';
-          },
-          [&](const Instruction &, const Phi &p) {
-            out << "phi " << type_name(p.result.type) << ' ';
-            for (std::size_t i = 0; i < p.incoming.size(); ++i) {
-              if (i)
-                out << ", ";
-              out << "[ " << value(p.incoming[i].value) << ", "
-                  << label(p.incoming[i].predecessor) << " ]";
-            }
-          },
-          [&](const Instruction &, const Branch &p) {
-            out << "br label " << label(p.target);
-          },
-          [&](const Instruction &, const CondBranch &p) {
-            out << "br " << typed(p.condition) << ", label "
-                << label(p.consequent) << ", label " << label(p.alternative);
-          },
-          [&](const Instruction &, const Return &p) {
-            out << "ret " << (p.value ? typed(*p.value) : "void");
-          },
-          [&](const Instruction &, const Unreachable &) {
-            out << "unreachable";
-          }});
+  }
+  auto print_payload = ast::Overloaded{
+      [&](const Instruction &, const Alloca &payload) {
+        out << "alloca i8, i32 " << payload.bytes << ", align " << payload.alignment;
+      },
+      [&](const Instruction &, const Load &payload) {
+        out << "load " << type_name(payload.result.type) << ", " << typed(payload.address)
+            << ", align " << payload.alignment;
+      },
+      [&](const Instruction &, const Store &payload) {
+        out << "store " << typed(payload.value) << ", " << typed(payload.address) << ", align "
+            << payload.alignment;
+      },
+      [&](const Instruction &, const Gep &payload) {
+        out << "getelementptr i8, " << typed(payload.base) << ", " << typed(payload.offset);
+      },
+      [&](const Instruction &node, const Binary &payload) {
+        out << binary_opcode(opcode(node)) << ' ' << typed(payload.left) << ", "
+            << value(payload.right);
+      },
+      [&](const Instruction &, const Compare &payload) {
+        out << "icmp " << predicate_name(payload.predicate) << ' ' << typed(payload.left) << ", "
+            << value(payload.right);
+      },
+      [&](const Instruction &, const Cast &payload) {
+        constexpr std::array names{"zext", "trunc", "ptrtoint", "inttoptr"};
+        out << names.at(static_cast<std::size_t>(payload.op)) << ' ' << typed(payload.operand)
+            << " to " << type_name(payload.result.type);
+      },
+      [&](const Instruction &, const Call &payload) {
+        Type result_type = Type::Void;
+        if (payload.result) {
+          result_type = payload.result->type;
+        }
+        out << "call " << type_name(result_type) << " @" << symbol_name(payload.callee) << '(';
+        for (std::size_t index = 0; index < payload.arguments.size(); ++index) {
+          if (index) {
+            out << ", ";
+          }
+          out << typed(payload.arguments[index]);
+        }
+        out << ')';
+      },
+      [&](const Instruction &, const Phi &payload) {
+        out << "phi " << type_name(payload.result.type) << ' ';
+        for (std::size_t index = 0; index < payload.incoming.size(); ++index) {
+          if (index) {
+            out << ", ";
+          }
+          out << "[ " << value(payload.incoming[index].value) << ", "
+              << label(payload.incoming[index].predecessor) << " ]";
+        }
+      },
+      [&](const Instruction &, const Branch &payload) {
+        out << "br label " << label(payload.target);
+      },
+      [&](const Instruction &, const CondBranch &payload) {
+        out << "br " << typed(payload.condition) << ", label " << label(payload.consequent)
+            << ", label " << label(payload.alternative);
+      },
+      [&](const Instruction &, const Return &payload) {
+        out << "ret ";
+        if (payload.value) {
+          out << typed(*payload.value);
+        } else {
+          out << "void";
+        }
+      },
+      [&](const Instruction &, const Unreachable &) { out << "unreachable"; },
+  };
+  visit(instruction, print_payload);
   out << '\n';
 }
 
-} // namespace
+}
 
 std::string symbol_name(std::string_view name) {
   auto initial = [](unsigned char c) {
