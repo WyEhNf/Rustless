@@ -33,7 +33,8 @@ fn main() {
     assert(symbol.declaration.value != 0);
   assert(!valid.data().expressions.empty());
   assert(!valid.data().resolved_types.empty());
-  assert(valid.data().constants.size() == 1 && valid.data().constants[0].bits == 2);
+  assert(valid.data().constants.size() == 1 &&
+         valid.data().constants[0].bits == 2);
 
   constexpr std::string_view wrong_type = R"(
 fn main() { let value: i32 = true; }
