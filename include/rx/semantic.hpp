@@ -4,6 +4,7 @@
 #include "rx/diagnostic.hpp"
 #include "rx/symbol.hpp"
 #include "rx/semantic_type.hpp"
+#include "rx/semantic_operation.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -27,18 +28,6 @@ enum class SymbolKind {
 };
 std::string_view symbol_kind_name(SymbolKind kind);
 
-struct Adjustment {
-  // Implicit operations are stored in execution order.
-  enum class Kind {
-    Dereference,
-    BorrowShared,
-    BorrowMutable,
-    MutToShared,
-    NeverToAny
-  } kind{Kind::Dereference};
-  SemanticTypePtr target;
-};
-
 struct SymbolRecord {
   SymbolId id{};
   SymbolKind kind;
@@ -57,6 +46,9 @@ struct ExpressionSemantics {
   std::optional<SymbolId> symbol;
   std::string target;
   std::vector<Adjustment> adjustments;
+  std::optional<CallTarget> callable;
+  std::optional<ResolvedBinary> binary;
+  std::optional<ResolvedBinary> compound;
 };
 
 struct SemanticSummary {
