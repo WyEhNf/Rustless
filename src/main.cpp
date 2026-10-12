@@ -17,43 +17,48 @@ void usage(std::ostream &out) {
 }
 
 int run(int argc, char **argv) {
-  std::string stage = "semantic", entry = "crate", source, output;
-  bool dump_ast = false, dump_typed = false;
-  for (int i = 1; i < argc; ++i) {
-    const std::string argument = argv[i];
-    auto next = [&]() -> std::string {
-      if (++i == argc)
+  std::string stage = "semantic";
+  std::string entry = "crate";
+  std::string source;
+  std::string output;
+  bool dump_ast = false;
+  bool dump_typed = false;
+  for (int argument_index = 1; argument_index < argc; ++argument_index) {
+    const std::string argument = argv[argument_index];
+    auto next_argument = [&]() -> std::string {
+      ++argument_index;
+      if (argument_index == argc)
         throw std::runtime_error("missing value for " + argument);
-      return argv[i];
+      return argv[argument_index];
     };
     if (argument == "--help" || argument == "-h") {
       usage(std::cout);
       return 0;
     } else if (argument == "--stage")
-      stage = next();
+      stage = next_argument();
     else if (argument == "--parse-entry")
-      entry = next();
+      entry = next_argument();
     else if (argument == "--dump-ast")
       dump_ast = true;
     else if (argument == "--dump-typed")
       dump_typed = true;
     else if (argument == "-o")
-      output = next();
-    else if (argument.starts_with('-'))
+      output = next_argument();
+    else if (!argument.empty() && argument.front() == '-')
       throw std::runtime_error("unknown option '" + argument + "'");
     else if (source.empty())
       source = argument;
     else
       throw std::runtime_error("more than one source file was supplied");
   }
-  const bool valid_entry = entry == "crate" || entry == "item" ||
-                           entry == "expression" || entry == "letStatement" ||
-                           entry == "typeRef";
-  if (source.empty() ||
-      (stage != "lex" && stage != "parse" && stage != "semantic") ||
-      !valid_entry || (entry != "crate" && stage != "parse") ||
-      (dump_ast && (stage == "lex" || entry != "crate")) ||
-      (dump_typed && stage != "semantic") ||
+  const bool valid_entry = entry == "crate" || entry == "item" || entry == "expression" ||
+                           entry == "letStatement" || entry == "typeRef";
+  const bool valid_stage = stage == "lex" || stage == "parse" || stage == "semantic";
+  if (source.empty() || !valid_stage || !valid_entry)
+    throw std::runtime_error("invalid stage or option combination; use --help");
+  if (entry != "crate" && stage != "parse")
+    throw std::runtime_error("invalid stage or option combination; use --help");
+  if ((dump_ast && (stage == "lex" || entry != "crate")) || (dump_typed && stage != "semantic") ||
       (!output.empty() && !dump_ast && !dump_typed))
     throw std::runtime_error("invalid stage or option combination; use --help");
 
@@ -68,12 +73,16 @@ int run(int argc, char **argv) {
   if (stage == "lex") {
     const bool accepted = rx::lex_source(buffer.str(), diagnostics);
     diagnostics.print(std::cerr);
-    return accepted ? 0 : 1;
+    if (accepted)
+      return 0;
+    return 1;
   }
   if (stage == "parse" && entry != "crate") {
     const bool accepted = rx::parse_syntax(buffer.str(), entry, diagnostics);
     diagnostics.print(std::cerr);
-    return accepted ? 0 : 1;
+    if (accepted)
+      return 0;
+    return 1;
   }
 
   const auto frontend = rx::parse_source(buffer.str(), diagnostics);
@@ -81,7 +90,6 @@ int run(int argc, char **argv) {
   if (frontend.syntax_ok && frontend.crate && stage == "semantic")
     semantic = rx::analyze(*frontend.crate, diagnostics);
   diagnostics.print(std::cerr);
-  // Rejected source never produces an AST or semantic output file.
   if (diagnostics.has_errors() || !frontend.syntax_ok || !frontend.crate)
     return 1;
 
@@ -100,10 +108,9 @@ int run(int argc, char **argv) {
   return 0;
 }
 
-} // namespace
+}
 
 int main(int argc, char **argv) {
-  // Exit 1 denotes source rejection; exit 2 denotes invocation/internal errors.
   try {
     return run(argc, argv);
   } catch (const std::exception &error) {
