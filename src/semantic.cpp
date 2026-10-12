@@ -97,6 +97,9 @@ struct ExprInfo {
   std::optional<SymbolId> symbol;
   std::string target;
   std::vector<Adjustment> adjustments;
+  std::optional<CallTarget> callable;
+  std::optional<ResolvedBinary> binary;
+  std::optional<ResolvedBinary> compound;
 };
 
 struct Binding {
@@ -852,7 +855,8 @@ private:
     expression_facts_[node.id] = {
         node.id,           result.type,          result.is_place,
         result.is_mutable, result.access_locked, result.symbol,
-        result.target,     result.adjustments};
+        result.target,     result.adjustments, result.callable,
+        result.binary,     result.compound};
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
     return check_expr(*expression, std::move(expected));
@@ -1007,6 +1011,38 @@ private:
     }
     report(node.span, "unresolved value name '" + name + "'");
     return {};
+  }
+
+  static BuiltinId io_builtin(std::string_view name) {
+    if (name == "getInt" || name == "get_i32") return BuiltinId::GetInt;
+    if (name == "printInt" || name == "print_i32") return BuiltinId::PrintInt;
+    return BuiltinId::PrintlnInt;
+  }
+  TyPtr builtin_path_type(const ast::Path &path, const std::string &name) {
+    const std::string owner{ast::name_text(path.segments[0].name)};
+    const auto member = ast::name_text(path.segments[1].name);
+    BuiltinId id = BuiltinId::Clone;
+    if (member == "new")
+      id = owner == "Box" ? BuiltinId::BoxNew : BuiltinId::VecNew;
+    else if (member == "len") id = BuiltinId::Len;
+    else if (member == "is_empty") id = BuiltinId::IsEmpty;
+    else if (member == "push") id = BuiltinId::Push;
+    else if (member == "remove") id = BuiltinId::Remove;
+    if (structures_.contains(owner)) {
+      auto type = structure_type(owner);
+      if (!supports(type, "Clone", "", {}))
+        report(path.span, "clone is not available for " + type_name(type));
+      return types_.builtin(id, type);
+    }
+    auto arguments = type_arguments(path);
+    if (arguments.size() != 1) {
+      report(path.span, name + " requires one concrete type argument");
+      return types_.builtin(id);
+    }
+    auto element = resolve_type(*arguments.front());
+    return types_.builtin(id, compound(owner == "Box" ? Ty::Kind::Box
+                                                       : Ty::Kind::Vec,
+                                      element));
   }
 
   static bool builtin_function(std::string_view name) {
