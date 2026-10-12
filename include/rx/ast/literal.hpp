@@ -21,8 +21,8 @@ struct IntegerLiteral {
       base = IntegerBase::Hex;
     }
     std::optional<IntegerSuffix> suffix;
-    constexpr std::array<std::string_view, 4> names{
-        "i32", "u32", "isize", "usize"};
+    constexpr std::array<std::string_view, 4> names{"i32", "u32", "isize",
+                                                    "usize"};
     for (std::size_t index = 0; index < names.size(); ++index) {
       const std::string_view candidate = names[index];
       if (text.size() < candidate.size()) {

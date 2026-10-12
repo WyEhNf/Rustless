@@ -114,12 +114,12 @@ struct Expr : Node {
   explicit Expr(Data value) : data(std::move(value)) {}
   Data data;
 };
-template <class T> const T *get_if(const Expr &expr) {
-  return std::get_if<T>(&expr.data);
+template <class Payload> const Payload *get_if(const Expr &expr) {
+  return std::get_if<Payload>(&expr.data);
 }
 inline const ExprPtr &unparen(const ExprPtr &expr) {
   if (auto *paren = get_if<ParenExpr>(*expr))
     return unparen(paren->inner);
   return expr;
 }
-} // namespace rx::ast
+}

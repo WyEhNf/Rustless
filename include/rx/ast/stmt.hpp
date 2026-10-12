@@ -24,7 +24,7 @@ struct Block : Node {
   std::vector<StmtPtr> statements;
   std::optional<ExprPtr> tail;
 };
-template <class T> const T *get_if(const Stmt &stmt) {
-  return std::get_if<T>(&stmt.data);
+template <class Payload> const Payload *get_if(const Stmt &stmt) {
+  return std::get_if<Payload>(&stmt.data);
 }
-} // namespace rx::ast
+} 

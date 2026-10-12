@@ -56,13 +56,12 @@ inline std::string_view spelling(CompoundAssignOp op) {
   return compound_spellings.at(static_cast<std::size_t>(op));
 }
 
-// Text conversion is used only at the parser boundary.
-template <class Op, std::size_t N>
-Op parse_operator(std::string_view text,
-                  const std::array<const char *, N> &names) {
-  for (std::size_t i = 0; i < N; ++i)
-    if (text == names[i])
-      return static_cast<Op>(i);
+template <class Operator, std::size_t Count>
+Operator parse_operator(std::string_view text,
+                        const std::array<const char *, Count> &names) {
+  for (std::size_t index = 0; index < Count; ++index)
+    if (text == names[index])
+      return static_cast<Operator>(index);
   throw std::logic_error("unexpected operator spelling");
 }
 inline BinaryOp binary_operator(std::string_view text) {
@@ -86,4 +85,4 @@ inline DeriveKind derive_kind(std::string_view text) {
   constexpr std::array names{"Copy", "Clone", "PartialEq", "Eq"};
   return parse_operator<DeriveKind>(text, names);
 }
-} // namespace rx::ast
+}

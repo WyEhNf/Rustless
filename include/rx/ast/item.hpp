@@ -79,4 +79,4 @@ struct Crate : Node {
 };
 
 std::string dump(const Crate &crate);
-} // namespace rx::ast
+} 

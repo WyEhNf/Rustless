@@ -29,7 +29,7 @@ struct TypeSyntax : Node {
   Data data;
 };
 
-template <class T> const T *get_if(const TypeSyntax &type) {
-  return std::get_if<T>(&type.data);
+template <class Payload> const Payload *get_if(const TypeSyntax &type) {
+  return std::get_if<Payload>(&type.data);
 }
-} // namespace rx::ast
+}
