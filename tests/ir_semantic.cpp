@@ -9,6 +9,61 @@
 namespace ast = rx::ast;
 namespace ir = rx::ir;
 namespace {
+void check_unary_lowering() {
+  rx::DiagnosticEngine diagnostics;
+  auto parsed = rx::parse_source(R"(
+#[derive(Clone, Copy)]
+struct Payload { value: i32 }
+fn main() {
+  let x = 8;
+  let flag = true;
+  let negative = -&x;
+  let inverted = !&x;
+  let opposite = !&flag;
+  let address = &x;
+  let value = *address;
+  let boxed = Box::<Payload>::new(Payload { value: 1 });
+  let field = (*boxed).value;
+}
+)", diagnostics);
+  assert(parsed.syntax_ok && parsed.crate);
+  auto checked = rx::analyze(*parsed.crate, diagnostics);
+  diagnostics.print(std::cerr);
+  assert(!diagnostics.has_errors());
+  rx::SemanticIndex index(*parsed.crate, checked);
+  ir::SemanticBridge bridge(index);
+  std::vector<ir::ScalarUnary> computations;
+  std::vector<rx::SemanticType::Kind> place_types;
+  unsigned converted_operands = 0;
+  ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
+                               ast::UnaryExpr>) {
+      const auto lowered = bridge.unary(owner, payload);
+      assert(lowered.operand.node == payload.operand->id);
+      assert(rx::same_type(lowered.result, index.expression(owner).type));
+      if (const auto *scalar = std::get_if<ir::ScalarUnary>(&lowered.operation)) {
+        computations.push_back(*scalar);
+        converted_operands += !lowered.operand.adjustments.empty();
+      } else {
+        const auto &place = std::get<ir::DereferencePlace>(lowered.operation);
+        place_types.push_back(place.element_type->kind());
+        assert(index.expression(owner).is_place);
+        assert(place.layout.bytes == 4 && place.layout.alignment == 4);
+      }
+    }
+  });
+  assert(computations.size() == 3 && converted_operands == 3);
+  assert(computations[0].op == ir::BinaryOp::Sub &&
+         computations[0].left_constant == 0);
+  assert(computations[1].op == ir::BinaryOp::Xor &&
+         computations[1].operand_type == ir::Type::I32 &&
+         computations[1].left_constant == 0xffffffffu);
+  assert(computations[2].op == ir::BinaryOp::Xor &&
+         computations[2].operand_type == ir::Type::I1 &&
+         computations[2].left_constant == 1);
+  using K = rx::SemanticType::Kind;
+  assert(place_types == (std::vector{K::I32, K::Struct}));
+}
 void check_equality_and_adjustments() {
   rx::DiagnosticEngine diagnostics;
   auto parsed = rx::parse_source(R"(
@@ -70,6 +125,7 @@ fn main() {
 }
 } // namespace
 int main() {
+  check_unary_lowering();
   check_equality_and_adjustments();
   const auto target = ir::TargetLayout::rv32();
   assert(target.integer_bits() == 32 && target.shift_count_mask() == 31);
