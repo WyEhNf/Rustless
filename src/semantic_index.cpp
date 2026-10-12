@@ -144,6 +144,21 @@ void SemanticIndex::validate_links() const {
       (void)symbol(*fact->symbol);
     for (const auto &adjustment : fact->adjustments)
       require_type(adjustment.target);
+    if (fact->callable)
+      std::visit(ast::Overloaded{
+          [&](const FunctionTarget &target) { (void)function(target.symbol); },
+          [&](const BuiltinTarget &target) { (void)builtin_name(target.builtin); }},
+          *fact->callable);
+    for (const auto *operation : {&fact->binary, &fact->compound})
+      if (*operation) {
+        require_type((*operation)->result);
+        for (const auto *operand : {&(*operation)->left, &(*operation)->right}) {
+          (void)expression(operand->node);
+          require_type(operand->effective_type);
+          for (const auto &adjustment : operand->adjustments)
+            require_type(adjustment.target);
+        }
+      }
   }
   for (const auto &[_, fact] : types_)
     require_type(fact->type);
