@@ -5,6 +5,24 @@
 #include <set>
 
 namespace rx::ir {
+namespace {
+bool same_operand(const Operand &left, const Operand &right) {
+  if (left.type != right.type || left.data.index() != right.data.index())
+    return false;
+  return visit(left, ast::Overloaded{
+                         [&](const Operand &, const ConstantOperand &p) {
+                           return p.bits ==
+                                  std::get<ConstantOperand>(right.data).bits;
+                         },
+                         [&](const Operand &, const LocalOperand &p) {
+                           return p.id == std::get<LocalOperand>(right.data).id;
+                         },
+                         [&](const Operand &, const GlobalOperand &p) {
+                           return p.symbol ==
+                                  std::get<GlobalOperand>(right.data).symbol;
+                         }});
+}
+} // namespace
 std::vector<std::string> verify_instruction(const Instruction &node) {
   std::vector<std::string> errors;
   auto require = [&](bool ok, const char *message) {
@@ -104,12 +122,15 @@ std::vector<std::string> verify_instruction(const Instruction &node) {
           },
           [&](const Instruction &, const Phi &p) {
             require(!p.incoming.empty(), "phi requires incoming values");
-            std::set<BlockId> predecessors;
+            std::map<BlockId, const Operand *> values;
             for (const auto &incoming : p.incoming) {
               require(incoming.value.type == p.result.type,
                       "phi incoming type mismatch");
-              require(predecessors.insert(incoming.predecessor).second,
-                      "duplicate phi predecessor");
+              auto [position, inserted] =
+                  values.emplace(incoming.predecessor, &incoming.value);
+              require(inserted ||
+                          same_operand(*position->second, incoming.value),
+                      "parallel phi edges must carry the same value");
             }
           },
           [&](const Instruction &, const Branch &) {},
@@ -129,6 +150,7 @@ struct Signature {
 using Signatures = std::map<std::string, Signature>;
 using Blocks = std::map<BlockId, const Block *>;
 using Predecessors = std::map<BlockId, std::set<BlockId>>;
+using IncomingEdges = std::map<BlockId, std::multiset<BlockId>>;
 using Dominators = std::map<BlockId, std::set<BlockId>>;
 Dominators dominators(const Function &function, const Blocks &blocks,
                       const Predecessors &predecessors) {
@@ -249,10 +271,12 @@ void verify_function(const Function &function, const Signatures &signatures,
   }
   Blocks blocks;
   Predecessors predecessors;
+  IncomingEdges incoming_edges;
   for (const auto &block : function.blocks) {
     if (!blocks.emplace(block.id, &block).second)
       error(block.id, {}, "duplicate block identity");
     predecessors[block.id];
+    incoming_edges[block.id];
   }
   for (const auto &block : function.blocks) {
     bool terminated = false, non_phi = false;
@@ -281,8 +305,10 @@ void verify_function(const Function &function, const Signatures &signatures,
       for_each_successor(node, [&](BlockId target) {
         if (!blocks.contains(target))
           error(block.id, node.origin, "branch targets a missing block");
-        else
+        else {
           predecessors[target].insert(block.id);
+          incoming_edges[target].insert(block.id);
+        }
       });
       if (const auto *ret = std::get_if<Return>(&node.data)) {
         if ((!ret->value && function.result != Type::Void) ||
@@ -316,12 +342,12 @@ void verify_function(const Function &function, const Signatures &signatures,
   for (const auto &block : function.blocks)
     for (const auto &node : block.instructions)
       if (const auto *phi = std::get_if<Phi>(&node.data)) {
-        std::set<BlockId> incoming;
+        std::multiset<BlockId> incoming;
         for (const auto &value : phi->incoming)
           incoming.insert(value.predecessor);
-        if (incoming != predecessors[block.id])
+        if (incoming != incoming_edges[block.id])
           error(block.id, node.origin,
-                "phi predecessors do not match control flow");
+                "phi incoming edges do not match control flow");
       }
   if (errors.size() == initial_errors)
     verify_ssa(function, blocks, predecessors, errors);
