@@ -112,6 +112,8 @@ private:
   SemanticTypePtr canonical(SemanticTypePtr value);
 };
 
+// Strict equality does not perform coercions or error recovery. Nominal
+// SymbolIds must belong to the same declaration identity space.
 bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right);
 std::string type_name(const SemanticTypePtr &type);
 

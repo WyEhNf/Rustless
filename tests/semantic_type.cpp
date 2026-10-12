@@ -21,6 +21,18 @@ struct MixedReturns : KindObserver {
   using KindObserver::operator();
   void operator()(const rx::SemanticType &, const rx::ArrayType &);
 };
+struct MutablePayload {
+  template <class P>
+  void operator()(const rx::SemanticType &, P &)
+    requires(!std::is_const_v<P>)
+  {}
+};
+struct ReferenceObserver {
+  template <class P>
+  const rx::SemanticType &operator()(const rx::SemanticType &owner, const P &) {
+    return owner;
+  }
+};
 static_assert(std::is_const_v<rx::SemanticTypePtr::element_type>);
 static_assert(!std::is_default_constructible_v<rx::SemanticType>);
 static_assert(
@@ -34,6 +46,11 @@ static_assert(std::same_as<decltype(rx::get_if<rx::ArrayType>(
 static_assert(rx::SemanticTypeVisitor<KindObserver>);
 static_assert(!rx::SemanticTypeVisitor<OnlyArray>);
 static_assert(!rx::SemanticTypeVisitor<MixedReturns>);
+static_assert(!rx::SemanticTypeVisitor<MutablePayload>);
+static_assert(
+    std::same_as<decltype(rx::visit(std::declval<const rx::SemanticType &>(),
+                                    std::declval<ReferenceObserver &>())),
+                 const rx::SemanticType &>);
 
 template <class Exception, class Action> void rejects(Action action) {
   bool rejected = false;
@@ -82,6 +99,7 @@ void composite_shapes() {
   assert(box->kind() == K::Box && box->element() == integer);
   assert(vector->kind() == K::Vec && vector->element() == integer);
   assert(array->kind() == K::Array && array->length() == 3);
+  assert(&rx::visit(*array, ReferenceObserver{}) == array.get());
   assert(reference->kind() == K::Ref && !reference->is_mutable());
   assert(mutable_ref->is_mutable() && mutable_ref != reference);
   assert(rx::type_name(box) == "Box<i32>");

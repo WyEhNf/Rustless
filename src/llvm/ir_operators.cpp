@@ -106,4 +106,29 @@ SemanticBridge::lower_binary(const ResolvedBinary &resolved) const {
       resolved.operation);
   return {std::move(operation), resolved.left, resolved.right, *result};
 }
+BinaryLowering SemanticBridge::binary(const ast::Expr &node,
+                                      const ast::BinaryExpr &payload) const {
+  if (std::get_if<ast::BinaryExpr>(&node.data) != &payload)
+    throw std::invalid_argument(
+        "binary payload does not belong to this AST node");
+  const auto &resolved = semantic_.expression(node).binary;
+  if (!resolved)
+    throw std::invalid_argument("binary expression lacks a resolved operation");
+  return lower_binary(*resolved);
+}
+CompoundLowering
+SemanticBridge::compound(const ast::Expr &node,
+                         const ast::CompoundAssignExpr &payload) const {
+  if (std::get_if<ast::CompoundAssignExpr>(&node.data) != &payload)
+    throw std::invalid_argument(
+        "assignment payload does not belong to this AST node");
+  const auto &resolved = semantic_.expression(node).compound;
+  if (!resolved)
+    throw std::invalid_argument("assignment lacks a resolved operation");
+  auto lowered = lower_binary(*resolved);
+  const auto *operation = std::get_if<ScalarArithmetic>(&lowered.operation);
+  if (!operation)
+    throw std::invalid_argument("assignment requires scalar arithmetic");
+  return {*operation, std::move(lowered.left), std::move(lowered.right)};
+}
 } // namespace rx::ir
