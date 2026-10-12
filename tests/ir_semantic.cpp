@@ -9,12 +9,9 @@
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
-static_assert(std::is_constructible_v<ir::SemanticBridge,
-                                      const rx::SemanticIndex &>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge,
-                                       rx::SemanticIndex &&>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge,
-                                       const rx::SemanticIndex &&>);
+static_assert(std::is_constructible_v<ir::SemanticBridge, const rx::SemanticIndex &>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge, rx::SemanticIndex &&>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge, const rx::SemanticIndex &&>);
 namespace {
 void check_unary_lowering() {
   rx::DiagnosticEngine diagnostics;
@@ -44,13 +41,11 @@ fn main() {
   std::vector<rx::SemanticType::Kind> place_types;
   unsigned converted_operands = 0;
   ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
-    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
-                               ast::UnaryExpr>) {
+    if constexpr (std::is_same_v<std::decay_t<decltype(payload)>, ast::UnaryExpr>) {
       const auto lowered = bridge.unary(owner, payload);
       assert(lowered.operand.node == payload.operand->id);
       assert(rx::same_type(lowered.result, index.expression(owner).type));
-      if (const auto *scalar =
-              std::get_if<ir::ScalarUnary>(&lowered.operation)) {
+      if (const auto *scalar = std::get_if<ir::ScalarUnary>(&lowered.operation)) {
         computations.push_back(*scalar);
         converted_operands += !lowered.operand.adjustments.empty();
       } else {
@@ -62,16 +57,13 @@ fn main() {
     }
   });
   assert(computations.size() == 3 && converted_operands == 3);
-  assert(computations[0].op == ir::BinaryOp::Sub &&
-         computations[0].left_constant == 0);
-  assert(computations[1].op == ir::BinaryOp::Xor &&
-         computations[1].operand_type == ir::Type::I32 &&
+  assert(computations[0].op == ir::BinaryOp::Sub && computations[0].left_constant == 0);
+  assert(computations[1].op == ir::BinaryOp::Xor && computations[1].operand_type == ir::Type::I32 &&
          computations[1].left_constant == 0xffffffffu);
-  assert(computations[2].op == ir::BinaryOp::Xor &&
-         computations[2].operand_type == ir::Type::I1 &&
+  assert(computations[2].op == ir::BinaryOp::Xor && computations[2].operand_type == ir::Type::I1 &&
          computations[2].left_constant == 1);
-  using K = rx::SemanticType::Kind;
-  assert(place_types == (std::vector{K::I32, K::Struct}));
+  using TypeKind = rx::SemanticType::Kind;
+  assert(place_types == (std::vector{TypeKind::I32, TypeKind::Struct}));
 }
 void check_equality_and_adjustments() {
   rx::DiagnosticEngine diagnostics;
@@ -103,11 +95,10 @@ fn main() {
   std::vector<bool> negated;
   unsigned converted_operands = 0;
   ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
-    using P = std::remove_cvref_t<decltype(payload)>;
-    if constexpr (std::same_as<P, ast::BinaryExpr>) {
+    using PayloadType = std::decay_t<decltype(payload)>;
+    if constexpr (std::is_same_v<PayloadType, ast::BinaryExpr>) {
       const auto lowered = bridge.binary(owner, payload);
-      if (const auto *content =
-              std::get_if<ir::StructuralEquality>(&lowered.operation)) {
+      if (const auto *content = std::get_if<ir::StructuralEquality>(&lowered.operation)) {
         content_types.push_back(content->compared_type->kind());
         negated.push_back(content->negated);
         assert(lowered.result_type == ir::Type::I1);
@@ -116,23 +107,25 @@ fn main() {
         if (!use->adjustments.empty()) {
           ++converted_operands;
           assert(use->effective_type->kind() == rx::SemanticType::Kind::I32);
-          for (const auto &adjustment : use->adjustments)
+          for (const auto &adjustment : use->adjustments) {
             assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
+          }
         }
       }
     }
-    if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+    if constexpr (std::is_same_v<PayloadType, ast::CompoundAssignExpr>) {
       const auto lowered = bridge.compound(owner, payload);
       assert(lowered.operation.op == ir::BinaryOp::And);
       assert(lowered.operation.operand_type == ir::Type::I1);
     }
   });
-  using K = rx::SemanticType::Kind;
-  assert(content_types == (std::vector{K::Box, K::Box, K::Array, K::Struct}));
+  using TypeKind = rx::SemanticType::Kind;
+  assert(content_types ==
+         (std::vector{TypeKind::Box, TypeKind::Box, TypeKind::Array, TypeKind::Struct}));
   assert(negated == (std::vector{false, true, false, false}));
   assert(converted_operands == 4);
 }
-} // namespace
+}
 int main() {
   check_unary_lowering();
   check_equality_and_adjustments();
@@ -143,11 +136,9 @@ int main() {
   assert(target.boolean().bytes == 1 && target.boolean().alignment == 1);
   assert(target.unit().bytes == 0 && target.unit().alignment == 1);
   const auto vector = target.vector();
-  assert(vector.data_offset == 0 && vector.length_offset == 4 &&
-         vector.capacity_offset == 8);
+  assert(vector.data_offset == 0 && vector.length_offset == 4 && vector.capacity_offset == 8);
   assert(vector.storage.bytes == 12 && vector.storage.alignment == 4);
-  assert(vector.capacity_offset + target.integer().bytes ==
-         vector.storage.bytes);
+  assert(vector.capacity_offset + target.integer().bytes == vector.storage.bytes);
   rx::DiagnosticEngine diagnostics;
   auto parsed = rx::parse_source(R"(
 struct Packet { flag: bool, count: i32, bits: [bool; 3] }
@@ -193,17 +184,13 @@ fn main() {
   assert(declarations[0].name == "Packet::get");
   assert(declarations[0].parameters == std::vector{ir::Type::Ptr});
   assert(declarations[0].result == ir::Type::I32);
-  assert(declarations[1].name == "Packet::copy" &&
-         declarations[1].result == ir::Type::Void);
-  assert(declarations[1].parameters ==
-         (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
+  assert(declarations[1].name == "Packet::copy" && declarations[1].result == ir::Type::Void);
+  assert(declarations[1].parameters == (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
   assert(declarations[2].name == "take");
-  assert(declarations[2].parameters ==
-         (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
+  assert(declarations[2].parameters == (std::vector{ir::Type::Ptr, ir::Type::Ptr}));
   for (const auto &declaration : declarations) {
     assert(declaration.symbol && declaration.origin);
-    assert(index.symbol(*declaration.symbol).declaration ==
-           declaration.origin->node);
+    assert(index.symbol(*declaration.symbol).declaration == declaration.origin->node);
   }
   const auto &take = std::get<ast::Function>(parsed.crate->items[2]);
   auto abi = bridge.function(take);
@@ -211,8 +198,7 @@ fn main() {
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
   auto foreign = rx::parse_source(parsed.crate->source.text, diagnostics);
-  const auto &foreign_function =
-      std::get<ast::Function>(foreign.crate->items[2]);
+  const auto &foreign_function = std::get<ast::Function>(foreign.crate->items[2]);
   assert(foreign_function.id == take.id);
   bool foreign_rejected = false;
   try {
@@ -221,56 +207,51 @@ fn main() {
     foreign_rejected = true;
   }
   assert(foreign_rejected);
-  assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") !=
-         std::string::npos);
+  assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") != std::string::npos);
   std::vector<decltype(ir::BinaryLowering::operation)> operations;
   std::vector<ir::ScalarArithmetic> assignments;
   const ast::Expr *first_binary = nullptr;
   ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
-    using P = std::remove_cvref_t<decltype(payload)>;
-    if constexpr (std::same_as<P, ast::BinaryExpr>) {
+    using PayloadType = std::decay_t<decltype(payload)>;
+    if constexpr (std::is_same_v<PayloadType, ast::BinaryExpr>) {
       auto lowered = bridge.binary(owner, payload);
       operations.push_back(lowered.operation);
       assert(lowered.left.node == payload.left->id);
       assert(lowered.right.node == payload.right->id);
-      if (!first_binary)
+      if (!first_binary) {
         first_binary = &owner;
-      if (payload.op == ast::BinaryOp::Lt ||
-          payload.op == ast::BinaryOp::LogicalAnd ||
-          payload.op == ast::BinaryOp::LogicalOr)
+      }
+      if (payload.op == ast::BinaryOp::Lt || payload.op == ast::BinaryOp::LogicalAnd ||
+          payload.op == ast::BinaryOp::LogicalOr) {
         assert(lowered.result_type == ir::Type::I1);
-      else
+      } else {
         assert(lowered.result_type == ir::Type::I32);
+      }
     }
-    if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+    if constexpr (std::is_same_v<PayloadType, ast::CompoundAssignExpr>) {
       auto lowered = bridge.compound(owner, payload);
       assignments.push_back(lowered.operation);
       assert(lowered.target.node == payload.target->id);
       assert(lowered.value.node == payload.value->id);
-      assert(index.expression(owner).type->kind() ==
-             rx::SemanticType::Kind::Unit);
+      assert(index.expression(owner).type->kind() == rx::SemanticType::Kind::Unit);
     }
   });
   using Operation = decltype(ir::BinaryLowering::operation);
-  const std::vector<Operation> expected{
-      ir::ScalarArithmetic{ir::BinaryOp::SDiv, ir::Type::I32, {}},
-      ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}},
-      ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
-      ir::ScalarArithmetic{ir::BinaryOp::LShr, ir::Type::I32, 31},
-      ir::ScalarComparison{ir::Predicate::SLt, ir::Type::I32},
-      ir::ScalarComparison{ir::Predicate::ULt, ir::Type::I32},
-      ir::ShortCircuit::And,
-      ir::ShortCircuit::Or};
+  const std::vector<Operation> expected{ir::ScalarArithmetic{ir::BinaryOp::SDiv, ir::Type::I32, {}},
+                                        ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}},
+                                        ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
+                                        ir::ScalarArithmetic{ir::BinaryOp::LShr, ir::Type::I32, 31},
+                                        ir::ScalarComparison{ir::Predicate::SLt, ir::Type::I32},
+                                        ir::ScalarComparison{ir::Predicate::ULt, ir::Type::I32},
+                                        ir::ShortCircuit::And,
+                                        ir::ShortCircuit::Or};
   assert(operations == expected);
-  assert(assignments ==
-         (std::vector{
-             ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
-             ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}}}));
+  assert(assignments == (std::vector{ir::ScalarArithmetic{ir::BinaryOp::AShr, ir::Type::I32, 31},
+                                     ir::ScalarArithmetic{ir::BinaryOp::UDiv, ir::Type::I32, {}}}));
   auto alien = rx::parse_source("fn main() { let x = 1 + 2; }", diagnostics);
   bool rejected = false;
   ast::walk(*alien.crate, [&](const auto &, const auto &payload) {
-    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
-                               ast::BinaryExpr>) {
+    if constexpr (std::is_same_v<std::decay_t<decltype(payload)>, ast::BinaryExpr>) {
       try {
         (void)bridge.binary(*first_binary, payload);
       } catch (const std::invalid_argument &) {
@@ -281,8 +262,7 @@ fn main() {
   assert(rejected);
   rx::TypeContext types;
   auto integer = types.primitive(rx::SemanticType::Kind::I32);
-  const auto packet_type =
-      types.structure(index.declaration(packet.id).id, "Packet");
+  const auto packet_type = types.structure(index.declaration(packet.id).id, "Packet");
   assert(bridge.layout(types.array(packet_type, 2)).bytes == 24);
   assert(bridge.layout(types.box(packet_type)).bytes == target.pointer().bytes);
   assert(bridge.layout(types.vector(integer)).bytes == vector.storage.bytes);
@@ -297,7 +277,7 @@ fn main() {
   } catch (const std::out_of_range &) {
     rejected = true;
   }
-  assert(rejected); // A matching display name cannot replace nominal identity.
+  assert(rejected);
   auto array = types.array(integer, std::uint64_t{1} << 32);
   rejected = false;
   try {
