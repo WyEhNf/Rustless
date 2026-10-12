@@ -1,29 +1,30 @@
 #include "rx/ir_semantic.hpp"
 #include <algorithm>
-#include <limits>
 #include <stdexcept>
 
 namespace rx::ir {
 namespace {
 using K = SemanticType::Kind;
-std::uint32_t checked_size(std::uint64_t size) {
-  if (size > std::numeric_limits<std::uint32_t>::max())
+std::uint32_t checked_size(std::uint64_t size, const TargetLayout &target) {
+  if (size > target.max_object_size())
     throw std::overflow_error("type layout exceeds RV32 address space");
   return static_cast<std::uint32_t>(size);
 }
-std::uint32_t align_size(std::uint32_t size, std::uint32_t alignment) {
+std::uint32_t align_size(std::uint32_t size, std::uint32_t alignment,
+                         const TargetLayout &target) {
   return checked_size((std::uint64_t{size} + alignment - 1) / alignment *
-                      alignment);
+                          alignment,
+                      target);
 }
-Layout array_layout(Layout element, std::uint64_t count) {
-  if (element.bytes &&
-      count > std::numeric_limits<std::uint32_t>::max() / element.bytes)
+Layout array_layout(Layout element, std::uint64_t count,
+                    const TargetLayout &target) {
+  if (element.bytes && count > target.max_object_size() / element.bytes)
     throw std::overflow_error("array layout exceeds RV32 address space");
   return {static_cast<std::uint32_t>(element.bytes * count), element.alignment};
 }
 } // namespace
-SemanticBridge::SemanticBridge(const SemanticIndex &semantic)
-    : semantic_(semantic) {
+SemanticBridge::SemanticBridge(const SemanticIndex &semantic, TargetLayout target)
+    : semantic_(semantic), target_(target) {
   for (const auto &item : semantic.crate().items)
     ast::visit(
         item,
@@ -72,23 +73,24 @@ Layout SemanticBridge::layout(const SemanticTypePtr &type) const {
   switch (type->kind) {
   case K::Unit:
   case K::Never:
-    return {0, 1};
+    return target_.unit();
   case K::Bool:
-    return {1, 1};
+    return target_.boolean();
   case K::Vec:
-    return {12, 4};
+    return target_.vector().storage;
   case K::Array:
-    return array_layout(layout(type->element), type->length);
+    return array_layout(layout(type->element), type->length, target_);
   case K::Struct:
     return layouts_.at(structures_.at(type->name)).layout;
   case K::I32:
   case K::U32:
   case K::Isize:
   case K::Usize:
+    return target_.integer();
   case K::Ref:
   case K::Box:
   case K::Function:
-    return {4, 4};
+    return target_.pointer();
   case K::Error:
     break;
   }
@@ -100,7 +102,7 @@ Layout SemanticBridge::compute_layout(const SemanticTypePtr &type) {
   if (type->kind == K::Struct)
     return resolve_structure(structures_.at(type->name)).layout;
   if (type->kind == K::Array)
-    return array_layout(compute_layout(type->element), type->length);
+    return array_layout(compute_layout(type->element), type->length, target_);
   return layout(type);
 }
 StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {
@@ -108,17 +110,18 @@ StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {
     return found->second;
   if (!resolving_.insert(symbol).second)
     throw std::invalid_argument("inline recursive layout");
-  StructLayout result{symbol, {0, 1}, {}};
+  StructLayout result{symbol, target_.unit(), {}};
   for (auto field : semantic_.structure(symbol).fields) {
     auto value = compute_layout(semantic_.symbol_type(field));
-    auto offset = align_size(result.layout.bytes, value.alignment);
+    auto offset = align_size(result.layout.bytes, value.alignment, target_);
     result.fields.push_back({field, offset, value});
-    result.layout.bytes = checked_size(std::uint64_t{offset} + value.bytes);
+    result.layout.bytes =
+        checked_size(std::uint64_t{offset} + value.bytes, target_);
     result.layout.alignment =
         std::max(result.layout.alignment, value.alignment);
   }
   result.layout.bytes =
-      align_size(result.layout.bytes, result.layout.alignment);
+      align_size(result.layout.bytes, result.layout.alignment, target_);
   resolving_.erase(symbol);
   return layouts_.emplace(symbol, std::move(result)).first->second;
 }
