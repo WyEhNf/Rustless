@@ -3,6 +3,8 @@
 #include "rx/ast/node.hpp"
 #include "rx/builtin.hpp"
 #include "rx/semantic_type.hpp"
+#include "rx/ast/operators.hpp"
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -49,4 +51,9 @@ struct ResolvedBinary {
 struct FunctionTarget { SymbolId symbol; };
 struct BuiltinTarget { BuiltinId builtin; };
 using CallTarget = std::variant<FunctionTarget, BuiltinTarget>;
+// Resolve once in the language layer; backends consume the selected operation.
+std::optional<ResolvedOperation> resolve_operation(
+    ast::BinaryOp op, const SemanticTypePtr &left,
+    const SemanticTypePtr &right);
+ast::BinaryOp binary_operation(ast::CompoundAssignOp op);
 } // namespace rx
