@@ -38,13 +38,13 @@ bool same(const TyPtr &lhs, const TyPtr &rhs) {
 
 bool integer(const TyPtr &value) {
   return value &&
-         (value->kind == Ty::Kind::I32 || value->kind == Ty::Kind::U32 ||
-          value->kind == Ty::Kind::Isize || value->kind == Ty::Kind::Usize);
+         (value->kind() == Ty::Kind::I32 || value->kind() == Ty::Kind::U32 ||
+          value->kind() == Ty::Kind::Isize || value->kind() == Ty::Kind::Usize);
 }
 
 bool signed_integer(const TyPtr &value) {
   return value &&
-         (value->kind == Ty::Kind::I32 || value->kind == Ty::Kind::Isize);
+         (value->kind() == Ty::Kind::I32 || value->kind() == Ty::Kind::Isize);
 }
 
 struct ConstantInfo {
@@ -293,11 +293,9 @@ private:
                               p.mutability == ast::Mutability::Mutable);
             },
             [&](const ast::TypeSyntax &, const ast::ArrayType &p) {
-              auto value =
-                  compound(Ty::Kind::Array, resolve_type(p.element, self_name));
-              if (auto length = evaluate_length(p.length, self_name))
-                value->length = *length;
-              return value;
+              auto element = resolve_type(p.element, self_name);
+              auto length = evaluate_length(p.length, self_name);
+              return types_.array(std::move(element), length.value_or(0));
             },
             [&](const ast::TypeSyntax &node, const ast::PathType &p) {
               return resolve_path_type(p.path, node.span, self_name);
@@ -312,9 +310,7 @@ private:
         report(span, "Self is only available inside a struct or impl");
         return ty(Ty::Kind::Error);
       }
-      auto value = ty(Ty::Kind::Struct);
-      value->name = self_name;
-      return value;
+      return structure_type(std::string(self_name));
     }
     static const std::unordered_map<std::string, Ty::Kind> primitives = {
         {"bool", Ty::Kind::Bool},
@@ -338,9 +334,7 @@ private:
     if (structures_.contains(name)) {
       if (!arguments.empty())
         report(span, "struct '" + name + "' has no type parameters");
-      auto value = ty(Ty::Kind::Struct);
-      value->name = name;
-      return value;
+      return structure_type(name);
     }
     report(span, "unknown type '" + name + "'");
     return ty(Ty::Kind::Error);
@@ -351,7 +345,7 @@ private:
     auto errors = diagnostics_.error_count();
     auto [type, value] =
         constant_value(expression, ty(Ty::Kind::Usize), self_name);
-    if (type->kind != Ty::Kind::Usize)
+    if (type->kind() != Ty::Kind::Usize)
       report(expression->span, "array length must have type usize");
     if (value < 0)
       report(expression->span, "array length cannot be negative");
@@ -381,13 +375,13 @@ private:
     // Register every associated item before resolving declaration types.
     for (const auto *implementation : impls_) {
       auto target = resolve_type(implementation->target);
-      if (target->kind != Ty::Kind::Struct ||
-          !structures_.contains(target->name)) {
+      if (target->kind() != Ty::Kind::Struct ||
+          !structures_.contains(target->name())) {
         report(implementation->span,
                "an inherent impl target must be a user-defined struct");
         continue;
       }
-      const std::string owner = target->name;
+      const std::string owner = target->name();
       const auto owner_symbol = structures_.at(owner).ast->id;
       std::unordered_set<std::string> associated_names;
       for (const auto &member : implementation->members) {
@@ -617,10 +611,10 @@ private:
     structure.layout = StructInfo::LayoutState::Visiting;
     bool valid = true;
     std::function<void(const TyPtr &)> visit = [&](const TyPtr &field) {
-      if (field->kind == Ty::Kind::Struct)
-        valid &= validate_layout(field->name);
-      else if (field->kind == Ty::Kind::Array)
-        visit(field->element);
+      if (field->kind() == Ty::Kind::Struct)
+        valid &= validate_layout(field->name());
+      else if (field->kind() == Ty::Kind::Array)
+        visit(field->element());
     };
     for (const auto &[_, field] : structure.fields)
       visit(field);
@@ -633,28 +627,28 @@ private:
                 const std::string &root, std::unordered_set<std::string> seen) {
     if (!value)
       return false;
-    if (value->kind == Ty::Kind::Bool || integer(value) ||
-        value->kind == Ty::Kind::Unit)
+    if (value->kind() == Ty::Kind::Bool || integer(value) ||
+        value->kind() == Ty::Kind::Unit)
       return true;
-    if (value->kind == Ty::Kind::Ref) {
+    if (value->kind() == Ty::Kind::Ref) {
       if (trait == "Copy")
-        return !value->is_mutable;
+        return !value->is_mutable();
       if (trait == "Clone")
-        return !value->is_mutable;
+        return !value->is_mutable();
       if (trait == "PartialEq" || trait == "Eq")
-        return supports(value->element, trait, root, seen);
+        return supports(value->element(), trait, root, seen);
     }
-    if (value->kind == Ty::Kind::Box || value->kind == Ty::Kind::Vec ||
-        value->kind == Ty::Kind::Array) {
-      if (trait == "Copy" && value->kind != Ty::Kind::Array)
+    if (value->kind() == Ty::Kind::Box || value->kind() == Ty::Kind::Vec ||
+        value->kind() == Ty::Kind::Array) {
+      if (trait == "Copy" && value->kind() != Ty::Kind::Array)
         return false;
-      return supports(value->element, trait, root, std::move(seen));
+      return supports(value->element(), trait, root, std::move(seen));
     }
-    if (value->kind == Ty::Kind::Struct) {
-      if (seen.contains(value->name))
+    if (value->kind() == Ty::Kind::Struct) {
+      if (seen.contains(value->name()))
         return trait != "Copy";
-      seen.insert(value->name);
-      auto it = structures_.find(value->name);
+      seen.insert(value->name());
+      auto it = structures_.find(value->name());
       if (it == structures_.end() || !it->second.derives.contains(trait))
         return false;
       for (const auto &[_, field] : it->second.fields)
@@ -676,7 +670,7 @@ private:
       report(main.ast->span, "main cannot have value parameters");
     if (main.ast->generics && !main.ast->generics->lifetimes.empty())
       report(main.ast->span, "main cannot have generic parameters");
-    if (main.result->kind != Ty::Kind::Unit)
+    if (main.result->kind() != Ty::Kind::Unit)
       report(main.ast->span, "main must return unit");
   }
 
@@ -697,8 +691,7 @@ private:
     if (function.ast->signature.receiver.has_value()) {
       if (function.owner.empty())
         report(function.ast->span, "self is only available in a method");
-      auto self = ty(Ty::Kind::Struct);
-      self->name = function.owner;
+      auto self = structure_type(function.owner);
       if (ast::by_reference(*function.ast->signature.receiver))
         self = compound(Ty::Kind::Ref, self,
                         ast::is_mutable(*function.ast->signature.receiver));
@@ -741,20 +734,20 @@ private:
   }
 
   bool coercible(const TyPtr &from, const TyPtr &to) {
-    if (!from || !to || from->kind == Ty::Kind::Error ||
-        to->kind == Ty::Kind::Error || from->kind == Ty::Kind::Never)
+    if (!from || !to || from->kind() == Ty::Kind::Error ||
+        to->kind() == Ty::Kind::Error || from->kind() == Ty::Kind::Never)
       return true;
     if (same(from, to))
       return true;
-    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref) {
-      if (from->is_mutable && !to->is_mutable &&
-          same(from->element, to->element))
+    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref) {
+      if (from->is_mutable() && !to->is_mutable() &&
+          same(from->element(), to->element()))
         return true;
       auto current = from;
-      while (current->kind == Ty::Kind::Ref || current->kind == Ty::Kind::Box) {
-        current = current->element;
-        if (to->kind == Ty::Kind::Ref &&
-            (!to->is_mutable || from->is_mutable) && same(current, to->element))
+      while (current->kind() == Ty::Kind::Ref || current->kind() == Ty::Kind::Box) {
+        current = current->element();
+        if (to->kind() == Ty::Kind::Ref &&
+            (!to->is_mutable() || from->is_mutable()) && same(current, to->element()))
           return true;
       }
     }
@@ -773,10 +766,10 @@ private:
     if (value.access_locked)
       return false;
     auto current = value.type;
-    while (current && current->kind == Ty::Kind::Box)
-      current = current->element;
-    if (current && current->kind == Ty::Kind::Ref)
-      return current->is_mutable;
+    while (current && current->kind() == Ty::Kind::Box)
+      current = current->element();
+    if (current && current->kind() == Ty::Kind::Ref)
+      return current->is_mutable();
     return !value.is_place || value.is_mutable;
   }
 
@@ -816,26 +809,26 @@ private:
   std::vector<Adjustment> coercion_adjustments(const TyPtr &from,
                                                const TyPtr &to) const {
     std::vector<Adjustment> result;
-    if (!from || !to || same(from, to) || from->kind == Ty::Kind::Error ||
-        to->kind == Ty::Kind::Error)
+    if (!from || !to || same(from, to) || from->kind() == Ty::Kind::Error ||
+        to->kind() == Ty::Kind::Error)
       return result;
-    if (from->kind == Ty::Kind::Never) {
+    if (from->kind() == Ty::Kind::Never) {
       result.push_back({Adjustment::Kind::NeverToAny, to});
       return result;
     }
-    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref &&
-        from->is_mutable && !to->is_mutable &&
-        same(from->element, to->element)) {
+    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref &&
+        from->is_mutable() && !to->is_mutable() &&
+        same(from->element(), to->element())) {
       result.push_back({Adjustment::Kind::MutToShared, to});
       return result;
     }
-    if (from->kind == Ty::Kind::Ref && to->kind == Ty::Kind::Ref) {
+    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref) {
       auto current = from;
-      while (current->kind == Ty::Kind::Ref || current->kind == Ty::Kind::Box) {
-        current = current->element;
+      while (current->kind() == Ty::Kind::Ref || current->kind() == Ty::Kind::Box) {
+        current = current->element();
         result.push_back({Adjustment::Kind::Dereference, current});
-        if (same(current, to->element)) {
-          result.push_back({to->is_mutable ? Adjustment::Kind::BorrowMutable
+        if (same(current, to->element())) {
+          result.push_back({to->is_mutable() ? Adjustment::Kind::BorrowMutable
                                            : Adjustment::Kind::BorrowShared,
                             to});
           return result;
@@ -968,7 +961,7 @@ private:
     }
     if (path.segments.size() == 1) {
       if (auto *binding = lookup(name))
-        return {binding->type,   true, binding->is_mutable, false,
+        return {binding->type,   true, binding->is_mutable(), false,
                 binding->symbol, name};
       if (auto it = constants_.find(name); it != constants_.end())
         return {it->second.type,
@@ -978,22 +971,15 @@ private:
                 symbol_for(it->second.ast->id),
                 name};
       if (auto it = functions_.find(name); it != functions_.end()) {
-        auto value = ty(Ty::Kind::Function);
-        value->name = name;
+        auto value = types_.function(symbol_for(it->second.ast->id), name);
         return {value, false, false, false, symbol_for(it->second.ast->id),
                 name};
       }
       if (builtin_function(name)) {
-        auto value = ty(Ty::Kind::Function);
-        value->name = name;
+        auto value = types_.builtin(io_builtin(name));
         return {value, false, false, false, std::nullopt, "builtin::" + name};
       }
-      if (auto it = structures_.find(name); it != structures_.end()) {
-        auto value = ty(Ty::Kind::Function);
-        value->name = name;
-        return {value, false, false, false, symbol_for(it->second.ast->id),
-                name};
-      }
+
     } else {
       if (auto it = associated_constants_.find(name);
           it != associated_constants_.end())
@@ -1005,14 +991,12 @@ private:
                 name};
       if (auto it = associated_functions_.find(name);
           it != associated_functions_.end()) {
-        auto value = ty(Ty::Kind::Function);
-        value->name = name;
+        auto value = types_.function(symbol_for(it->second.ast->id), name);
         return {value, false, false, false, symbol_for(it->second.ast->id),
                 name};
       }
       if (constructor_path(path)) {
-        auto value = ty(Ty::Kind::Function);
-        value->name = name;
+        auto value = builtin_path_type(path, name);
         std::optional<SymbolId> symbol;
         if (auto it = structures_.find(
                 std::string(ast::name_text(path.segments.front().name)));
@@ -1045,8 +1029,8 @@ private:
 
   ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array,
                        const TyPtr &expected) {
-    auto expected_element = expected && expected->kind == Ty::Kind::Array
-                                ? expected->element
+    auto expected_element = expected && expected->kind() == Ty::Kind::Array
+                                ? expected->element()
                                 : TyPtr{};
     if (array.elements.empty()) {
       if (!expected_element) {
@@ -1056,12 +1040,11 @@ private:
       return {compound(Ty::Kind::Array, expected_element)};
     }
     auto first = check_expr(array.elements.front(), expected_element);
-    auto result = compound(Ty::Kind::Array, first.type);
-    result->length = array.elements.size();
+
     for (std::size_t i = 1; i < array.elements.size(); ++i) {
       auto element = check_expr(array.elements[i], expected_element);
       auto merged = common_type(first.type, element.type);
-      if (merged->kind == Ty::Kind::Error)
+      if (merged->kind() == Ty::Kind::Error)
         mismatch(array.elements[i]->span, element.type, first.type);
       else {
         if (!same(element.type, merged))
@@ -1070,28 +1053,27 @@ private:
         first.type = merged;
       }
     }
-    result->element = first.type;
+    auto result = types_.array(first.type, array.elements.size());
     if (expected_element &&
-        (result->length != expected->length || !coercible(result, expected)))
+        (result->length() != expected->length() || !coercible(result, expected)))
       mismatch(node.span, result, expected);
     return {result};
   }
   ExprInfo check_repeat_array(const ast::Expr &node,
                               const ast::RepeatArrayExpr &array,
                               const TyPtr &expected) {
-    auto expected_element = expected && expected->kind == Ty::Kind::Array
-                                ? expected->element
+    auto expected_element = expected && expected->kind() == Ty::Kind::Array
+                                ? expected->element()
                                 : TyPtr{};
     auto first = check_expr(array.element, expected_element);
-    auto result = compound(Ty::Kind::Array, first.type);
     check_expr(array.count, ty(Ty::Kind::Usize));
     auto length = evaluate_length(
         array.count, current_function_ ? current_function_->owner : "");
-    result->length = length.value_or(0);
-    if (result->length > 1 && !supports(first.type, "Copy", "", {}))
+    auto result = types_.array(first.type, length.value_or(0));
+    if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
       report(node.span, "array repetition requires Copy");
     if (expected_element &&
-        (result->length != expected->length || !coercible(result, expected)))
+        (result->length() != expected->length() || !coercible(result, expected)))
       mismatch(node.span, result, expected);
     return {result};
   }
@@ -1126,8 +1108,7 @@ private:
     for (const auto &[field, _] : it->second.fields)
       if (!initialized.contains(field))
         report(node.span, "missing field initializer '" + field + "'");
-    auto result = ty(Ty::Kind::Struct);
-    result->name = name;
+    auto result = structure_type(name);
     return {result, false, false, false, symbol_for(it->second.ast->id), name};
   }
 
@@ -1151,8 +1132,8 @@ private:
                 auto binding_type = annotation ? annotation : initializer.type;
                 if (annotation && !coercible(initializer.type, annotation))
                   mismatch(p.initializer->span, initializer.type, annotation);
-                if (annotation && annotation->kind == Ty::Kind::Ref &&
-                    annotation->is_mutable && initializer.access_locked)
+                if (annotation && annotation->kind() == Ty::Kind::Ref &&
+                    annotation->is_mutable() && initializer.access_locked)
                   report(p.initializer->span,
                          "mutable reference initializer requires mutable "
                          "container access");
@@ -1173,11 +1154,11 @@ private:
               [&](const ast::Stmt &node, const ast::ExprStmt &p) {
                 auto value = check_expr(p.expression);
                 if (!block.tail && i + 1 == block.statements.size() &&
-                    value.type->kind == Ty::Kind::Never)
+                    value.type->kind() == Ty::Kind::Never)
                   result = value.type;
                 else if (p.termination == ast::Termination::Omitted &&
-                         value.type->kind != Ty::Kind::Unit &&
-                         value.type->kind != Ty::Kind::Never)
+                         value.type->kind() != Ty::Kind::Unit &&
+                         value.type->kind() != Ty::Kind::Never)
                   report(p.expression->span, "a non-final expression without a "
                                              "semicolon must have unit type");
               }});
@@ -1196,8 +1177,8 @@ private:
       mismatch(branch.condition->span, condition.type, ty(Ty::Kind::Bool));
     auto then_value = check_block(*branch.then_block, expected);
     if (!branch.else_branch) {
-      if (then_value.type->kind != Ty::Kind::Unit &&
-          then_value.type->kind != Ty::Kind::Never)
+      if (then_value.type->kind() != Ty::Kind::Unit &&
+          then_value.type->kind() != Ty::Kind::Never)
         report(node.span, "if without else requires a unit consequent");
       return {ty(Ty::Kind::Unit)};
     }
@@ -1219,9 +1200,9 @@ private:
                                      return result;
                                    }},
                    *branch.else_branch);
-    if (then_value.type->kind == Ty::Kind::Never)
+    if (then_value.type->kind() == Ty::Kind::Never)
       return else_value;
-    if (else_value.type->kind == Ty::Kind::Never)
+    if (else_value.type->kind() == Ty::Kind::Never)
       return then_value;
     if (coercible(else_value.type, then_value.type)) {
       append_adjustments(
@@ -1242,7 +1223,7 @@ private:
                       const TyPtr &expected) {
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
-    if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
+    if (body.type->kind() != Ty::Kind::Unit && body.type->kind() != Ty::Kind::Never)
       report(loop_expr.body->span, "loop body must have unit type");
     auto loop = std::move(loops_.back());
     loops_.pop_back();
@@ -1266,10 +1247,10 @@ private:
       mismatch(while_expr.condition->span, condition.type, ty(Ty::Kind::Bool));
     loops_.push_back({ty(Ty::Kind::Unit), {}});
     auto body = check_block(*while_expr.body, ty(Ty::Kind::Unit));
-    if (body.type->kind != Ty::Kind::Unit && body.type->kind != Ty::Kind::Never)
+    if (body.type->kind() != Ty::Kind::Unit && body.type->kind() != Ty::Kind::Never)
       report(while_expr.body->span, "while body must have unit type");
     for (const auto &value : loops_.back().break_types)
-      if (value->kind != Ty::Kind::Unit)
+      if (value->kind() != Ty::Kind::Unit)
         report(node.span, "break with a value is not allowed in while");
     loops_.pop_back();
     return {ty(Ty::Kind::Unit)};
@@ -1288,26 +1269,26 @@ private:
     auto op = unary.op;
     auto operand = check_expr(unary.operand, expected);
     if (op == ast::UnaryOp::Dereference) {
-      if (operand.type->kind != Ty::Kind::Ref &&
-          operand.type->kind != Ty::Kind::Box) {
+      if (operand.type->kind() != Ty::Kind::Ref &&
+          operand.type->kind() != Ty::Kind::Box) {
         report(node.span,
                "type " + type_name(operand.type) + " cannot be dereferenced");
         return {};
       }
       const bool shared_layer =
-          operand.type->kind == Ty::Kind::Ref && !operand.type->is_mutable;
+          operand.type->kind() == Ty::Kind::Ref && !operand.type->is_mutable();
       const bool locked = operand.access_locked || shared_layer;
       const bool mut =
-          (operand.type->kind == Ty::Kind::Ref ? operand.type->is_mutable
+          (operand.type->kind() == Ty::Kind::Ref ? operand.type->is_mutable()
                                                : operand.is_mutable) &&
           !locked;
-      return {operand.type->element, true, mut, locked};
+      return {operand.type->element(), true, mut, locked};
     }
     TyPtr scalar = operand.type;
-    if (scalar->kind == Ty::Kind::Ref && !scalar->is_mutable)
-      scalar = scalar->element;
+    if (scalar->kind() == Ty::Kind::Ref && !scalar->is_mutable())
+      scalar = scalar->element();
     if (op == ast::UnaryOp::Not) {
-      if (!integer(scalar) && scalar->kind != Ty::Kind::Bool)
+      if (!integer(scalar) && scalar->kind() != Ty::Kind::Bool)
         report(node.span, "operator ! requires bool or integer");
       return {scalar};
     }
@@ -1323,8 +1304,8 @@ private:
     auto rhs = scalar_operand(right.type);
     auto op = binary.op;
     if (op == ast::BinaryOp::LogicalAnd || op == ast::BinaryOp::LogicalOr) {
-      if (left.type->kind != Ty::Kind::Bool ||
-          right.type->kind != Ty::Kind::Bool)
+      if (left.type->kind() != Ty::Kind::Bool ||
+          right.type->kind() != Ty::Kind::Bool)
         report(node.span, "logical operators require bool operands");
       return {ty(Ty::Kind::Bool)};
     }
@@ -1339,20 +1320,20 @@ private:
         op == ast::BinaryOp::Gt || op == ast::BinaryOp::Ge) {
       auto ordering_left = left.type;
       auto ordering_right = right.type;
-      if ((ordering_left->kind == Ty::Kind::Ref) !=
-          (ordering_right->kind == Ty::Kind::Ref)) {
+      if ((ordering_left->kind() == Ty::Kind::Ref) !=
+          (ordering_right->kind() == Ty::Kind::Ref)) {
         report(node.span, "ordering requires matching scalar operands");
         return {ty(Ty::Kind::Bool)};
       }
-      while (ordering_left->kind == Ty::Kind::Ref &&
-             ordering_right->kind == Ty::Kind::Ref) {
-        if (ordering_left->is_mutable && !ordering_right->is_mutable)
+      while (ordering_left->kind() == Ty::Kind::Ref &&
+             ordering_right->kind() == Ty::Kind::Ref) {
+        if (ordering_left->is_mutable() && !ordering_right->is_mutable())
           report(node.span, "ordering cannot coerce a mutable left "
                             "reference to a shared right reference");
-        ordering_left = ordering_left->element;
-        ordering_right = ordering_right->element;
+        ordering_left = ordering_left->element();
+        ordering_right = ordering_right->element();
       }
-      if ((!integer(ordering_left) && ordering_left->kind != Ty::Kind::Bool) ||
+      if ((!integer(ordering_left) && ordering_left->kind() != Ty::Kind::Bool) ||
           !same(ordering_left, ordering_right))
         report(node.span, "ordering requires matching scalar operands");
       return {ty(Ty::Kind::Bool)};
@@ -1364,7 +1345,7 @@ private:
     }
     if ((op == ast::BinaryOp::BitAnd || op == ast::BinaryOp::BitOr ||
          op == ast::BinaryOp::BitXor) &&
-        lhs->kind == Ty::Kind::Bool && rhs->kind == Ty::Kind::Bool)
+        lhs->kind() == Ty::Kind::Bool && rhs->kind() == Ty::Kind::Bool)
       return {ty(Ty::Kind::Bool)};
     if (!integer(lhs) || !same(lhs, rhs))
       report(node.span, "integer operator requires matching integer operands");
@@ -1372,8 +1353,8 @@ private:
   }
 
   TyPtr scalar_operand(TyPtr value) {
-    if (value->kind == Ty::Kind::Ref && !value->is_mutable)
-      return value->element;
+    if (value->kind() == Ty::Kind::Ref && !value->is_mutable())
+      return value->element();
     return value;
   }
 
@@ -1405,7 +1386,7 @@ private:
     if (!(shift && integer(scalar) && integer(destination.type)) &&
         !same(scalar, destination.type))
       mismatch(assignment.value->span, scalar, destination.type);
-    if (!integer(destination.type) && destination.type->kind != Ty::Kind::Bool)
+    if (!integer(destination.type) && destination.type->kind() != Ty::Kind::Bool)
       report(node.span, "compound assignment requires a scalar destination");
     return {ty(Ty::Kind::Unit)};
   }
@@ -1416,7 +1397,7 @@ private:
         cast.target_type, current_function_ ? current_function_->owner : "");
     const bool valid =
         (integer(source.type) && integer(destination)) ||
-        (source.type->kind == Ty::Kind::Bool && integer(destination));
+        (source.type->kind() == Ty::Kind::Bool && integer(destination));
     if (!valid)
       report(node.span, "unsupported cast from " + type_name(source.type) +
                             " to " + type_name(destination));
@@ -1428,13 +1409,13 @@ private:
     auto *path = ast::get_if<ast::PathExpr>(*ast::unparen(call.callee));
     auto arguments =
         path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
-    if (callee.type->kind != Ty::Kind::Function) {
+    if (callee.type->kind() != Ty::Kind::Function) {
       report(node.span, "called expression is not a function");
       for (const auto &argument : call.arguments)
         check_expr(argument);
       return {};
     }
-    const auto &name = callee.type->name;
+    const auto &name = callee.type->name();
     auto finish = [&](ExprInfo result) {
       result.symbol = callee.symbol;
       result.target = callee.target.empty() ? name : callee.target;
@@ -1457,8 +1438,7 @@ private:
         it != associated_functions_.end()) {
       auto parameters = it->second.parameters;
       if (it->second.ast->signature.receiver.has_value()) {
-        auto self = ty(Ty::Kind::Struct);
-        self->name = it->second.owner;
+        auto self = structure_type(it->second.owner);
         if (ast::by_reference(*it->second.ast->signature.receiver))
           self = compound(Ty::Kind::Ref, self,
                           ast::is_mutable(*it->second.ast->signature.receiver));
@@ -1515,8 +1495,7 @@ private:
     }
     if (name.ends_with("::clone")) {
       auto owner = name.substr(0, name.size() - 7);
-      auto result = ty(Ty::Kind::Struct);
-      result->name = owner;
+      auto result = structure_type(owner);
       return finish(check_signature(node, call.arguments,
                                     {compound(Ty::Kind::Ref, result)}, result));
     }
@@ -1535,7 +1514,7 @@ private:
       auto argument = check_expr(arguments[i], expected);
       if (expected && !coercible(argument.type, expected))
         mismatch(arguments[i]->span, argument.type, expected);
-      if (expected && expected->kind == Ty::Kind::Ref && expected->is_mutable &&
+      if (expected && expected->kind() == Ty::Kind::Ref && expected->is_mutable() &&
           argument.access_locked)
         report(arguments[i]->span,
                "mutable reference argument requires mutable container access");
@@ -1550,8 +1529,8 @@ private:
     auto receiver = check_expr(method.receiver);
     TyPtr base = receiver.type;
     std::vector<Adjustment> receiver_adjustments;
-    while (base->kind == Ty::Kind::Ref || base->kind == Ty::Kind::Box) {
-      base = base->element;
+    while (base->kind() == Ty::Kind::Ref || base->kind() == Ty::Kind::Box) {
+      base = base->element();
       receiver_adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
     auto finish = [&](ExprInfo result, std::string target,
@@ -1569,11 +1548,11 @@ private:
     };
     const auto &name = method.method.text;
     if (name == "len" || name == "is_empty") {
-      if (receiver.type->kind != Ty::Kind::Vec &&
-          receiver.type->kind != Ty::Kind::Array &&
-          !(receiver.type->kind == Ty::Kind::Ref &&
-            (receiver.type->element->kind == Ty::Kind::Vec ||
-             receiver.type->element->kind == Ty::Kind::Array)))
+      if (receiver.type->kind() != Ty::Kind::Vec &&
+          receiver.type->kind() != Ty::Kind::Array &&
+          !(receiver.type->kind() == Ty::Kind::Ref &&
+            (receiver.type->element()->kind() == Ty::Kind::Vec ||
+             receiver.type->element()->kind() == Ty::Kind::Array)))
         report(node.span, name + " is only available on arrays and Vec");
       return finish(check_method_signature(node, method.arguments, {},
                                            name == "len" ? ty(Ty::Kind::Usize)
@@ -1582,9 +1561,9 @@ private:
     }
     if (name == "push" || name == "remove") {
       TyPtr vector = receiver.type;
-      if (vector->kind == Ty::Kind::Ref)
-        vector = vector->element;
-      if (vector->kind != Ty::Kind::Vec) {
+      if (vector->kind() == Ty::Kind::Ref)
+        vector = vector->element();
+      if (vector->kind() != Ty::Kind::Vec) {
         report(node.span, name + " is only available on Vec");
         return finish({}, "builtin::Vec::" + name);
       }
@@ -1592,28 +1571,28 @@ private:
         report(node.span, name + " requires mutable access to Vec");
       if (name == "push")
         return finish(
-            check_method_signature(node, method.arguments, {vector->element},
+            check_method_signature(node, method.arguments, {vector->element()},
                                    ty(Ty::Kind::Unit)),
             "builtin::Vec::push", {}, Adjustment::Kind::BorrowMutable);
       return finish(
           check_method_signature(node, method.arguments, {ty(Ty::Kind::Usize)},
-                                 vector->element),
+                                 vector->element()),
           "builtin::Vec::remove", {}, Adjustment::Kind::BorrowMutable);
     }
     if (name == "clone") {
       auto cloned = receiver.type;
-      if (cloned->kind == Ty::Kind::Ref &&
-          (cloned->element->kind == Ty::Kind::Box ||
-           cloned->element->kind == Ty::Kind::Vec ||
-           cloned->element->kind == Ty::Kind::Array))
-        cloned = cloned->element;
+      if (cloned->kind() == Ty::Kind::Ref &&
+          (cloned->element()->kind() == Ty::Kind::Box ||
+           cloned->element()->kind() == Ty::Kind::Vec ||
+           cloned->element()->kind() == Ty::Kind::Array))
+        cloned = cloned->element();
       if (!supports(cloned, "Clone", "", {}))
         report(node.span, "clone is not available for " + type_name(cloned));
       return finish(check_method_signature(node, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
-    if (base->kind == Ty::Kind::Struct) {
-      auto key = base->name + "::" + name;
+    if (base->kind() == Ty::Kind::Struct) {
+      auto key = base->name() + "::" + name;
       if (auto it = associated_functions_.find(key);
           it != associated_functions_.end()) {
         const auto &function = it->second;
@@ -1665,9 +1644,9 @@ private:
     bool mutable_access = receiver.is_place ? receiver.is_mutable : true;
     bool locked = receiver.access_locked;
     std::vector<Adjustment> adjustments;
-    while (base->kind == Ty::Kind::Ref || base->kind == Ty::Kind::Box) {
-      if (base->kind == Ty::Kind::Ref) {
-        if (!base->is_mutable) {
+    while (base->kind() == Ty::Kind::Ref || base->kind() == Ty::Kind::Box) {
+      if (base->kind() == Ty::Kind::Ref) {
+        if (!base->is_mutable()) {
           locked = true;
           mutable_access = false;
         } else if (!locked) {
@@ -1675,15 +1654,15 @@ private:
           mutable_access = true;
         }
       }
-      base = base->element;
+      base = base->element();
       adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
-    if (base->kind != Ty::Kind::Struct || !structures_.contains(base->name)) {
+    if (base->kind() != Ty::Kind::Struct || !structures_.contains(base->name())) {
       report(node.span, "field access requires a struct");
       return {};
     }
-    auto field = structures_.at(base->name).fields.find(projection.field.text);
-    if (field == structures_.at(base->name).fields.end()) {
+    auto field = structures_.at(base->name()).fields.find(projection.field.text);
+    if (field == structures_.at(base->name()).fields.end()) {
       report(node.span, "unknown field '" + projection.field.text + "'");
       return {};
     }
@@ -1691,8 +1670,8 @@ private:
             true,
             mutable_access,
             locked,
-            structures_.at(base->name).field_symbols.at(projection.field.text),
-            base->name + "::" + projection.field.text,
+            structures_.at(base->name()).field_symbols.at(projection.field.text),
+            base->name() + "::" + projection.field.text,
             std::move(adjustments)};
   }
 
@@ -1706,27 +1685,27 @@ private:
     bool mutable_access = base.is_place ? base.is_mutable : true;
     bool locked = base.access_locked;
     std::vector<Adjustment> adjustments;
-    while (container->kind == Ty::Kind::Ref ||
-           container->kind == Ty::Kind::Box) {
-      if (container->kind == Ty::Kind::Ref) {
-        if (!container->is_mutable) {
+    while (container->kind() == Ty::Kind::Ref ||
+           container->kind() == Ty::Kind::Box) {
+      if (container->kind() == Ty::Kind::Ref) {
+        if (!container->is_mutable()) {
           locked = true;
           mutable_access = false;
         } else if (!locked) {
           mutable_access = true;
         }
       }
-      container = container->element;
+      container = container->element();
       adjustments.push_back({Adjustment::Kind::Dereference, container});
     }
-    if (container->kind != Ty::Kind::Array &&
-        container->kind != Ty::Kind::Vec) {
+    if (container->kind() != Ty::Kind::Array &&
+        container->kind() != Ty::Kind::Vec) {
       report(node.span, "type " + type_name(container) + " cannot be indexed");
       return {};
     }
-    if (container->kind == Ty::Kind::Vec && !mutable_access)
+    if (container->kind() == Ty::Kind::Vec && !mutable_access)
       locked = true;
-    return {container->element, true,    mutable_access,        locked,
+    return {container->element(), true,    mutable_access,        locked,
             std::nullopt,       "index", std::move(adjustments)};
   }
 
