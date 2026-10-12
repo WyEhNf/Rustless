@@ -3,9 +3,13 @@
 #include "rx/ir_semantic.hpp"
 
 #undef NDEBUG
+#include <array>
 #include <cassert>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
@@ -231,10 +235,43 @@ fn main() {
   assert(lowered.operation.shift_count_mask == 31);
 }
 
+void projection_result_operations() {
+  Program program(R"(
+struct P { value: i32 }
+impl P { fn get(&self) -> i32 { self.value } }
+fn main() {
+  let p = P { value: 1 };
+  let r = &p;
+  let array = [1, 2];
+  let ar = &array;
+  let field_result = r.value + 1;
+  let index_result = ar[0] + 1;
+  let method_result = r.get() + 1;
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  ir::SemanticBridge bridge(index);
+  for (const auto text : {"r.value + 1", "ar[0] + 1", "r.get() + 1"}) {
+    const auto &node = expression(program, text);
+    const auto &fact = index.expression(node);
+    assert(fact.binary->left.effective_type->kind() == K::I32);
+    assert(fact.binary->left.adjustments.empty());
+    const auto &left = index.expression(fact.binary->left.node);
+    assert(left.type->kind() == K::I32);
+    const auto lowered =
+        bridge.binary(node, *ast::get_if<ast::BinaryExpr>(node));
+    assert(std::get<ir::ScalarArithmetic>(lowered.operation).op ==
+           ir::BinaryOp::Add);
+    assert(lowered.result_type == ir::Type::I32);
+  }
+}
+
 int main() {
   boolean_assignments();
   reference_operand_adjustments();
   box_equality();
   callable_aliases();
   shift_policy();
+  projection_result_operations();
 }
