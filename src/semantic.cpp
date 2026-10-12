@@ -1343,8 +1343,9 @@ private:
   }
   ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary,
                        const TyPtr &expected) {
-    auto operand = check_expr(unary.operand,
-        unary.op == ast::UnaryOp::Dereference ? TyPtr{} : expected);
+    auto operand =
+        check_expr(unary.operand,
+                   unary.op == ast::UnaryOp::Dereference ? TyPtr{} : expected);
     if (unary.op == ast::UnaryOp::Dereference) {
       if (operand.type->kind() != Ty::Kind::Ref &&
           operand.type->kind() != Ty::Kind::Box) {

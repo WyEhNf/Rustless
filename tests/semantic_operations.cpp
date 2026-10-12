@@ -336,8 +336,10 @@ fn main() {
   rx::SemanticIndex index(*program.parsed.crate, program.checked);
   unsigned checked = 0;
   ast::walk(*program.parsed.crate, [&](const auto &node, const auto &payload) {
-    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>, ast::UnaryExpr>) {
-      if (program.parsed.crate->source.slice(node.span) != "*outer") return;
+    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
+                               ast::UnaryExpr>) {
+      if (program.parsed.crate->source.slice(node.span) != "*outer")
+        return;
       const auto &fact = index.expression(node);
       assert(fact.unary->operand.adjustments.empty());
       assert(fact.type->kind() == K::Ref && fact.type->is_mutable());
