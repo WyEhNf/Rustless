@@ -11,5 +11,7 @@ struct Origin {
   ast::NodeId node;
   Span span;
 };
-inline Origin origin(const ast::Node &node) { return {node.id, node.span}; }
-} // namespace rx::ir
+inline Origin origin(const ast::Node &node) {
+  return {node.id, node.span};
+}
+}
