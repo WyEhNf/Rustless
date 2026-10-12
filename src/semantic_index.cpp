@@ -1,5 +1,6 @@
 #include "rx/semantic_index.hpp"
 #include "rx/ast/visitor.hpp"
+#include <functional>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -84,9 +85,36 @@ const ConstantValue &SemanticIndex::constant(SymbolId id) const {
   return *constants_.at(id);
 }
 void SemanticIndex::validate_links() const {
-  auto require_type = [&](const SemanticTypePtr &type) {
-    if (!type || type->kind == SemanticType::Kind::Error)
+  std::unordered_set<const SemanticType *> checked_types;
+  std::unordered_set<const SemanticType *> active_types;
+  std::function<void(const SemanticTypePtr &)> require_type;
+  require_type = [&](const SemanticTypePtr &type) {
+    if (!type || type->kind() == SemanticType::Kind::Error)
       throw std::invalid_argument("checked semantic fact has no valid type");
+    if (checked_types.contains(type.get()))
+      return;
+    if (!active_types.insert(type.get()).second)
+      throw std::invalid_argument("cyclic semantic type object graph");
+    rx::visit(*type, [&](const SemanticType &, const auto &payload) {
+      using T = std::remove_cvref_t<decltype(payload)>;
+      if constexpr (requires { payload.element; })
+        require_type(payload.element);
+      if constexpr (requires { payload.owner; })
+        if (payload.owner)
+          require_type(payload.owner);
+      if constexpr (std::same_as<T, StructType> || std::same_as<T, FunctionType>) {
+        const auto &record = symbol(payload.symbol);
+        const bool correct_kind =
+            std::same_as<T, StructType>
+                ? record.kind == SymbolKind::Struct
+                : (record.kind == SymbolKind::Function ||
+                   record.kind == SymbolKind::AssociatedFunction);
+        if (!correct_kind || record.name != payload.name)
+          throw std::invalid_argument("semantic nominal type identity mismatch");
+      }
+    });
+    active_types.erase(type.get());
+    checked_types.insert(type.get());
   };
   for (const auto &[_, fact] : symbols_) {
     if (fact->owner)
