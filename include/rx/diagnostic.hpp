@@ -1,6 +1,5 @@
 #pragma once
 
-#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
@@ -11,7 +10,13 @@ namespace rx {
 
 struct FileId {
   std::uint32_t value{};
-  auto operator<=>(const FileId &) const = default;
+
+  constexpr bool operator==(const FileId &other) const { return value == other.value; }
+  constexpr bool operator!=(const FileId &other) const { return value != other.value; }
+  constexpr bool operator<(const FileId &other) const { return value < other.value; }
+  constexpr bool operator<=(const FileId &other) const { return value <= other.value; }
+  constexpr bool operator>(const FileId &other) const { return value > other.value; }
+  constexpr bool operator>=(const FileId &other) const { return value >= other.value; }
 };
 
 struct Span {
@@ -32,7 +37,6 @@ struct Diagnostic {
 
 class DiagnosticEngine {
 public:
-  // Diagnostics accumulate so one run can report independent errors together.
   explicit DiagnosticEngine(std::string file = {});
 
   void error(Span span, std::string message);
@@ -47,4 +51,4 @@ private:
   std::vector<Diagnostic> diagnostics_;
 };
 
-} // namespace rx
+}
