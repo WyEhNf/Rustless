@@ -1077,11 +1077,12 @@ private:
       return false;
     const std::string first{ast::name_text(path.segments[0].name)};
     auto second = ast::name_text(path.segments[1].name);
-    const bool container = first == "Box" || first == "Vec";
     const bool member = second == "new" || second == "clone" ||
                         second == "len" || second == "is_empty" ||
                         second == "push" || second == "remove";
-    return (container && member) ||
+    const bool container_member = (first == "Vec" && member) ||
+        (first == "Box" && (second == "new" || second == "clone"));
+    return container_member ||
            (structures_.contains(first) && second == "clone");
   }
 
