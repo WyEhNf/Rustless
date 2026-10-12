@@ -19,38 +19,36 @@
 namespace rx {
 namespace {
 
-using Ty = SemanticType;
-using TyPtr = SemanticTypePtr;
-
-TyPtr error_type() {
+SemanticTypePtr error_type() {
   static const auto value = [] {
     TypeContext context;
-    return context.primitive(Ty::Kind::Error);
+    return context.primitive(SemanticType::Kind::Error);
   }();
   return value;
 }
 
-bool same(const TyPtr &lhs, const TyPtr &rhs) {
-  // Recovery compatibility is distinct from strict type identity.
+bool compatible_types(const SemanticTypePtr &lhs, const SemanticTypePtr &rhs) {
+
   return lhs && rhs &&
-         (lhs->kind() == Ty::Kind::Error || rhs->kind() == Ty::Kind::Error ||
-          same_type(lhs, rhs));
+         (lhs->kind() == SemanticType::Kind::Error ||
+          rhs->kind() == SemanticType::Kind::Error || same_type(lhs, rhs));
 }
 
-bool integer(const TyPtr &value) {
-  return value &&
-         (value->kind() == Ty::Kind::I32 || value->kind() == Ty::Kind::U32 ||
-          value->kind() == Ty::Kind::Isize || value->kind() == Ty::Kind::Usize);
+bool integer(const SemanticTypePtr &value) {
+  return value && (value->kind() == SemanticType::Kind::I32 ||
+                   value->kind() == SemanticType::Kind::U32 ||
+                   value->kind() == SemanticType::Kind::Isize ||
+                   value->kind() == SemanticType::Kind::Usize);
 }
 
-bool signed_integer(const TyPtr &value) {
-  return value &&
-         (value->kind() == Ty::Kind::I32 || value->kind() == Ty::Kind::Isize);
+bool signed_integer(const SemanticTypePtr &value) {
+  return value && (value->kind() == SemanticType::Kind::I32 ||
+                   value->kind() == SemanticType::Kind::Isize);
 }
 
 struct ConstantInfo {
   const ast::Constant *ast{};
-  TyPtr type;
+  SemanticTypePtr type;
   std::string owner;
   enum class TypeState {
     Fresh,
@@ -64,7 +62,7 @@ struct ConstantInfo {
 
 struct StructInfo {
   const ast::Struct *ast{};
-  std::unordered_map<std::string, TyPtr> fields;
+  std::unordered_map<std::string, SemanticTypePtr> fields;
   std::unordered_map<std::string, SymbolId> field_symbols;
   std::unordered_set<std::string> derives;
   enum class LayoutState {
@@ -77,13 +75,13 @@ struct StructInfo {
 
 struct FunctionInfo {
   const ast::Function *ast{};
-  std::vector<TyPtr> parameters;
-  TyPtr result;
+  std::vector<SemanticTypePtr> parameters;
+  SemanticTypePtr result;
   std::string owner;
 };
 
 struct ExprInfo {
-  ExprInfo(TyPtr type = error_type(), bool is_place = false,
+  ExprInfo(SemanticTypePtr type = error_type(), bool is_place = false,
            bool is_mutable = false, bool access_locked = false,
            std::optional<SymbolId> symbol = {}, std::string target = {},
            std::vector<Adjustment> adjustments = {})
@@ -96,7 +94,7 @@ struct ExprInfo {
       callable = BuiltinTarget{builtin->builtin};
   }
 
-  TyPtr type;
+  SemanticTypePtr type;
   bool is_place{};
   bool is_mutable{};
   bool access_locked{};
@@ -111,7 +109,7 @@ struct ExprInfo {
 };
 
 struct Binding {
-  TyPtr type;
+  SemanticTypePtr type;
   bool is_mutable{};
   SymbolId symbol{};
 };
@@ -123,7 +121,7 @@ public:
 
   SemanticResult run() {
     result_.source_crate = &crate_;
-    // Each pass consumes complete tables produced by the earlier passes.
+
     collect_items();
     resolve_declarations();
     for (const auto &[_, function] : functions_)
@@ -143,9 +141,13 @@ public:
     for (auto &[_, fact] : expression_facts_)
       result_.expressions.push_back(std::move(fact));
     std::sort(result_.functions.begin(), result_.functions.end(),
-              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+              [](const auto &left, const auto &right) {
+                return left.symbol < right.symbol;
+              });
     std::sort(result_.structures.begin(), result_.structures.end(),
-              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+              [](const auto &left, const auto &right) {
+                return left.symbol < right.symbol;
+              });
     for (auto &[node, type] : resolved_types_)
       result_.resolved_types.push_back({node, std::move(type)});
     for (auto &[symbol, type] : symbol_types_)
@@ -161,35 +163,48 @@ public:
             {symbol_for(constant.ast->id),
              static_cast<std::uint32_t>(constant.value)});
     std::sort(result_.constants.begin(), result_.constants.end(),
-              [](const auto &a, const auto &b) { return a.symbol < b.symbol; });
+              [](const auto &left, const auto &right) {
+                return left.symbol < right.symbol;
+              });
     result_.success = !diagnostics_.has_errors();
-    return result_.success
-               ? SemanticResult::publish(crate_, std::move(result_))
-               : SemanticResult::rejected(crate_, std::move(result_));
+    if (result_.success)
+      return SemanticResult::publish(crate_, std::move(result_));
+    return SemanticResult::rejected(crate_, std::move(result_));
   }
 
 private:
-  TyPtr ty(Ty::Kind kind) { return types_.primitive(kind); }
-  TyPtr compound(Ty::Kind kind, TyPtr element, bool mutable_ref = false) {
+  std::string_view current_owner() const {
+    if (current_function_)
+      return current_function_->owner;
+    return {};
+  }
+
+  SemanticTypePtr primitive_type(SemanticType::Kind kind) {
+    return types_.primitive(kind);
+  }
+  SemanticTypePtr compound(SemanticType::Kind kind, SemanticTypePtr element,
+                           bool mutable_ref = false) {
     switch (kind) {
-    case Ty::Kind::Box:
+    case SemanticType::Kind::Box:
       return types_.box(std::move(element));
-    case Ty::Kind::Vec:
+    case SemanticType::Kind::Vec:
       return types_.vector(std::move(element));
-    case Ty::Kind::Array:
+    case SemanticType::Kind::Array:
       return types_.array(std::move(element), 0);
-    case Ty::Kind::Ref:
-      return types_.reference(std::move(element),
-                              mutable_ref ? ast::Mutability::Mutable
-                                          : ast::Mutability::Immutable);
+    case SemanticType::Kind::Ref: {
+      auto mutability = ast::Mutability::Immutable;
+      if (mutable_ref)
+        mutability = ast::Mutability::Mutable;
+      return types_.reference(std::move(element), mutability);
+    }
     default:
       throw std::logic_error("invalid compound type factory");
     }
   }
-  TyPtr structure_type(const std::string &name) {
+  SemanticTypePtr structure_type(const std::string &name) {
     if (auto found = structures_.find(name); found != structures_.end())
       return types_.structure(symbol_for(found->second.ast->id), name);
-    return ty(Ty::Kind::Error);
+    return primitive_type(SemanticType::Kind::Error);
   }
   void report(Span span, std::string message) {
     diagnostics_.error(span, std::move(message));
@@ -211,7 +226,8 @@ private:
     if (recorded_symbols_.insert(id).second)
       result_.symbols.push_back({id, kind, std::move(name), parent, node});
   }
-  void record_symbol_type(ast::NodeId declaration, const TyPtr &type) {
+  void record_symbol_type(ast::NodeId declaration,
+                          const SemanticTypePtr &type) {
     symbol_types_[symbol_for(declaration)] = type;
   }
 
@@ -220,8 +236,8 @@ private:
     std::unordered_set<std::string> value_names;
     for (const auto &item : crate_.items) {
       ast::visit(item, [&](const ast::Node &, const auto &value) {
-        using T = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<T, ast::Struct>) {
+        using Payload = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<Payload, ast::Struct>) {
           record_symbol(value.id, SymbolKind::Struct, value.name.text);
           if (builtin_type(value.name.text))
             report(value.span, "the builtin type name '" + value.name.text +
@@ -229,7 +245,7 @@ private:
           if (!type_names.insert(value.name.text).second)
             report(value.span, "duplicate type name '" + value.name.text + "'");
           structures_[value.name.text].ast = &value;
-        } else if constexpr (std::is_same_v<T, ast::Function>) {
+        } else if constexpr (std::is_same_v<Payload, ast::Function>) {
           record_symbol(value.id, SymbolKind::Function, value.name.text);
           if (protected_builtin_value(value.name.text))
             report(value.span, "the builtin value name '" + value.name.text +
@@ -238,7 +254,7 @@ private:
             report(value.span,
                    "duplicate value name '" + value.name.text + "'");
           functions_[value.name.text].ast = &value;
-        } else if constexpr (std::is_same_v<T, ast::Constant>) {
+        } else if constexpr (std::is_same_v<Payload, ast::Constant>) {
           record_symbol(value.id, SymbolKind::Constant, value.name.text);
           if (protected_builtin_value(value.name.text))
             report(value.span, "the builtin value name '" + value.name.text +
@@ -247,10 +263,10 @@ private:
             report(value.span,
                    "duplicate value name '" + value.name.text + "'");
           constants_[value.name.text].ast = &value;
-        } else if constexpr (std::is_same_v<T, ast::Impl>) {
+        } else if constexpr (std::is_same_v<Payload, ast::Impl>) {
           impls_.push_back(&value);
         } else {
-          static_assert(std::is_same_v<T, ast::Use>,
+          static_assert(std::is_same_v<Payload, ast::Use>,
                         "unhandled AST declaration");
           (void)value;
         }
@@ -269,8 +285,8 @@ private:
     return name == "getInt" || name == "printInt" || name == "printlnInt";
   }
 
-  TyPtr resolve_type(const ast::TypePtr &syntax,
-                     std::string_view self_name = {}) {
+  SemanticTypePtr resolve_type(const ast::TypePtr &syntax,
+                               std::string_view self_name = {}) {
     auto result = resolve_type_impl(syntax, self_name);
     resolved_types_[syntax->id] = result;
     return result;
@@ -294,20 +310,22 @@ private:
     }
     return result;
   }
-  TyPtr resolve_type(const std::optional<ast::TypePtr> &syntax,
-                     std::string_view self_name = {}) {
-    return syntax ? resolve_type(*syntax, self_name) : ty(Ty::Kind::Unit);
+  SemanticTypePtr resolve_type(const std::optional<ast::TypePtr> &syntax,
+                               std::string_view self_name = {}) {
+    if (syntax)
+      return resolve_type(*syntax, self_name);
+    return primitive_type(SemanticType::Kind::Unit);
   }
-  TyPtr resolve_type_impl(const ast::TypePtr &syntax,
-                          std::string_view self_name) {
+  SemanticTypePtr resolve_type_impl(const ast::TypePtr &syntax,
+                                    std::string_view self_name) {
     return ast::visit(
         *syntax,
         ast::Overloaded{
             [&](const ast::TypeSyntax &, const ast::UnitType &) {
-              return ty(Ty::Kind::Unit);
+              return primitive_type(SemanticType::Kind::Unit);
             },
-            [&](const ast::TypeSyntax &, const ast::ParenType &p) {
-              return resolve_type(p.inner, self_name);
+            [&](const ast::TypeSyntax &, const ast::ParenType &payload) {
+              return resolve_type(payload.inner, self_name);
             },
             [&](const ast::TypeSyntax &, const ast::ReferenceType &p) {
               return compound(Ty::Kind::Ref,
