@@ -1451,101 +1451,77 @@ private:
 
   ExprInfo check_call(const ast::Expr &node, const ast::CallExpr &call) {
     auto callee = check_expr(call.callee);
-    auto *path = ast::get_if<ast::PathExpr>(*ast::unparen(call.callee));
-    auto arguments =
-        path ? type_arguments(path->path) : std::vector<const ast::TypePtr *>{};
-    if (callee.type->kind() != Ty::Kind::Function) {
-      report(node.span, "called expression is not a function");
-      for (const auto &argument : call.arguments)
-        check_expr(argument);
-      return {};
-    }
-    const auto &name = callee.type->name();
     auto finish = [&](ExprInfo result) {
-      result.symbol = callee.symbol;
-      result.target = callee.target.empty() ? name : callee.target;
+      result.callable = callee.callable;
+      if (auto *function = rx::get_if<FunctionType>(*callee.type)) {
+        result.symbol = function->symbol;
+        result.target = function->name;
+      } else if (auto *builtin = rx::get_if<BuiltinFunctionType>(*callee.type)) {
+        result.target = "builtin::" + std::string(builtin_name(builtin->builtin));
+      }
       return result;
     };
-    if (!arguments.empty() && !name.starts_with("Box::") &&
-        !name.starts_with("Vec::"))
-      report(call.callee->span, "functions have no type parameters");
-    if (name == "get_i32" || name == "getInt")
-      return finish(
-          check_signature(node, call.arguments, {}, ty(Ty::Kind::I32)));
-    if (name == "print_i32" || name == "println_i32" || name == "printInt" ||
-        name == "printlnInt")
-      return finish(check_signature(node, call.arguments, {ty(Ty::Kind::I32)},
-                                    ty(Ty::Kind::Unit)));
-    if (auto it = functions_.find(name); it != functions_.end())
-      return finish(check_signature(node, call.arguments, it->second.parameters,
-                                    it->second.result));
-    if (auto it = associated_functions_.find(name);
-        it != associated_functions_.end()) {
-      auto parameters = it->second.parameters;
-      if (it->second.ast->signature.receiver.has_value()) {
-        auto self = structure_type(it->second.owner);
-        if (ast::by_reference(*it->second.ast->signature.receiver))
+    if (auto *function = rx::get_if<FunctionType>(*callee.type)) {
+      const auto &info = *callable_functions_.at(function->symbol);
+      auto parameters = info.parameters;
+      if (info.ast->signature.receiver) {
+        auto self = structure_type(info.owner);
+        if (ast::by_reference(*info.ast->signature.receiver))
           self = compound(Ty::Kind::Ref, self,
-                          ast::is_mutable(*it->second.ast->signature.receiver));
+                          ast::is_mutable(*info.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
-      return finish(
-          check_signature(node, call.arguments, parameters, it->second.result));
+      return finish(check_signature(node, call.arguments, parameters, info.result));
     }
-    if (name == "Box::new" || name == "Vec::new") {
-      if (arguments.size() != 1) {
-        report(node.span,
-               name.substr(0, 3) + " constructor requires one type argument");
-        return finish({});
-      }
-      auto element = resolve_type(*arguments.front());
-      if (name == "Box::new")
-        return finish(check_signature(node, call.arguments, {element},
-                                      compound(Ty::Kind::Box, element)));
-      return finish(check_signature(node, call.arguments, {},
-                                    compound(Ty::Kind::Vec, element)));
+    if (auto *builtin = rx::get_if<BuiltinFunctionType>(*callee.type))
+      return finish(check_builtin_call(node, call.arguments, *builtin));
+    report(node.span, "called expression is not a function");
+    for (const auto &argument : call.arguments)
+      check_expr(argument);
+    return {};
+  }
+
+  ExprInfo check_builtin_call(const ast::Expr &node,
+                             const std::vector<ast::ExprPtr> &arguments,
+                             const BuiltinFunctionType &builtin) {
+    switch (builtin.builtin) {
+    case BuiltinId::GetInt:
+      return check_signature(node, arguments, {}, ty(Ty::Kind::I32));
+    case BuiltinId::PrintInt:
+    case BuiltinId::PrintlnInt:
+      return check_signature(node, arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit));
+    default: break;
     }
-    if (name == "Box::clone" || name == "Vec::clone" || name == "Vec::len" ||
-        name == "Vec::is_empty" || name == "Vec::push" ||
-        name == "Vec::remove") {
-      if (arguments.size() != 1) {
-        report(node.span,
-               "container associated function requires one type argument");
-        return finish({});
-      }
-      auto element = resolve_type(*arguments.front());
-      auto container = compound(
-          name.starts_with("Box") ? Ty::Kind::Box : Ty::Kind::Vec, element);
-      if (name.ends_with("clone")) {
-        if (!supports(container, "Clone", "", {}))
-          report(node.span,
-                 "clone is not available for " + type_name(container));
-        return finish(check_signature(node, call.arguments,
-                                      {compound(Ty::Kind::Ref, container)},
-                                      container));
-      }
-      if (name.ends_with("push"))
-        return finish(
-            check_signature(node, call.arguments,
-                            {compound(Ty::Kind::Ref, container, true), element},
-                            ty(Ty::Kind::Unit)));
-      if (name.ends_with("remove"))
-        return finish(check_signature(
-            node, call.arguments,
-            {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
-            element));
-      return finish(check_signature(
-          node, call.arguments, {compound(Ty::Kind::Ref, container)},
-          name.ends_with("len") ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool)));
+    auto container = builtin.owner;
+    if (!container) {
+      report(node.span, "container function requires a resolved owner type");
+      for (const auto &argument : arguments) check_expr(argument);
+      return {};
     }
-    if (name.ends_with("::clone")) {
-      auto owner = name.substr(0, name.size() - 7);
-      auto result = structure_type(owner);
-      return finish(check_signature(node, call.arguments,
-                                    {compound(Ty::Kind::Ref, result)}, result));
+    switch (builtin.builtin) {
+    case BuiltinId::BoxNew:
+      return check_signature(node, arguments, {container->element()}, container);
+    case BuiltinId::VecNew:
+      return check_signature(node, arguments, {}, container);
+    case BuiltinId::Clone:
+      if (!supports(container, "Clone", "", {}))
+        report(node.span, "clone is not available for " + type_name(container));
+      return check_signature(node, arguments, {compound(Ty::Kind::Ref, container)}, container);
+    case BuiltinId::Push:
+      return check_signature(node, arguments,
+          {compound(Ty::Kind::Ref, container, true), container->element()}, ty(Ty::Kind::Unit));
+    case BuiltinId::Remove:
+      return check_signature(node, arguments,
+          {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)}, container->element());
+    case BuiltinId::Len:
+    case BuiltinId::IsEmpty:
+      return check_signature(node, arguments, {compound(Ty::Kind::Ref, container)},
+          builtin.builtin == BuiltinId::Len ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool));
+    case BuiltinId::GetInt:
+    case BuiltinId::PrintInt:
+    case BuiltinId::PrintlnInt: break;
     }
-    report(node.span, "unknown function '" + name + "'");
-    return finish({});
+    throw std::logic_error("unhandled builtin call");
   }
 
   ExprInfo check_signature(const ast::Node &node,
