@@ -40,6 +40,7 @@ private:
   void validate_links() const;
   void validate_tree() const;
   void validate_declarations() const;
+  void validate_shapes() const;
   const ast::Crate *crate_;
   std::shared_ptr<const SemanticData> snapshot_;
   std::unordered_map<SymbolId, const SymbolRecord *> symbols_;

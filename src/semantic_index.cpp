@@ -42,6 +42,7 @@ SemanticIndex::SemanticIndex(const ast::Crate &crate,
   validate_links();
   validate_tree();
   validate_declarations();
+  validate_shapes();
 }
 SemanticResult::SemanticResult()
     : data_(std::make_shared<const SemanticData>()) {}
@@ -352,5 +353,65 @@ void SemanticIndex::validate_declarations() const {
     });
   if (expected.size() != declarations_.size())
     throw std::invalid_argument("semantic symbols do not match AST declarations");
+}
+void SemanticIndex::validate_shapes() const {
+  using K = SemanticType::Kind;
+  auto expect = [](const SemanticTypePtr &type, K kind) {
+    if (type->kind() != kind)
+      throw std::invalid_argument("semantic type does not match AST payload");
+  };
+  ast::walk(*crate_, [&](const auto &node, const auto &payload) {
+    using Owner = std::remove_cvref_t<decltype(node)>;
+    using P = std::remove_cvref_t<decltype(payload)>;
+    if constexpr (std::same_as<Owner, ast::TypePredicate>)
+      return ast::WalkControl::SkipChildren;
+    if constexpr (std::same_as<Owner, ast::Expr>) {
+      const auto &fact = expression(node);
+      if constexpr (std::same_as<P, ast::IntegerExpr>) {
+        const auto kind = fact.type->kind();
+        if (kind != K::I32 && kind != K::U32 && kind != K::Isize &&
+            kind != K::Usize)
+          throw std::invalid_argument("integer expression has non-integer type");
+      }
+      if constexpr (std::same_as<P, ast::BooleanExpr>)
+        expect(fact.type, K::Bool);
+      if constexpr (std::same_as<P, ast::UnitExpr> ||
+                    std::same_as<P, ast::AssignExpr> ||
+                    std::same_as<P, ast::CompoundAssignExpr> ||
+                    std::same_as<P, ast::WhileExpr>)
+        expect(fact.type, K::Unit);
+      if constexpr (std::same_as<P, ast::BreakExpr> ||
+                    std::same_as<P, ast::ContinueExpr> ||
+                    std::same_as<P, ast::ReturnExpr>)
+        expect(fact.type, K::Never);
+      if constexpr (std::same_as<P, ast::BorrowExpr>) {
+        expect(fact.type, K::Ref);
+        if (fact.type->is_mutable() !=
+            (payload.mutability == ast::Mutability::Mutable))
+          throw std::invalid_argument("borrow mutability fact mismatch");
+        require_equivalent(fact.type->element(), expression(*payload.operand).type);
+      }
+      if constexpr (std::same_as<P, ast::CastExpr>)
+        require_equivalent(fact.type, type(*payload.target_type));
+      if constexpr (std::same_as<P, ast::FieldExpr>) {
+        if (!fact.symbol || symbol(*fact.symbol).kind != SymbolKind::Field)
+          throw std::invalid_argument("field expression has no field symbol");
+        require_equivalent(fact.type, symbol_type(*fact.symbol));
+      }
+      if constexpr (std::same_as<P, ast::ArrayExpr>) {
+        expect(fact.type, K::Array);
+        if (fact.type->length() != payload.elements.size())
+          throw std::invalid_argument("array expression length fact mismatch");
+      }
+      if constexpr (std::same_as<P, ast::RepeatArrayExpr>)
+        expect(fact.type, K::Array);
+      if constexpr (std::same_as<P, ast::StructExpr>) {
+        expect(fact.type, K::Struct);
+        if (fact.symbol != fact.type->symbol())
+          throw std::invalid_argument("struct expression identity mismatch");
+      }
+    }
+    return ast::WalkControl::Continue;
+  });
 }
 } // namespace rx
