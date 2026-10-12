@@ -2,22 +2,28 @@
 
 #include "rx/ast/literal.hpp"
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace rx {
-// Interpret the parser's typed literal descriptor rather than guessing its
-// kind.
-inline std::optional<std::uint64_t>
-integer_magnitude(const ast::IntegerLiteral &literal) {
+inline std::optional<std::uint64_t> integer_magnitude(const ast::IntegerLiteral &literal) {
   std::string digits = literal.spelling;
   if (literal.suffix) {
-    constexpr std::array suffixes{"i32", "u32", "isize", "usize"};
-    auto index = static_cast<std::size_t>(*literal.suffix);
-    if (index >= suffixes.size() || !digits.ends_with(suffixes[index]))
+    constexpr std::array<std::string_view, 4> suffixes{"i32", "u32", "isize", "usize"};
+    const auto suffix_index = static_cast<std::size_t>(*literal.suffix);
+    if (suffix_index >= suffixes.size())
       return {};
-    digits.resize(digits.size() - std::string_view(suffixes[index]).size());
+    const std::string_view suffix = suffixes[suffix_index];
+    if (digits.size() < suffix.size())
+      return {};
+    const std::size_t suffix_begin = digits.size() - suffix.size();
+    if (digits.compare(suffix_begin, suffix.size(), suffix) != 0)
+      return {};
+    digits.resize(suffix_begin);
   }
   digits.erase(std::remove(digits.begin(), digits.end(), '_'), digits.end());
   std::string_view prefix;
@@ -36,14 +42,15 @@ integer_magnitude(const ast::IntegerLiteral &literal) {
   default:
     return {};
   }
-  if (!digits.starts_with(prefix) || digits.size() == prefix.size())
+  if (digits.compare(0, prefix.size(), prefix) != 0 || digits.size() == prefix.size())
     return {};
   std::uint64_t value{};
-  auto [end, error] = std::from_chars(digits.data() + prefix.size(),
-                                      digits.data() + digits.size(), value,
-                                      static_cast<int>(literal.base));
-  if (error != std::errc{} || end != digits.data() + digits.size())
+  const char *number_begin = digits.data() + prefix.size();
+  const char *number_end = digits.data() + digits.size();
+  const auto parsed =
+      std::from_chars(number_begin, number_end, value, static_cast<int>(literal.base));
+  if (parsed.ec != std::errc{} || parsed.ptr != number_end)
     return {};
   return value;
 }
-} // namespace rx
+}
