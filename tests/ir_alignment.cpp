@@ -8,10 +8,10 @@
 
 namespace ir = rx::ir;
 namespace {
-template <class F> void rejects(F &&f) {
+template <class Function> void rejects(Function &&function) {
   bool rejected = false;
   try {
-    f();
+    function();
   } catch (const std::exception &) {
     rejected = true;
   }
@@ -21,7 +21,7 @@ struct PartialVisitor {
   void operator()(const ir::Instruction &, const ir::Return &) {}
 };
 struct InconsistentVisitor {
-  template <class P> int operator()(const ir::Instruction &, const P &) {
+  template <class PayloadType> int operator()(const ir::Instruction &, const PayloadType &) {
     return 0;
   }
   void operator()(const ir::Instruction &, const ir::Return &) {}
@@ -37,19 +37,20 @@ ir::Module diamond() {
   builder.select(entry);
   rx::ast::Node source;
   source.id = rx::ast::NodeId{7};
-  source.span = {.begin = 2, .end = 9, .file = rx::FileId{1}};
+  source.span.begin = 2;
+  source.span.end = 9;
+  source.span.file = rx::FileId{1};
   builder.set_origin(source);
   auto address = builder.allocate(4);
   builder.store(ir::Operand::constant(ir::Type::I32, 8), address);
   auto value = builder.load(ir::Type::I32, address);
-  // These pushes may reallocate the block vector while entry stays selected.
-  auto left = builder.create_block("left"),
-       right = builder.create_block("right");
+
+  auto left = builder.create_block("left");
+  auto right = builder.create_block("right");
   auto join = builder.create_block("join");
   builder.cond_branch(ir::Operand::constant(ir::Type::I1, 1), left, right);
   builder.select(left);
-  auto sum = builder.binary(ir::BinaryOp::Add, value,
-                            ir::Operand::constant(ir::Type::I32, 1));
+  auto sum = builder.binary(ir::BinaryOp::Add, value, ir::Operand::constant(ir::Type::I32, 1));
   builder.branch(join);
   builder.select(right);
   builder.branch(join);
@@ -66,9 +67,9 @@ ir::Module parallel_edges() {
   auto entry = builder.create_block("entry");
   auto join = builder.create_block("join");
   builder.select(entry);
-  auto value =
-      builder.binary(ir::BinaryOp::Add, ir::Operand::constant(ir::Type::I32, 3),
-                     ir::Operand::constant(ir::Type::I32, 4));
+  auto value = builder.binary(ir::BinaryOp::Add,
+                              ir::Operand::constant(ir::Type::I32, 3),
+                              ir::Operand::constant(ir::Type::I32, 4));
   builder.cond_branch(ir::Operand::constant(ir::Type::I1, 1), join, join);
   builder.select(join);
   auto merged = builder.phi(ir::Type::I32, {{value, entry}, {value, entry}});
@@ -79,30 +80,24 @@ void check_parallel_edges() {
   auto module = parallel_edges();
   assert(ir::verify(module).empty());
   assert(ir::print(module).find("phi i32") != std::string::npos);
-  auto &phi =
-      std::get<ir::Phi>(module.functions[0].blocks[1].instructions[0].data);
+  auto &phi = std::get<ir::Phi>(module.functions[0].blocks[1].instructions[0].data);
   auto second = phi.incoming.back();
   phi.incoming.pop_back();
-  assert(!ir::verify(module).empty()); // One incoming cannot cover two edges.
+  assert(!ir::verify(module).empty());
   phi.incoming.push_back(second);
   phi.incoming.back().value = ir::Operand::constant(ir::Type::I32, 8);
-  assert(
-      !ir::verify(module).empty()); // Duplicate edges cannot select two values.
+  assert(!ir::verify(module).empty());
   phi.incoming.back() = second;
   phi.incoming.push_back(second);
-  assert(
-      !ir::verify(module).empty()); // Three incoming values exceed two edges.
+  assert(!ir::verify(module).empty());
   phi.incoming.pop_back();
-  auto &branch = std::get<ir::CondBranch>(
-      module.functions[0].blocks[0].instructions.back().data);
-  module.functions[0].blocks[0].instructions.back().data =
-      ir::Branch{branch.consequent};
-  assert(!ir::verify(module)
-              .empty()); // Two incoming values cannot cover one edge.
+  auto &branch = std::get<ir::CondBranch>(module.functions[0].blocks[0].instructions.back().data);
+  module.functions[0].blocks[0].instructions.back().data = ir::Branch{branch.consequent};
+  assert(!ir::verify(module).empty());
   phi.incoming.pop_back();
   assert(ir::verify(module).empty());
 }
-} // namespace
+}
 int main(int argc, char **argv) {
   check_parallel_edges();
   auto module = diamond();
@@ -125,49 +120,44 @@ int main(int argc, char **argv) {
     rejects([&] { (void)ir::print(broken); });
     return errors;
   };
-  auto errors = invalid([](ir::Function &f) {
-    auto &binary = std::get<ir::Binary>(f.blocks[1].instructions[0].data);
+  auto errors = invalid([](ir::Function &function) {
+    auto &binary = std::get<ir::Binary>(function.blocks[1].instructions[0].data);
     binary.left = ir::Operand::local(ir::Type::I32, ir::ValueId{999});
   });
   assert(errors[0].origin && errors[0].origin->node.value == 7);
-  invalid([](ir::Function &f) {
-    auto &ret = std::get<ir::Return>(f.blocks[3].instructions.back().data);
-    ret.value = ir::Operand::local(
-        ir::Type::I32, ir::definition(f.blocks[1].instructions[0])->id);
-  }); // A left-only value cannot dominate the join.
-  invalid([](ir::Function &f) {
-    auto &phi = std::get<ir::Phi>(f.blocks[3].instructions[0].data);
+  invalid([](ir::Function &function) {
+    auto &ret = std::get<ir::Return>(function.blocks[3].instructions.back().data);
+    ret.value =
+        ir::Operand::local(ir::Type::I32, ir::definition(function.blocks[1].instructions[0])->id);
+  });
+  invalid([](ir::Function &function) {
+    auto &phi = std::get<ir::Phi>(function.blocks[3].instructions[0].data);
     phi.incoming.pop_back();
   });
-  invalid([](ir::Function &f) {
-    auto &load = std::get<ir::Load>(f.blocks[0].instructions[2].data);
-    load.address = ir::Operand::local(
-        ir::Type::Ptr, ir::definition(f.blocks[1].instructions[0])->id);
+  invalid([](ir::Function &function) {
+    auto &load = std::get<ir::Load>(function.blocks[0].instructions[2].data);
+    load.address =
+        ir::Operand::local(ir::Type::Ptr, ir::definition(function.blocks[1].instructions[0])->id);
   });
-  invalid([](ir::Function &f) {
-    auto &branch = std::get<ir::Branch>(f.blocks[2].instructions[0].data);
+  invalid([](ir::Function &function) {
+    auto &branch = std::get<ir::Branch>(function.blocks[2].instructions[0].data);
     branch.target = ir::BlockId{999};
   });
-  invalid([](ir::Function &f) {
-    f.blocks[3].instructions.emplace_back(ir::Unreachable{});
+  invalid([](ir::Function &function) {
+    function.blocks[3].instructions.emplace_back(ir::Unreachable{});
   });
   auto integer = ir::Operand::constant(ir::Type::I32, 1);
-  assert(!ir::verify_instruction(
-              ir::Instruction{ir::Cast{
-                  {ir::ValueId{1}, ir::Type::I8}, ir::CastOp::ZExt, integer}})
-              .empty());
-  assert(
-      !ir::verify_instruction(ir::Instruction{ir::Load{
-                                  {ir::ValueId{1}, ir::Type::I32}, integer, 3}})
-           .empty());
+  const ir::Instruction invalid_cast{
+      ir::Cast{{ir::ValueId{1}, ir::Type::I8}, ir::CastOp::ZExt, integer}};
+  assert(!ir::verify_instruction(invalid_cast).empty());
+  const ir::Instruction invalid_load{ir::Load{{ir::ValueId{1}, ir::Type::I32}, integer, 3}};
+  assert(!ir::verify_instruction(invalid_load).empty());
   ir::Function function{"calls", ir::Type::Void};
   ir::Builder builder(function);
   builder.select(builder.create_block("entry"));
   auto before = function.blocks[0].instructions.size();
-  rejects([&] {
-    builder.binary(ir::BinaryOp::Add, integer,
-                   ir::Operand::constant(ir::Type::I1, 0));
-  });
+  rejects(
+      [&] { builder.binary(ir::BinaryOp::Add, integer, ir::Operand::constant(ir::Type::I1, 0)); });
   assert(function.blocks[0].instructions.size() == before);
   assert(!builder.call(ir::Type::Void, "external", {}));
   builder.ret();
@@ -180,7 +170,6 @@ int main(int argc, char **argv) {
   calls.functions[0].symbol.reset();
   calls.functions[0].blocks[0].instructions.insert(
       calls.functions[0].blocks[0].instructions.begin(),
-      ir::Instruction{ir::Load{{ir::ValueId{99}, ir::Type::I32},
-                               ir::Operand::global("missing")}});
+      ir::Instruction{ir::Load{{ir::ValueId{99}, ir::Type::I32}, ir::Operand::global("missing")}});
   assert(!ir::verify(calls).empty());
 }
