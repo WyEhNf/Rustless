@@ -1,6 +1,6 @@
+#include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
 #include "rx/semantic_index.hpp"
-#include "rx/ast/visitor.hpp"
 
 #undef NDEBUG
 #include <algorithm>
@@ -34,7 +34,8 @@ fn main() {
     let cloned = a.clone();
     let also_equal = a == cloned;
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto result = rx::analyze(*parsed.crate, diagnostics);
   assert(result.success() && !diagnostics.has_errors());
@@ -51,8 +52,9 @@ fn main() {
     assert(rejected);
   };
   auto named = [&](std::string_view name) {
-    const auto found = std::find_if(original.symbols.begin(), original.symbols.end(),
-        [&](const auto &record) { return record.name == name; });
+    const auto found =
+        std::find_if(original.symbols.begin(), original.symbols.end(),
+                     [&](const auto &record) { return record.name == name; });
     assert(found != original.symbols.end());
     return found->id;
   };
@@ -81,8 +83,12 @@ fn main() {
   rejects([](auto &draft) { draft.expressions.pop_back(); });
   rejects([](auto &draft) { draft.resolved_types.pop_back(); });
   rejects([](auto &draft) { draft.constants.clear(); });
-  rejects([](auto &draft) { draft.expressions.push_back(draft.expressions.front()); });
-  rejects([](auto &draft) { draft.symbol_types.push_back(draft.symbol_types.front()); });
+  rejects([](auto &draft) {
+    draft.expressions.push_back(draft.expressions.front());
+  });
+  rejects([](auto &draft) {
+    draft.symbol_types.push_back(draft.symbol_types.front());
+  });
   const auto value_field = named("value");
   rejects([&](auto &draft) {
     rx::TypeContext types;
@@ -119,8 +125,9 @@ fn main() {
     draft.expressions.front().node = draft.symbols.front().declaration;
   });
   auto binary_fact = [](auto &draft) -> auto & {
-    const auto found = std::find_if(draft.expressions.begin(), draft.expressions.end(),
-        [](const auto &fact) { return fact.binary.has_value(); });
+    const auto found =
+        std::find_if(draft.expressions.begin(), draft.expressions.end(),
+                     [](const auto &fact) { return fact.binary.has_value(); });
     assert(found != draft.expressions.end());
     return *found;
   };
@@ -140,8 +147,8 @@ fn main() {
   });
   rejects([&](auto &draft) {
     for (auto &fact : draft.expressions)
-      if (fact.binary &&
-          std::holds_alternative<rx::StructuralEquality>(fact.binary->operation)) {
+      if (fact.binary && std::holds_alternative<rx::StructuralEquality>(
+                             fact.binary->operation)) {
         fact.binary->operation = rx::ScalarComparison{rx::Relation::Eq};
         return;
       }
@@ -149,12 +156,18 @@ fn main() {
   });
   rejects([](auto &draft) {
     for (auto &fact : draft.expressions)
-      if (fact.unary) { fact.unary.reset(); return; }
+      if (fact.unary) {
+        fact.unary.reset();
+        return;
+      }
     assert(false);
   });
   rejects([](auto &draft) {
     for (auto &fact : draft.expressions)
-      if (fact.receiver) { fact.receiver.reset(); return; }
+      if (fact.receiver) {
+        fact.receiver.reset();
+        return;
+      }
     assert(false);
   });
   rejects([](auto &draft) {
@@ -181,11 +194,16 @@ fn main() {
   }
   assert(retained->function(choose).parameters.size() == 2);
   rx::DiagnosticEngine foreign_diagnostics;
-  auto foreign = rx::parse_source(parsed.crate->source.text, foreign_diagnostics);
+  auto foreign =
+      rx::parse_source(parsed.crate->source.text, foreign_diagnostics);
   assert(foreign.syntax_ok && foreign.crate);
   auto rejects_query = [](auto query) {
     bool rejected = false;
-    try { query(); } catch (const std::invalid_argument &) { rejected = true; }
+    try {
+      query();
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
     assert(rejected);
   };
   std::size_t foreign_queries = 0;

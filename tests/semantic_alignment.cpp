@@ -50,7 +50,8 @@ fn main() {
   assert(index.declaration(pair.id).kind == rx::SymbolKind::Struct);
   assert(index.structure(index.declaration(pair.id).id).fields[0] ==
          index.declaration(pair.fields[0].id).id);
-  assert(index.type(*pair.fields[0].type)->kind() == rx::SemanticType::Kind::I32);
+  assert(index.type(*pair.fields[0].type)->kind() ==
+         rx::SemanticType::Kind::I32);
   auto missing = facts;
   missing.expressions.pop_back();
   bool rejected = false;
