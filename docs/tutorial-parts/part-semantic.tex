@@ -30,10 +30,10 @@ using SymbolId = ast::Id<SymbolTag>;
 \centering
 \begin{tikzpicture}[>=Stealth,node distance=9mm and 14mm,
   every node/.style={draw,rounded corners,align=center,font=\small}]
-\node (decl) {声明：\texttt{let x = 3}\par \texttt{NodeId = 7}};
-\node (sym) [right=of decl] {变量符号\par \texttt{SymbolId = 2}};
-\node (use1) [above right=of sym] {第一处 \texttt{x}\par \texttt{NodeId = 11}};
-\node (use2) [below right=of sym] {第二处 \texttt{x}\par \texttt{NodeId = 16}};
+\node (decl) {声明：\texttt{let x = 3}\\ \texttt{NodeId = 7}};
+\node (sym) [right=of decl] {变量符号\\ \texttt{SymbolId = 2}};
+\node (use1) [above right=of sym] {第一处 \texttt{x}\\ \texttt{NodeId = 11}};
+\node (use2) [below right=of sym] {第二处 \texttt{x}\\ \texttt{NodeId = 16}};
 \draw[->] (decl) -- (sym);
 \draw[->] (use1) -- (sym);
 \draw[->] (use2) -- (sym);
@@ -688,9 +688,9 @@ struct StructSemantics {
 \centering
 \begin{tikzpicture}[>=Stealth,node distance=8mm and 12mm,
  every node/.style={draw,rounded corners,align=center,font=\small,text width=32mm}]
-\node (source) {初始化源码\par right，left};
-\node (decl) [right=of source] {字段声明\par left，right};
-\node (layout) [right=of decl] {存储位置\par left：0\par right：4};
+\node (source) {初始化源码\\ right，left};
+\node (decl) [right=of source] {字段声明\\ left，right};
+\node (layout) [right=of decl] {存储位置\\ left：0\\ right：4};
 \draw[->] (source) -- node[above,draw=none] {名字对应} (decl);
 \draw[->] (decl) -- node[above,draw=none] {布局规则} (layout);
 \end{tikzpicture}
@@ -1017,10 +1017,10 @@ for (std::size_t i = 0; i < node.fields.size(); ++i) {
 \centering
 \begin{tikzpicture}[>=Stealth,node distance=8mm and 10mm,
  every node/.style={draw,rounded corners,align=center,font=\small,text width=30mm}]
-\node (ast) {AST 字段\par left，right};
-\node (good) [right=of ast] {完整事实\par left，right};
-\node (missing) [below=of good] {缺失事实\par left};
-\node (wrong) [below=of missing] {错误顺序\par right，left};
+\node (ast) {AST 字段\\ left，right};
+\node (good) [right=of ast] {完整事实\\ left，right};
+\node (missing) [below=of good] {缺失事实\\ left};
+\node (wrong) [below=of missing] {错误顺序\\ right，left};
 \draw[->] (ast) -- (good);
 \draw[->,dashed] (ast.south) -- (missing.west);
 \draw[->,dashed] (ast.south) to[bend right=20] (wrong.west);
