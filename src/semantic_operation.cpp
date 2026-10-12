@@ -4,111 +4,122 @@
 namespace rx {
 namespace {
 bool integer(const SemanticTypePtr &type) {
-  using K = SemanticType::Kind;
-  return type && (type->kind() == K::I32 || type->kind() == K::U32 ||
-                  type->kind() == K::Isize || type->kind() == K::Usize);
+  using TypeKind = SemanticType::Kind;
+  return type &&
+         (type->kind() == TypeKind::I32 || type->kind() == TypeKind::U32 ||
+          type->kind() == TypeKind::Isize || type->kind() == TypeKind::Usize);
 }
-} // namespace
+}
 std::optional<ResolvedOperation>
 resolve_operation(ast::BinaryOp op, const SemanticTypePtr &left,
                   const SemanticTypePtr &right) {
-  using A = ast::BinaryOp;
-  using K = SemanticType::Kind;
+  using BinaryOp = ast::BinaryOp;
+  using TypeKind = SemanticType::Kind;
   if (!left || !right)
     return {};
   const bool equal = same_type(left, right);
   const bool integers = integer(left) && integer(right);
-  const bool booleans = left->kind() == K::Bool && right->kind() == K::Bool;
+  const bool booleans =
+      left->kind() == TypeKind::Bool && right->kind() == TypeKind::Bool;
   switch (op) {
-  case A::Add:
-  case A::Sub:
-  case A::Mul:
-  case A::Div:
-  case A::Rem:
+  case BinaryOp::Add:
+  case BinaryOp::Sub:
+  case BinaryOp::Mul:
+  case BinaryOp::Div:
+  case BinaryOp::Rem:
     if (!integers || !equal)
       return {};
     switch (op) {
-    case A::Add:
+    case BinaryOp::Add:
       return IntegerArithmetic{ArithmeticOp::Add};
-    case A::Sub:
+    case BinaryOp::Sub:
       return IntegerArithmetic{ArithmeticOp::Sub};
-    case A::Mul:
+    case BinaryOp::Mul:
       return IntegerArithmetic{ArithmeticOp::Mul};
-    case A::Div:
+    case BinaryOp::Div:
       return IntegerArithmetic{ArithmeticOp::Div};
     default:
       return IntegerArithmetic{ArithmeticOp::Rem};
     }
-  case A::BitAnd:
-  case A::BitOr:
-  case A::BitXor:
+  case BinaryOp::BitAnd:
+  case BinaryOp::BitOr:
+  case BinaryOp::BitXor:
     if (!equal || (!integers && !booleans))
       return {};
-    return BitwiseOperation{op == A::BitAnd  ? BitwiseOp::And
-                            : op == A::BitOr ? BitwiseOp::Or
-                                             : BitwiseOp::Xor};
-  case A::Shl:
-  case A::Shr:
+    if (op == BinaryOp::BitAnd)
+      return BitwiseOperation{BitwiseOp::And};
+    if (op == BinaryOp::BitOr)
+      return BitwiseOperation{BitwiseOp::Or};
+    return BitwiseOperation{BitwiseOp::Xor};
+  case BinaryOp::Shl:
+  case BinaryOp::Shr:
     if (!integers)
       return {};
-    return ShiftOperation{op == A::Shl ? ShiftDirection::Left
-                                       : ShiftDirection::Right};
-  case A::Eq:
-  case A::Ne:
+    if (op == BinaryOp::Shl)
+      return ShiftOperation{ShiftDirection::Left};
+    return ShiftOperation{ShiftDirection::Right};
+  case BinaryOp::Eq:
+  case BinaryOp::Ne:
     if (!equal)
       return {};
-    if (integers || booleans)
-      return ScalarComparison{op == A::Eq ? Relation::Eq : Relation::Ne};
-    return StructuralEquality{op == A::Eq ? EqualityOp::Eq : EqualityOp::Ne};
-  case A::Lt:
-  case A::Le:
-  case A::Gt:
-  case A::Ge:
+    if (integers || booleans) {
+      if (op == BinaryOp::Eq)
+        return ScalarComparison{Relation::Eq};
+      return ScalarComparison{Relation::Ne};
+    }
+    if (op == BinaryOp::Eq)
+      return StructuralEquality{EqualityOp::Eq};
+    return StructuralEquality{EqualityOp::Ne};
+  case BinaryOp::Lt:
+  case BinaryOp::Le:
+  case BinaryOp::Gt:
+  case BinaryOp::Ge:
     if (!equal || (!integers && !booleans))
       return {};
     switch (op) {
-    case A::Lt:
+    case BinaryOp::Lt:
       return ScalarComparison{Relation::Lt};
-    case A::Le:
+    case BinaryOp::Le:
       return ScalarComparison{Relation::Le};
-    case A::Gt:
+    case BinaryOp::Gt:
       return ScalarComparison{Relation::Gt};
     default:
       return ScalarComparison{Relation::Ge};
     }
-  case A::LogicalAnd:
-  case A::LogicalOr:
+  case BinaryOp::LogicalAnd:
+  case BinaryOp::LogicalOr:
     if (!booleans)
       return {};
-    return LogicalOperation{op == A::LogicalAnd ? LogicalOp::And
-                                                : LogicalOp::Or};
+    if (op == BinaryOp::LogicalAnd)
+      return LogicalOperation{LogicalOp::And};
+    return LogicalOperation{LogicalOp::Or};
   }
   return {};
 }
 ast::BinaryOp binary_operation(ast::CompoundAssignOp op) {
-  using C = ast::CompoundAssignOp;
-  using B = ast::BinaryOp;
+  using CompoundOp = ast::CompoundAssignOp;
+  using BinaryOp = ast::BinaryOp;
   switch (op) {
-  case C::Add:
-    return B::Add;
-  case C::Sub:
-    return B::Sub;
-  case C::Mul:
-    return B::Mul;
-  case C::Div:
-    return B::Div;
-  case C::Rem:
-    return B::Rem;
-  case C::BitAnd:
-    return B::BitAnd;
-  case C::BitOr:
-    return B::BitOr;
-  case C::BitXor:
-    return B::BitXor;
-  case C::Shl:
-    return B::Shl;
-  case C::Shr:
-    return B::Shr;
+  case CompoundOp::Add:
+    return BinaryOp::Add;
+  case CompoundOp::Sub:
+    return BinaryOp::Sub;
+  case CompoundOp::Mul:
+    return BinaryOp::Mul;
+  case CompoundOp::Div:
+    return BinaryOp::Div;
+  case CompoundOp::Rem:
+    return BinaryOp::Rem;
+  case CompoundOp::BitAnd:
+    return BinaryOp::BitAnd;
+  case CompoundOp::BitOr:
+    return BinaryOp::BitOr;
+  case CompoundOp::BitXor:
+    return BinaryOp::BitXor;
+  case CompoundOp::Shl:
+    return BinaryOp::Shl;
+  case CompoundOp::Shr:
+    return BinaryOp::Shr;
   }
   throw std::invalid_argument("invalid compound operator");
 }
