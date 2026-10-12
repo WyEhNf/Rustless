@@ -65,4 +65,60 @@ fn main() {
       if (function.symbol == get)
         function.receiver.reset();
   });
+  rejects([](auto &draft) { draft.expressions.pop_back(); });
+  rejects([](auto &draft) { draft.resolved_types.pop_back(); });
+  rejects([](auto &draft) { draft.constants.clear(); });
+  rejects([](auto &draft) { draft.expressions.push_back(draft.expressions.front()); });
+  rejects([](auto &draft) { draft.symbol_types.push_back(draft.symbol_types.front()); });
+  const auto value_field = named("value");
+  rejects([&](auto &draft) {
+    rx::TypeContext types;
+    for (auto &fact : draft.symbol_types)
+      if (fact.symbol == value_field)
+        fact.type = types.primitive(rx::SemanticType::Kind::Bool);
+  });
+  rejects([&](auto &draft) {
+    for (auto &record : draft.symbols)
+      if (record.id == value_field)
+        record.owner = choose;
+  });
+  rejects([&](auto &draft) {
+    rx::TypeContext types;
+    for (auto &fact : draft.functions)
+      if (fact.symbol == choose)
+        fact.result = types.primitive(rx::SemanticType::Kind::Unit);
+  });
+  rejects([](auto &draft) {
+    rx::TypeContext types;
+    draft.expressions.front().type =
+        types.box(types.primitive(rx::SemanticType::Kind::Error));
+  });
+  rejects([&](auto &draft) {
+    rx::TypeContext types;
+    draft.expressions.front().type = types.structure(choose, "choose");
+  });
+  rejects([](auto &draft) {
+    rx::TypeContext types;
+    draft.expressions.front().type =
+        types.structure(rx::SymbolId{999999}, "Missing");
+  });
+  rejects([](auto &draft) {
+    draft.expressions.front().node = draft.symbols.front().declaration;
+  });
+  static_assert(std::is_const_v<rx::SemanticTypePtr::element_type>);
+  std::unique_ptr<rx::SemanticIndex> retained;
+  {
+    auto temporary = rx::SemanticResult::publish(*parsed.crate, original);
+    retained = std::make_unique<rx::SemanticIndex>(*parsed.crate, temporary);
+  }
+  assert(retained->function(choose).parameters.size() == 2);
+  auto failed = rx::SemanticResult::rejected(*parsed.crate, original);
+  assert(!failed.success());
+  bool rejected_failed = false;
+  try {
+    rx::SemanticIndex invalid(*parsed.crate, failed);
+  } catch (const std::exception &) {
+    rejected_failed = true;
+  }
+  assert(rejected_failed);
 }
