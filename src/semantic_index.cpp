@@ -200,30 +200,9 @@ void SemanticIndex::validate_tree() const {
     throw std::invalid_argument("semantic fact is attached to wrong AST shape");
 }
 namespace {
-bool equivalent(const SemanticTypePtr &left, const SemanticTypePtr &right) {
-  if (!left || !right || left->kind != right->kind)
-    return false;
-  using Kind = SemanticType::Kind;
-  switch (left->kind) {
-  case Kind::Struct:
-  case Kind::Function:
-    return left->name == right->name;
-  case Kind::Array:
-    return left->length == right->length &&
-           equivalent(left->element, right->element);
-  case Kind::Ref:
-    return left->is_mutable == right->is_mutable &&
-           equivalent(left->element, right->element);
-  case Kind::Box:
-  case Kind::Vec:
-    return equivalent(left->element, right->element);
-  default:
-    return left->kind != Kind::Error;
-  }
-}
 void require_equivalent(const SemanticTypePtr &left,
                         const SemanticTypePtr &right) {
-  if (!equivalent(left, right))
+  if (!same_type(left, right))
     throw std::invalid_argument("semantic declaration type mismatch");
 }
 } // namespace
@@ -282,18 +261,18 @@ void SemanticIndex::validate_declarations() const {
       require_equivalent(fact.receiver->type, symbol_type(receiver_id));
       auto receiver_type = fact.receiver->type;
       if (ast::by_reference(receiver)) {
-        if (receiver_type->kind != SemanticType::Kind::Ref ||
-            receiver_type->is_mutable != ast::is_mutable(receiver))
+        if (receiver_type->kind() != SemanticType::Kind::Ref ||
+            receiver_type->is_mutable() != ast::is_mutable(receiver))
           throw std::invalid_argument("semantic receiver reference mismatch");
-        receiver_type = receiver_type->element;
+        receiver_type = receiver_type->element();
       }
-      if (receiver_type->kind != SemanticType::Kind::Struct ||
-          receiver_type->name != symbol(*owner).name)
+      if (receiver_type->kind() != SemanticType::Kind::Struct ||
+          receiver_type->symbol() != *owner)
         throw std::invalid_argument("semantic receiver owner type mismatch");
     }
     if (node.signature.return_annotation)
       require_equivalent(fact.result, type(**node.signature.return_annotation));
-    else if (fact.result->kind != SemanticType::Kind::Unit)
+    else if (fact.result->kind() != SemanticType::Kind::Unit)
       throw std::invalid_argument("unannotated function result is not unit");
     ast::walk(*node.body, [&](const auto &statement, const auto &payload) {
       if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
@@ -329,12 +308,9 @@ void SemanticIndex::validate_declarations() const {
         check_constant(payload);
       if constexpr (std::same_as<T, ast::Impl>) {
         const auto target = type(*payload.target);
-        if (target->kind != SemanticType::Kind::Struct)
+        if (target->kind() != SemanticType::Kind::Struct)
           throw std::invalid_argument("checked impl target is not a struct");
-        SymbolId owner{};
-        for (const auto &[id, record] : symbols_)
-          if (record->kind == SymbolKind::Struct && record->name == target->name)
-            owner = id;
+        const auto owner = target->symbol();
         for (const auto &member : payload.members)
           ast::visit(member, [&](const ast::Node &, const auto &value) {
             if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
