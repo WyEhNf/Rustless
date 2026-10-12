@@ -130,7 +130,10 @@ fn twice(x: i32) -> i32 { x + x }
 \begin{lstlisting}[language=C++]
 collect_items();
 resolve_declarations();
-// Callable declarations are indexed before bodies are checked.
+for (const auto &[_, function] : functions_)
+  callable_functions_.emplace(symbol_for(function.ast->id), &function);
+for (const auto &[_, function] : associated_functions_)
+  callable_functions_.emplace(symbol_for(function.ast->id), &function);
 validate_constants();
 validate_layouts_and_derives();
 validate_entry();
@@ -319,8 +322,7 @@ fn main() {
 enum class TypeState {
   Fresh, Resolving, Done, Failed
 } type_state{TypeState::Fresh};
-enum class State { Fresh, Evaluating, Done, Failed };
-State state{State::Fresh};
+enum class State { Fresh, Evaluating, Done, Failed } state{State::Fresh};
 \end{lstlisting}
 类型依赖与值依赖相互关联，但不完全相同。例如数组类型的长度会引入常量依赖。分开记录可以明确地说明在哪一项任务中发现了递归，而不会把所有未完成状态混成一个布尔标记。
 
@@ -354,7 +356,7 @@ State state{State::Fresh};
 \section{为什么语义类型也需要具体形状}
 语法节点已经使用具体载荷表达形状，语义类型也需要同样清楚的结构。若类型对象只有 \texttt{kind}、\texttt{name}、\texttt{element}、\texttt{length} 和一个布尔标志，就必须依赖约定说明哪些字段有效。一个缺少元素的 Array 或同时带着无关长度的 Bool，仍可能由普通构造产生。
 
-当前 \texttt{include/rx/semantic\_type.hpp} 已把这些形状分开。下面是其中的实际定义：
+当前 \texttt{include/rx/semantic\_type.hpp} 已把这些形状分开。下面选取四种实际定义，其间其他载荷的定义没有列出：
 \begin{lstlisting}[language=C++]
 struct StructType {
   SymbolId symbol;
@@ -394,8 +396,12 @@ if (key.kind == K::Array)
 if (key.kind == K::Ref)
   key.mutability = value.is_mutable() ? ast::Mutability::Mutable
                                       : ast::Mutability::Immutable;
+// ... Builtin key construction is omitted here.
 if (const auto found = impl_->types.find(key);
     found != impl_->types.end()) {
+  if ((key.kind == K::Struct || key.kind == K::Function) &&
+      found->second->name() != value.name())
+    throw std::invalid_argument("declaration identity has conflicting names");
   return found->second;
 }
 \end{lstlisting}
