@@ -119,7 +119,50 @@ void composite_shapes() {
   assert(types.box(survivor)->element() == types.box(types.primitive(K::U32)));
 }
 
+void nominal_and_builtin_shapes() {
+  rx::TypeContext types, other;
+  const auto structure = types.structure(rx::SymbolId{1}, "Pair");
+  const auto same_spelling = types.structure(rx::SymbolId{2}, "Pair");
+  const auto function = types.function(rx::SymbolId{3}, "Pair::get");
+  assert(structure == types.structure(rx::SymbolId{1}, "Pair"));
+  assert(structure->symbol() == rx::SymbolId{1} && structure->name() == "Pair");
+  assert(function->kind() == K::Function &&
+         function->symbol() == rx::SymbolId{3});
+  assert(rx::type_name(function) == "fn Pair::get");
+  assert(!rx::same_type(structure, same_spelling));
+  assert(!rx::same_type(structure, function));
+  assert(rx::same_type(structure, other.structure(rx::SymbolId{1}, "Pair")));
+  rejects<std::invalid_argument>([&] { types.structure({}, "Invalid"); });
+  rejects<std::invalid_argument>([&] { types.function(rx::SymbolId{4}, ""); });
+  rejects<std::invalid_argument>(
+      [&] { types.structure(rx::SymbolId{1}, "Other"); });
+  rejects<std::invalid_argument>(
+      [&] { types.function(rx::SymbolId{1}, "Pair"); });
+  rejects<std::logic_error>([&] { function->element(); });
+  const auto io = types.builtin(rx::BuiltinId::PrintInt);
+  const auto vector = types.vector(types.primitive(K::I32));
+  const auto len = types.builtin(rx::BuiltinId::Len, vector);
+  assert(io->kind() == K::BuiltinFunction);
+  assert(io == types.builtin(rx::BuiltinId::PrintInt));
+  assert(io != types.builtin(rx::BuiltinId::GetInt));
+  assert(!rx::get_if<rx::BuiltinFunctionType>(*io)->owner);
+  assert(rx::get_if<rx::BuiltinFunctionType>(*len)->owner == vector);
+  assert(len == types.builtin(rx::BuiltinId::Len, vector));
+  assert(!rx::same_type(len, types.builtin(rx::BuiltinId::Len)));
+  assert(!rx::same_type(io, types.function(rx::SymbolId{5}, "printInt")));
+  assert(rx::same_type(io, other.builtin(rx::BuiltinId::PrintInt)));
+  const auto foreign_owner = other.vector(other.primitive(K::I32));
+  assert(types.builtin(rx::BuiltinId::Len, foreign_owner) == len);
+  assert(
+      types.box(other.builtin(rx::BuiltinId::Len, foreign_owner))->element() ==
+      len);
+  rejects<std::logic_error>([&] { io->symbol(); });
+  rejects<std::invalid_argument>(
+      [&] { types.builtin(static_cast<rx::BuiltinId>(999)); });
+}
+
 int main() {
   atomic_shapes();
   composite_shapes();
+  nominal_and_builtin_shapes();
 }
