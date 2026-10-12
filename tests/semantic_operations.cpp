@@ -350,7 +350,28 @@ fn main() {
   }
 }
 
+void language_boundaries() {
+  for (const auto source : {
+      "fn f() {} fn main() { f::<i32>(); }",
+      "fn f(self) {} fn main() {}",
+      "fn main() { let b = Box::<i32>::new(1); let n = Box::<i32>::len(&b); }"}) {
+    Program program(source);
+    assert(program.diagnostics.has_errors() && !program.checked.success());
+  }
+  Program ordering(R"(
+fn main() {
+  let mut x = 1;
+  let mut y = 2;
+  let a = &x < &mut y;
+  let b = &&x < &&y;
+  let c = &mut x > &mut y;
+}
+)");
+  ordering.accepted();
+}
+
 int main() {
+  language_boundaries();
   boolean_assignments();
   reference_operand_adjustments();
   box_equality();
