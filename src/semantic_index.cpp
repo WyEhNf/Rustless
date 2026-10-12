@@ -13,29 +13,51 @@ void insert(Map &map, Id id, const Fact &fact) {
 } // namespace
 SemanticIndex::SemanticIndex(const ast::Crate &crate,
                              const SemanticResult &result)
-    : crate_(&crate) {
-  if (!result.success || result.source_crate != &crate)
+    : SemanticIndex(crate, result.snapshot(), ValidationTag{}) {}
+SemanticIndex::SemanticIndex(const ast::Crate &crate,
+                             std::shared_ptr<const SemanticData> snapshot,
+                             ValidationTag)
+    : crate_(&crate), snapshot_(std::move(snapshot)) {
+  if (!snapshot_ || !snapshot_->success || snapshot_->source_crate != &crate)
     throw std::invalid_argument(
         "semantic result is not checked for this crate");
-  for (const auto &fact : result.symbols) {
+  const auto &data = *snapshot_;
+  for (const auto &fact : data.symbols) {
     insert(symbols_, fact.id, fact);
     insert(declarations_, fact.declaration, fact);
   }
-  for (const auto &fact : result.expressions)
+  for (const auto &fact : data.expressions)
     insert(expressions_, fact.node, fact);
-  for (const auto &fact : result.resolved_types)
+  for (const auto &fact : data.resolved_types)
     insert(types_, fact.node, fact);
-  for (const auto &fact : result.symbol_types)
+  for (const auto &fact : data.symbol_types)
     insert(symbol_types_, fact.symbol, fact);
-  for (const auto &fact : result.functions)
+  for (const auto &fact : data.functions)
     insert(functions_, fact.symbol, fact);
-  for (const auto &fact : result.structures)
+  for (const auto &fact : data.structures)
     insert(structures_, fact.symbol, fact);
-  for (const auto &fact : result.constants)
+  for (const auto &fact : data.constants)
     insert(constants_, fact.symbol, fact);
   validate_links();
   validate_tree();
   validate_declarations();
+}
+SemanticResult::SemanticResult()
+    : data_(std::make_shared<const SemanticData>()) {}
+SemanticResult SemanticResult::publish(const ast::Crate &crate,
+                                       SemanticData data) {
+  data.source_crate = &crate;
+  data.success = true;
+  auto snapshot = std::make_shared<const SemanticData>(std::move(data));
+  SemanticIndex validated(crate, snapshot, SemanticIndex::ValidationTag{});
+  return SemanticResult(std::move(snapshot));
+}
+SemanticResult SemanticResult::rejected(const ast::Crate &crate,
+                                        SemanticData data) {
+  data.source_crate = &crate;
+  data.success = false;
+  return SemanticResult(
+      std::make_shared<const SemanticData>(std::move(data)));
 }
 const SymbolRecord &SemanticIndex::symbol(SymbolId id) const {
   return *symbols_.at(id);

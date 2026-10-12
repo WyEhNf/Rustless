@@ -4,12 +4,12 @@
 #include <unordered_map>
 
 namespace rx {
-// A read-only index borrows a successful result and its original AST.
-// Both owners must remain alive and unchanged for the index's lifetime.
+// The index owns a frozen semantic snapshot and borrows its original AST.
+// The AST must remain alive and unchanged; the result wrapper may be destroyed.
 class SemanticIndex {
 public:
   SemanticIndex(const ast::Crate &crate, const SemanticResult &result);
-  SemanticIndex(const ast::Crate &, SemanticResult &&) = delete;
+  SemanticIndex(ast::Crate &&, const SemanticResult &) = delete;
   const ast::Crate &crate() const { return *crate_; }
   const SymbolRecord &symbol(SymbolId id) const;
   const SymbolRecord &declaration(ast::NodeId id) const;
@@ -33,10 +33,15 @@ public:
   }
 
 private:
+  friend class SemanticResult;
+  struct ValidationTag {};
+  SemanticIndex(const ast::Crate &crate,
+                std::shared_ptr<const SemanticData> snapshot, ValidationTag);
   void validate_links() const;
   void validate_tree() const;
   void validate_declarations() const;
   const ast::Crate *crate_;
+  std::shared_ptr<const SemanticData> snapshot_;
   std::unordered_map<SymbolId, const SymbolRecord *> symbols_;
   std::unordered_map<ast::NodeId, const SymbolRecord *> declarations_;
   std::unordered_map<ast::NodeId, const ExpressionSemantics *> expressions_;
