@@ -872,7 +872,8 @@ private:
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
     return check_expr(*expression, std::move(expected));
   }
-  ExprInfo check_expr(const ast::Expr &expression, TyPtr expected = {}) {
+  ExprInfo check_expr(const ast::Expr &expression, TyPtr expected = {},
+                      bool record_coercion = true) {
     auto result = ast::visit(
         expression,
         ast::Overloaded{
@@ -886,7 +887,7 @@ private:
               return {ty(Ty::Kind::Unit)};
             },
             [&](const ast::Expr &, const ast::ParenExpr &p) {
-              auto inner = check_expr(p.inner, expected);
+              auto inner = check_expr(*p.inner, expected, false);
               inner.adjustments.clear();
               inner.binary.reset();
               inner.compound.reset();
@@ -958,8 +959,7 @@ private:
             [&](const ast::Expr &node, const ast::ReturnExpr &p) {
               return check_return(node, p);
             }});
-    if (expected && !ast::get_if<ast::ParenExpr>(expression) &&
-        coercible(result.type, expected)) {
+    if (expected && record_coercion && coercible(result.type, expected)) {
       auto adjustments = coercion_adjustments(result.type, expected);
       result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
                                 adjustments.end());
@@ -1317,35 +1317,35 @@ private:
   }
   ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary,
                        const TyPtr &expected) {
-    auto op = unary.op;
     auto operand = check_expr(unary.operand, expected);
-    if (op == ast::UnaryOp::Dereference) {
+    if (unary.op == ast::UnaryOp::Dereference) {
       if (operand.type->kind() != Ty::Kind::Ref &&
           operand.type->kind() != Ty::Kind::Box) {
-        report(node.span,
-               "type " + type_name(operand.type) + " cannot be dereferenced");
+        report(node.span, "type " + type_name(operand.type) + " cannot be dereferenced");
         return {};
       }
-      const bool shared_layer =
-          operand.type->kind() == Ty::Kind::Ref && !operand.type->is_mutable();
+      const bool shared_layer = operand.type->kind() == Ty::Kind::Ref &&
+                                !operand.type->is_mutable();
       const bool locked = operand.access_locked || shared_layer;
-      const bool mut =
-          (operand.type->kind() == Ty::Kind::Ref ? operand.type->is_mutable()
-                                               : operand.is_mutable) &&
-          !locked;
-      return {operand.type->element(), true, mut, locked};
+      const bool mut = (operand.type->kind() == Ty::Kind::Ref
+                            ? operand.type->is_mutable() : operand.is_mutable) && !locked;
+      ExprInfo result{operand.type->element(), true, mut, locked};
+      result.unary = ResolvedUnary{UnaryOperation::Dereference,
+                                  operand_use(*unary.operand, operand, false), result.type};
+      return result;
     }
-    TyPtr scalar = operand.type;
-    if (scalar->kind() == Ty::Kind::Ref && !scalar->is_mutable())
-      scalar = scalar->element();
-    if (op == ast::UnaryOp::Not) {
-      if (!integer(scalar) && scalar->kind() != Ty::Kind::Bool)
+    auto use = operand_use(*unary.operand, operand);
+    if (unary.op == ast::UnaryOp::Not) {
+      if (!integer(use.effective_type) && use.effective_type->kind() != Ty::Kind::Bool)
         report(node.span, "operator ! requires bool or integer");
-      return {scalar};
-    }
-    if (op == ast::UnaryOp::Negate && !signed_integer(scalar))
+    } else if (!signed_integer(use.effective_type)) {
       report(node.span, "unary minus requires a signed integer");
-    return {scalar};
+    }
+    ExprInfo result{use.effective_type};
+    result.unary = ResolvedUnary{unary.op == ast::UnaryOp::Not
+                                    ? UnaryOperation::Complement : UnaryOperation::Negate,
+                                std::move(use), result.type};
+    return result;
   }
 
   OperandSemantics operand_use(const ast::Expr &node, const ExprInfo &info,
