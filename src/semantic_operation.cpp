@@ -55,4 +55,21 @@ std::optional<ResolvedOperation> resolve_operation(
   }
   return {};
 }
+ast::BinaryOp binary_operation(ast::CompoundAssignOp op) {
+  using C = ast::CompoundAssignOp;
+  using B = ast::BinaryOp;
+  switch (op) {
+  case C::Add: return B::Add;
+  case C::Sub: return B::Sub;
+  case C::Mul: return B::Mul;
+  case C::Div: return B::Div;
+  case C::Rem: return B::Rem;
+  case C::BitAnd: return B::BitAnd;
+  case C::BitOr: return B::BitOr;
+  case C::BitXor: return B::BitXor;
+  case C::Shl: return B::Shl;
+  case C::Shr: return B::Shr;
+  }
+  throw std::invalid_argument("invalid compound operator");
+}
 } // namespace rx
