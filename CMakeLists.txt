@@ -66,6 +66,8 @@ add_library(rustless_frontend STATIC
   src/llvm/ir_semantic.cpp
   src/llvm/ir_operators.cpp
   src/semantic.cpp
+  src/semantic_type.cpp
+  src/semantic_operation.cpp
   src/semantic_index.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
 target_include_directories(rustless_frontend SYSTEM PRIVATE
@@ -78,6 +80,15 @@ target_link_libraries(rxc PRIVATE rustless_frontend)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(semantic_index_invariants tests/semantic_index_invariants.cpp)
+  target_link_libraries(semantic_index_invariants PRIVATE rustless_frontend)
+  add_test(NAME semantic_index_invariants COMMAND semantic_index_invariants)
+  add_executable(semantic_operations tests/semantic_operations.cpp)
+  target_link_libraries(semantic_operations PRIVATE rustless_frontend)
+  add_test(NAME semantic_operations COMMAND semantic_operations)
+  add_executable(semantic_type tests/semantic_type.cpp)
+  target_link_libraries(semantic_type PRIVATE rustless_frontend)
+  add_test(NAME semantic_type COMMAND semantic_type)
   add_executable(ir_semantic tests/ir_semantic.cpp)
   target_link_libraries(ir_semantic PRIVATE rustless_frontend)
   add_test(NAME ir_semantic COMMAND ir_semantic)

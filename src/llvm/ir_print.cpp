@@ -171,8 +171,8 @@ std::string print(const Module &module) {
                                 ": " + errors.front().message);
   std::ostringstream out;
   out << "; Rx LLVM IR: RV32IM / ILP32\n"
-      << "target datalayout = \"e-m:e-p:32:32-i64:64-n32-S128\"\n"
-      << "target triple = \"riscv32-unknown-elf\"\n\n";
+      << "target datalayout = \"" << TargetLayout::rv32().llvm_data_layout() << "\"\n"
+      << "target triple = \"" << TargetLayout::rv32().triple() << "\"\n\n";
   for (const auto &declaration : module.declarations) {
     out << "declare " << type_name(declaration.result) << " @"
         << symbol_name(declaration.name) << '(';

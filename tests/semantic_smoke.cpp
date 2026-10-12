@@ -25,15 +25,15 @@ fn main() {
   assert(valid_ast.syntax_ok && valid_ast.crate);
   auto valid = rx::analyze(*valid_ast.crate, valid_diagnostics);
   assert(!valid_diagnostics.has_errors());
-  assert(valid.summary.functions == 1);
-  assert(valid.summary.structures == 1);
-  assert(valid.summary.constants == 1);
-  assert(!valid.symbols.empty());
-  for (const auto &symbol : valid.symbols)
+  assert(valid.data().summary.functions == 1);
+  assert(valid.data().summary.structures == 1);
+  assert(valid.data().summary.constants == 1);
+  assert(!valid.data().symbols.empty());
+  for (const auto &symbol : valid.data().symbols)
     assert(symbol.declaration.value != 0);
-  assert(!valid.expressions.empty());
-  assert(!valid.resolved_types.empty());
-  assert(valid.constants.size() == 1 && valid.constants[0].bits == 2);
+  assert(!valid.data().expressions.empty());
+  assert(!valid.data().resolved_types.empty());
+  assert(valid.data().constants.size() == 1 && valid.data().constants[0].bits == 2);
 
   constexpr std::string_view wrong_type = R"(
 fn main() { let value: i32 = true; }
@@ -67,7 +67,7 @@ fn main() {
   const auto &initializer =
       std::get<rx::ast::LetStmt>(main.body->statements[1]->data).initializer;
   const auto &borrow = rx::ast::unparen(initializer);
-  for (const auto &fact : paren_semantics.expressions) {
+  for (const auto &fact : paren_semantics.data().expressions) {
     if (fact.node == initializer->id)
       assert(fact.adjustments.empty());
     if (fact.node == borrow->id) {
