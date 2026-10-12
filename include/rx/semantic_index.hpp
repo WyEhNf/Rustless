@@ -13,6 +13,10 @@ public:
   const ast::Crate &crate() const { return *crate_; }
   const SymbolRecord &symbol(SymbolId id) const;
   const SymbolRecord &declaration(ast::NodeId id) const;
+  const SymbolRecord &declaration(const ast::Node &node) const {
+    require_node(node);
+    return declaration(node.id);
+  }
   const ExpressionSemantics &expression(ast::NodeId id) const;
   const SemanticTypePtr &type(ast::NodeId id) const;
   const SemanticTypePtr &symbol_type(SymbolId id) const;
