@@ -966,6 +966,14 @@ fn main() {
 
 AST 的情况不同。索引借用原来的 Crate，并不拥有或复制整个语法树。调用者必须让 AST 在索引使用期间存活且保持不变。后续桥接对象又借用索引，因而它的寿命必须包含在索引寿命内。拥有快照与借用语法树分别说明了哪些资源由对象负责保存，不能用一个模糊的“所有对象都要活得更久”替代这项关系。
 
+借用接口也应尽可能在编译期排除明显的寿命错误。单独使用 const 左值引用参数，会允许临时 Crate 绑定到该参数；一旦构造表达式结束，索引借用的对象便已销毁。当前接口因此显式删除两个右值重载，包括 const 右值：
+\begin{lstlisting}[language=C++]
+SemanticIndex(const ast::Crate &crate, const SemanticResult &result);
+SemanticIndex(ast::Crate &&, const SemanticResult &) = delete;
+SemanticIndex(const ast::Crate &&, const SemanticResult &) = delete;
+\end{lstlisting}
+这种限制使直接传入临时语法树的调用无法通过重载解析。它并不是完整的寿命证明：一个命名的 Crate 仍可能在索引之前离开作用域，调用者依然需要遵守借用关系。优雅的接口应当消除能够可靠识别的误用，同时准确说明其余条件。
+
 下图呈现 AST、结果快照、查询索引和桥接对象的关系。实线表示拥有或共享拥有，虚线表示借用；这张图描述寿命依赖，不描述程序数据流。
 \begin{figure}[htbp]
 \centering
@@ -1029,6 +1037,8 @@ for (std::size_t i = 0; i < node.fields.size(); ++i) {
 \end{figure}
 
 表达式的操作事实也需要对应具体载荷。BinaryExpr 必须有 Binary 的已解析操作，保存的左右 NodeId 必须对应真实子表达式，操作类别必须适合有效类型，结果类型必须与表达式一致。Unary、Compound、Method receiver 同样如此。一个有效的 \texttt{ResolvedBinary} 若附着在 ParenExpr 上，仍然是错误事实。
+
+调用事实同样不能只检查目标符号存在。对于用户函数，调用记录还要与目标签名的结果类型、显式参数数量以及每个实参的有效类型一致；方法调用则另外核对已经调整的接收者。这里使用实参在该调用位置的有效类型，才能正确容纳可变引用到共享引用等合法转换。如果一个返回 i32 的函数被记录成返回 bool，即使这两个类型对象本身都合法，这份调用事实仍然不成立。调用别名也必须回到原函数身份，而不能把局部变量的身份当作函数定义。
 
 完整性要求还必须诚实反映语义范围。AST 遍历可以覆盖 where 约束的所有节点，当前语义分析却没有为 TypePredicate 内部提供完整解释；查询验证因而明确跳过这部分语义覆盖要求，同时保留语法身份与源码范围检查。遍历覆盖不能被介绍为已经完成约束求解。
 
