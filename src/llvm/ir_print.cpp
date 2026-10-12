@@ -2,6 +2,7 @@
 #include "rx/ir_visit.hpp"
 #include "rx/target_layout.hpp"
 
+#include <algorithm>
 #include <array>
 #include <sstream>
 #include <stdexcept>
@@ -11,25 +12,27 @@ namespace rx::ir {
 namespace {
 
 std::string value(const Operand &operand) {
-  return std::visit(ast::Overloaded{[](const LocalOperand &p) {
-                                      return "%v" + std::to_string(p.id.value);
-                                    },
-                                    [](const GlobalOperand &p) {
-                                      return "@" + symbol_name(p.symbol);
-                                    },
-                                    [&](const ConstantOperand &p) {
-                                      return operand.type == Type::Ptr
-                                                 ? std::string("null")
-                                                 : std::to_string(p.bits);
-                                    }},
-                    operand.data);
+  return std::visit(
+      ast::Overloaded{
+          [](const LocalOperand &payload) { return "%v" + std::to_string(payload.id.value); },
+          [](const GlobalOperand &payload) { return "@" + symbol_name(payload.symbol); },
+          [&](const ConstantOperand &payload) {
+            if (operand.type == Type::Ptr) {
+              return std::string("null");
+            }
+            return std::to_string(payload.bits);
+          },
+      },
+      operand.data);
 }
 
 std::string typed(const Operand &operand) {
   return type_name(operand.type) + " " + value(operand);
 }
 
-std::string label(BlockId id) { return "%b" + std::to_string(id.value); }
+std::string label(BlockId id) {
+  return "%b" + std::to_string(id.value);
+}
 
 std::string_view predicate_name(Predicate predicate) {
   static constexpr std::array<std::string_view, 10> names = {
@@ -70,10 +73,9 @@ std::string_view binary_opcode(Op op) {
   }
 }
 
-void print_instruction(std::ostringstream &out,
-                       const Instruction &instruction) {
+void print_instruction(std::ostringstream &out, const Instruction &instruction) {
   out << "  ";
-  if (auto result = definition(instruction))
+  if (auto result = definition(instruction)) {
     out << "%v" << result->id << " = ";
   visit(
       instruction,
