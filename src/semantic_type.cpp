@@ -9,20 +9,22 @@ namespace rx {
 SemanticType::Kind SemanticType::kind() const noexcept {
   using K = Kind;
   return std::visit(
-      ast::Overloaded{[](const ErrorType &) { return K::Error; },
-                      [](const NeverType &) { return K::Never; },
-                      [](const UnitType &) { return K::Unit; },
-                      [](const BoolType &) { return K::Bool; },
-                      [](const I32Type &) { return K::I32; },
-                      [](const U32Type &) { return K::U32; },
-                      [](const IsizeType &) { return K::Isize; },
-                      [](const UsizeType &) { return K::Usize; },
-                      [](const StructType &) { return K::Struct; },
-                      [](const BoxType &) { return K::Box; },
-                      [](const VecType &) { return K::Vec; },
-                      [](const ArrayType &) { return K::Array; },
-                      [](const RefType &) { return K::Ref; },
-                      [](const FunctionType &) { return K::Function; }},
+      ast::Overloaded{
+          [](const ErrorType &) { return K::Error; },
+          [](const NeverType &) { return K::Never; },
+          [](const UnitType &) { return K::Unit; },
+          [](const BoolType &) { return K::Bool; },
+          [](const I32Type &) { return K::I32; },
+          [](const U32Type &) { return K::U32; },
+          [](const IsizeType &) { return K::Isize; },
+          [](const UsizeType &) { return K::Usize; },
+          [](const StructType &) { return K::Struct; },
+          [](const BoxType &) { return K::Box; },
+          [](const VecType &) { return K::Vec; },
+          [](const ArrayType &) { return K::Array; },
+          [](const RefType &) { return K::Ref; },
+          [](const FunctionType &) { return K::Function; },
+          [](const BuiltinFunctionType &) { return K::BuiltinFunction; }},
       data_);
 }
 
@@ -68,10 +70,11 @@ struct TypeContext::Impl {
     const SemanticType *element{};
     std::uint64_t length{};
     ast::Mutability mutability{ast::Mutability::Immutable};
+    BuiltinId builtin{BuiltinId::GetInt};
     bool operator<(const Key &other) const {
-      const auto fields = std::tie(kind, symbol, length, mutability);
-      const auto other_fields =
-          std::tie(other.kind, other.symbol, other.length, other.mutability);
+      const auto fields = std::tie(kind, symbol, length, mutability, builtin);
+      const auto other_fields = std::tie(other.kind, other.symbol, other.length,
+                                         other.mutability, other.builtin);
       if (fields != other_fields)
         return fields < other_fields;
       return std::less<const SemanticType *>{}(element, other.element);
@@ -107,6 +110,10 @@ SemanticTypePtr TypeContext::intern(SemanticType::Data data) {
   if (key.kind == K::Ref)
     key.mutability = value.is_mutable() ? ast::Mutability::Mutable
                                         : ast::Mutability::Immutable;
+  if (const auto *builtin = get_if<BuiltinFunctionType>(value)) {
+    key.builtin = builtin->builtin;
+    key.element = builtin->owner.get();
+  }
   if (const auto found = impl_->types.find(key); found != impl_->types.end()) {
     if ((key.kind == K::Struct || key.kind == K::Function) &&
         found->second->name() != value.name())
@@ -149,6 +156,25 @@ SemanticTypePtr TypeContext::structure(SymbolId symbol, std::string name) {
 SemanticTypePtr TypeContext::function(SymbolId symbol, std::string name) {
   return intern(FunctionType{symbol, std::move(name)});
 }
+SemanticTypePtr TypeContext::builtin(BuiltinId builtin, SemanticTypePtr owner) {
+  switch (builtin) {
+  case BuiltinId::GetInt:
+  case BuiltinId::PrintInt:
+  case BuiltinId::PrintlnInt:
+  case BuiltinId::BoxNew:
+  case BuiltinId::VecNew:
+  case BuiltinId::Clone:
+  case BuiltinId::Len:
+  case BuiltinId::IsEmpty:
+  case BuiltinId::Push:
+  case BuiltinId::Remove:
+    break;
+  default:
+    throw std::invalid_argument("unknown builtin function identity");
+  }
+  return intern(BuiltinFunctionType{builtin, owner ? canonical(std::move(owner))
+                                                   : SemanticTypePtr{}});
+}
 SemanticTypePtr TypeContext::box(SemanticTypePtr element) {
   return intern(BoxType{canonical(std::move(element))});
 }
@@ -178,6 +204,10 @@ SemanticTypePtr TypeContext::canonical(SemanticTypePtr value) {
     return structure(value->symbol(), value->name());
   case K::Function:
     return function(value->symbol(), value->name());
+  case K::BuiltinFunction: {
+    const auto &payload = *get_if<BuiltinFunctionType>(*value);
+    return builtin(payload.builtin, payload.owner);
+  }
   case K::Box:
     return box(value->element());
   case K::Vec:
@@ -227,6 +257,13 @@ bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right) {
                       },
                       [&](const FunctionType &p) {
                         return p.symbol == get_if<FunctionType>(*right)->symbol;
+                      },
+                      [&](const BuiltinFunctionType &p) {
+                        const auto &other =
+                            *get_if<BuiltinFunctionType>(*right);
+                        return p.builtin == other.builtin &&
+                               ((!p.owner && !other.owner) ||
+                                same_type(p.owner, other.owner));
                       }},
       left->data());
 }
@@ -256,7 +293,13 @@ std::string type_name(const SemanticTypePtr &type) {
                    (p.mutability == ast::Mutability::Mutable ? "mut " : "") +
                    type_name(p.element);
           },
-          [](const FunctionType &p) { return "fn " + p.name; }},
+          [](const FunctionType &p) { return "fn " + p.name; },
+          [](const BuiltinFunctionType &p) {
+            auto name = "fn " + std::string(builtin_name(p.builtin));
+            if (p.owner)
+              name += " (owner " + type_name(p.owner) + ")";
+            return name;
+          }},
       type->data());
 }
 } // namespace rx

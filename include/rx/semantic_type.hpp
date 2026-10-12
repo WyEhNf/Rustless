@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rx/ast/names.hpp"
+#include "rx/builtin.hpp"
 #include "rx/symbol.hpp"
 #include <concepts>
 #include <cstdint>
@@ -43,6 +44,10 @@ struct FunctionType {
   SymbolId symbol;
   std::string name;
 };
+struct BuiltinFunctionType {
+  BuiltinId builtin;
+  SemanticTypePtr owner;
+};
 
 class TypeContext;
 class SemanticType final {
@@ -61,11 +66,13 @@ public:
     Vec,
     Array,
     Ref,
-    Function
+    Function,
+    BuiltinFunction
   };
-  using Data = std::variant<ErrorType, NeverType, UnitType, BoolType, I32Type,
-                            U32Type, IsizeType, UsizeType, StructType, BoxType,
-                            VecType, ArrayType, RefType, FunctionType>;
+  using Data =
+      std::variant<ErrorType, NeverType, UnitType, BoolType, I32Type, U32Type,
+                   IsizeType, UsizeType, StructType, BoxType, VecType,
+                   ArrayType, RefType, FunctionType, BuiltinFunctionType>;
   Kind kind() const noexcept;
   const Data &data() const noexcept { return data_; }
   const SemanticTypePtr &element() const;
@@ -91,6 +98,7 @@ public:
   SemanticTypePtr primitive(SemanticType::Kind kind);
   SemanticTypePtr structure(SymbolId symbol, std::string name);
   SemanticTypePtr function(SymbolId symbol, std::string name);
+  SemanticTypePtr builtin(BuiltinId builtin, SemanticTypePtr owner = {});
   SemanticTypePtr box(SemanticTypePtr element);
   SemanticTypePtr vector(SemanticTypePtr element);
   SemanticTypePtr array(SemanticTypePtr element, std::uint64_t length);
