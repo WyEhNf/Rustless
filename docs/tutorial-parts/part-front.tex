@@ -1931,7 +1931,7 @@ fn main() {
 \begin{lstlisting}[language=Rustless]
 fn scoped() -> i32 {
     let x = 1;
-    { let x = 2; x } + x
+    ({ let x = 2; x }) + x
 }
 \end{lstlisting}
 进入内层块需要开启局部作用域；内层 let 是否覆盖外层名字、名字在初始化时是否已可见、离开块后查找恢复到何处，都是语言规则。通用 DFS 可以借 enter/leave 辅助维护某种栈，但不会自动给出这些规则，也不会决定应先登记绑定还是先检查初始化。
