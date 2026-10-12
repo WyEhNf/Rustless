@@ -1426,7 +1426,7 @@ x 在 printInt 之前形成，之后仍会使用。若将 x 放在调用允许�
 \caption{统一栈帧布局连接各阶段的存储需求}
 \end{figure}
 
-参考 \path{src/backend/machine.cpp} 在 spill、对象及保存区域都安排完之后，以 \texttt{aligned(cursor,16)} 得到总大小；\texttt{verify\_machine} 再核对帧内区域。新实现可以采用更明确的 StackSlotId 和帧布局记录，避免把“还未安排的槽”过早伪装成最终立即数偏移。
+Rx-Compiler 的参考实现先安排 spill、对象及保存区域，随后使用 \texttt{aligned(cursor,16)} 将总大小对齐到十六字节。\texttt{verify\_machine} 再核对帧内区域，相关代码见 \path{src/backend/machine.cpp}。新实现可以采用更明确的 StackSlotId 和帧布局记录，避免把“还未安排的槽”过早伪装成最终立即数偏移。
 
 \section{RISC-V 整数调用约定}
 针对标准 RV32 整数 ABI，a0 至 a7 用于参数，前两个也用于返回值；本教程的单字标量结果使用 a0。s0 至 s11 要跨调用保留，参数和 t 类临时寄存器不承担这种保留义务。ra 保存返回地址，sp 表示栈位置；gp、tp 不作为普通可分配寄存器。标准栈对齐为十六字节，进入函数时的首个栈参数位于入口 sp 的零偏移。规则依据 \href{https://riscv-non-isa.github.io/riscv-elf-psabi-doc/}{RISC-V ABI 规范的整数约定}。
