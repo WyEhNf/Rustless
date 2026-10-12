@@ -190,4 +190,44 @@ SemanticTypePtr TypeContext::canonical(SemanticTypePtr value) {
     return primitive(value->kind());
   }
 }
+
+bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right) {
+  if (!left || !right)
+    return false;
+  if (left == right)
+    return true;
+  if (left->kind() != right->kind())
+    return false;
+  return std::visit(
+      ast::Overloaded{[](const ErrorType &) { return true; },
+                      [](const NeverType &) { return true; },
+                      [](const UnitType &) { return true; },
+                      [](const BoolType &) { return true; },
+                      [](const I32Type &) { return true; },
+                      [](const U32Type &) { return true; },
+                      [](const IsizeType &) { return true; },
+                      [](const UsizeType &) { return true; },
+                      [&](const StructType &p) {
+                        return p.symbol == get_if<StructType>(*right)->symbol;
+                      },
+                      [&](const BoxType &p) {
+                        return same_type(p.element, right->element());
+                      },
+                      [&](const VecType &p) {
+                        return same_type(p.element, right->element());
+                      },
+                      [&](const ArrayType &p) {
+                        return p.length == right->length() &&
+                               same_type(p.element, right->element());
+                      },
+                      [&](const RefType &p) {
+                        return p.mutability ==
+                                   get_if<RefType>(*right)->mutability &&
+                               same_type(p.element, right->element());
+                      },
+                      [&](const FunctionType &p) {
+                        return p.symbol == get_if<FunctionType>(*right)->symbol;
+                      }},
+      left->data());
+}
 } // namespace rx
