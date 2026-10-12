@@ -10,7 +10,7 @@
 
 namespace rx {
 struct Adjustment {
-  // Implicit operations are stored in execution order.
+
   enum class Kind {
     Dereference,
     BorrowShared,
@@ -21,7 +21,6 @@ struct Adjustment {
   SemanticTypePtr target;
 };
 
-// A use records conversions without changing the expression's intrinsic type.
 struct OperandSemantics {
   ast::NodeId node;
   SemanticTypePtr effective_type;
@@ -75,9 +74,9 @@ struct BuiltinTarget {
   BuiltinId builtin;
 };
 using CallTarget = std::variant<FunctionTarget, BuiltinTarget>;
-// Resolve once in the language layer; backends consume the selected operation.
+
 std::optional<ResolvedOperation>
 resolve_operation(ast::BinaryOp op, const SemanticTypePtr &left,
                   const SemanticTypePtr &right);
 ast::BinaryOp binary_operation(ast::CompoundAssignOp op);
-} // namespace rx
+}
