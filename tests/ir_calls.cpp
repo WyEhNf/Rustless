@@ -32,9 +32,9 @@ fn main() {
   rx::ir::SemanticBridge bridge(index);
   unsigned calls = 0;
   rx::ast::walk(*parsed.crate, [&](const auto &node, const auto &payload) {
-    using P = std::remove_cvref_t<decltype(payload)>;
-    if constexpr (std::same_as<P, rx::ast::CallExpr> ||
-                  std::same_as<P, rx::ast::MethodCallExpr>) {
+    using PayloadType = std::decay_t<decltype(payload)>;
+    if constexpr (std::is_same_v<PayloadType, rx::ast::CallExpr> ||
+                  std::is_same_v<PayloadType, rx::ast::MethodCallExpr>) {
       const auto plan = bridge.call(node, payload);
       const auto spelling = parsed.crate->source.slice(node.span);
       assert(rx::same_type(plan.result, index.expression(node).type));
@@ -43,23 +43,19 @@ fn main() {
         assert(function.signature.name == "read");
         assert(function.signature.symbol == index.expression(node).symbol);
         assert(plan.arguments[0].adjustments.size() == 1);
-        assert(plan.arguments[0].adjustments[0].kind ==
-               rx::Adjustment::Kind::MutToShared);
+        assert(plan.arguments[0].adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
         assert(!plan.arguments[0].effective_type->is_mutable());
       } else if (spelling == "copy(p)") {
         const auto &function = std::get<rx::ir::FunctionCall>(plan.target);
         assert(function.signature.result.passing == rx::ir::Passing::Indirect);
-        assert(function.signature.parameters[0].value.passing ==
-               rx::ir::Passing::Indirect);
+        assert(function.signature.parameters[0].value.passing == rx::ir::Passing::Indirect);
       } else if (spelling == "q.get()") {
         const auto &function = std::get<rx::ir::FunctionCall>(plan.target);
         assert(function.signature.name == "P::get" && plan.receiver);
         assert(plan.receiver->adjustments.size() == 1);
-        assert(plan.receiver->adjustments[0].kind ==
-               rx::Adjustment::Kind::BorrowShared);
+        assert(plan.receiver->adjustments[0].kind == rx::Adjustment::Kind::BorrowShared);
       } else {
-        assert(std::get<rx::ir::BuiltinCall>(plan.target).builtin ==
-               rx::BuiltinId::PrintInt);
+        assert(std::get<rx::ir::BuiltinCall>(plan.target).builtin == rx::BuiltinId::PrintInt);
       }
       ++calls;
     }
