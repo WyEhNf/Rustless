@@ -886,6 +886,8 @@ private:
             [&](const ast::Expr &, const ast::ParenExpr &p) {
               auto inner = check_expr(p.inner, expected);
               inner.adjustments.clear();
+              inner.binary.reset();
+              inner.compound.reset();
               return inner;
             },
             [&](const ast::Expr &node, const ast::PathExpr &path) {
