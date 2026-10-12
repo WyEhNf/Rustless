@@ -6,6 +6,15 @@ from pathlib import Path
 import re
 
 
+def keep_listings_together(text):
+    """Keep the short teaching excerpts intact when the page is filled."""
+    pattern = r"\\begin\{lstlisting\}(?:\[[^\n]*\])?\n.*?\\end\{lstlisting\}"
+    def wrap(match):
+        return ("\\par\\noindent\n\\begin{minipage}{\\linewidth}\n"
+                + match.group(0) + "\n\\end{minipage}\n\\par")
+    return re.sub(pattern, wrap, text, flags=re.S)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-partial", action="store_true")
@@ -37,6 +46,7 @@ def main():
     appendix = parts / "appendices.tex"
     if appendix.is_file():
         text += "\n" + appendix.read_text(encoding="utf-8")
+    text = keep_listings_together(text)
     text += "\n\\end{document}\n"
     output = root / "docs" / "compiler-design-tutorial.tex"
     output.write_text(text, encoding="utf-8")
