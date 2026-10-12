@@ -8,7 +8,68 @@
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
+namespace {
+void check_equality_and_adjustments() {
+  rx::DiagnosticEngine diagnostics;
+  auto parsed = rx::parse_source(R"(
+#[derive(PartialEq, Eq)]
+struct Cell { value: i32 }
+fn main() {
+  let a = Box::<i32>::new(1);
+  let b = Box::<i32>::new(1);
+  let box_equal = a == b;
+  let box_different = a != b;
+  let array_equal = [1, 2] == [1, 2];
+  let cell_equal = Cell { value: 1 } == Cell { value: 1 };
+  let x = 8;
+  let sum = &x + &x;
+  let order = &(&x) < &(&x);
+  let mut flag = true;
+  flag &= false;
+}
+)", diagnostics);
+  assert(parsed.syntax_ok && parsed.crate);
+  auto checked = rx::analyze(*parsed.crate, diagnostics);
+  diagnostics.print(std::cerr);
+  assert(!diagnostics.has_errors());
+  rx::SemanticIndex index(*parsed.crate, checked);
+  ir::SemanticBridge bridge(index);
+  std::vector<rx::SemanticType::Kind> content_types;
+  std::vector<bool> negated;
+  unsigned converted_operands = 0;
+  ast::walk(*parsed.crate, [&](const auto &owner, const auto &payload) {
+    using P = std::remove_cvref_t<decltype(payload)>;
+    if constexpr (std::same_as<P, ast::BinaryExpr>) {
+      const auto lowered = bridge.binary(owner, payload);
+      if (const auto *content =
+              std::get_if<ir::StructuralEquality>(&lowered.operation)) {
+        content_types.push_back(content->compared_type->kind());
+        negated.push_back(content->negated);
+        assert(lowered.result_type == ir::Type::I1);
+      }
+      for (const auto *use : {&lowered.left, &lowered.right}) {
+        if (!use->adjustments.empty()) {
+          ++converted_operands;
+          assert(use->effective_type->kind() == rx::SemanticType::Kind::I32);
+          for (const auto &adjustment : use->adjustments)
+            assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
+        }
+      }
+    }
+    if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+      const auto lowered = bridge.compound(owner, payload);
+      assert(lowered.operation.op == ir::BinaryOp::And);
+      assert(lowered.operation.operand_type == ir::Type::I1);
+    }
+  });
+  using K = rx::SemanticType::Kind;
+  assert(content_types == (std::vector{K::Box, K::Box, K::Array, K::Struct}));
+  assert(negated == (std::vector{false, true, false, false}));
+  assert(converted_operands == 4);
+}
+} // namespace
 int main() {
+  check_equality_and_adjustments();
   const auto target = ir::TargetLayout::rv32();
   assert(target.integer_bits() == 32 && target.shift_count_mask() == 31);
   assert(target.integer().bytes == 4 && target.integer().alignment == 4);
