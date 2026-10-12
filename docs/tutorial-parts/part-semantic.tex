@@ -1,0 +1,425 @@
+% Chapters 9--13: semantic design. Included by the standalone tutorial.
+\chapter{名字、作用域与分阶段的语义分析}
+\label{chap:semantic-names}
+
+\section*{本章导读}
+解析器能够把 \lstinline[language=Rustless]|x + 1| 识别为一个二元表达式，却还不能说明 \lstinline[language=Rustless]|x| 指向哪一个变量。读懂一个程序，需要把文字名称与实际声明连接起来。本章从最小的变量例子开始，解释声明身份、作用域和关联成员，再说明为何应先认识整个程序的声明，随后检查函数体。读完本章，读者应能区分名字的拼写、一次语法出现和一个被引用的声明，也能说明各个分析步骤的先后关系来自哪些信息依赖。
+
+\section{名字的拼写与名字的含义}
+考虑下面的程序。这里的 \lstinline[language=Rustless]|x| 出现三次：一次声明，两次使用。
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let x = 3;
+    printInt(x);
+    printInt(x + 1);
+}
+\end{lstlisting}
+三次出现各有自己的源码范围，也分别构成不同的语法节点。因而它们需要三个节点身份。与此同时，两次使用都指向同一个变量声明。这个共同的含义需要另一种身份来表达。Rustless 将语法节点身份称为 \texttt{NodeId}，将声明身份称为 \texttt{SymbolId}。这两种身份解决的问题不同，不能因为它们都可由整数表示，就让它们彼此替代。
+
+\texttt{include/rx/symbol.hpp} 给出了声明身份的类型：
+\begin{lstlisting}[language=C++]
+struct SymbolTag;
+using SymbolId = ast::Id<SymbolTag>;
+\end{lstlisting}
+\texttt{Id} 的模板参数使节点身份与符号身份成为不同的 C++ 类型。把一个节点号误传给符号查询时，编译器可以发现这种混用。这种设计不需要额外的运行时标签：身份的类别由静态类型表达，运行时保存的仍是编号。
+
+名字的字符串仍然有价值。诊断需要告诉读者未定义的名字是什么，初次解析也需要用名字寻找声明。但是，已经解析过的引用应当保存找到的身份。后续过程若再次用字符串寻找声明，就必须重新理解遮蔽、关联成员和内建名称的规则。这会使一次已经完成的判断散布到更多地方，也给规则修改增加负担。
+
+下图将一个声明连接到两次引用，说明三个语法节点怎样通过共同的 \texttt{SymbolId} 建立联系。图中的编号仅用于说明身份关系，不是某次编译的实际编号。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=9mm and 14mm,
+  every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (decl) {声明：\texttt{let x = 3}\par \texttt{NodeId = 7}};
+\node (sym) [right=of decl] {变量符号\par \texttt{SymbolId = 2}};
+\node (use1) [above right=of sym] {第一处 \texttt{x}\par \texttt{NodeId = 11}};
+\node (use2) [below right=of sym] {第二处 \texttt{x}\par \texttt{NodeId = 16}};
+\draw[->] (decl) -- (sym);
+\draw[->] (use1) -- (sym);
+\draw[->] (use2) -- (sym);
+\end{tikzpicture}
+\caption{语法出现与声明身份}
+\end{figure}
+
+\section{符号记录与所属关系}
+在当前 \texttt{include/rx/semantic.hpp} 中，一个符号记录保存如下信息：
+\begin{lstlisting}[language=C++]
+struct SymbolRecord {
+  SymbolId id{};
+  SymbolKind kind;
+  std::string name;
+  std::optional<SymbolId> owner;
+  ast::NodeId declaration;
+};
+\end{lstlisting}
+\texttt{kind} 区分结构体、函数、常量、字段、参数、接收者和局部变量。\texttt{declaration} 连接回源程序中的声明节点。\texttt{owner} 表达所属关系，例如字段属于结构体，参数属于函数。所属关系不能用名字中的冒号完整代替；字符串适合展示限定名称，身份适合建立可检查的连接。
+
+可以把符号记录看作关于声明的最小知识。它不直接承担表达式类型推断，也不保存机器地址。这样，名字解析、类型检查和后续布局都可以引用同一声明，而不要求符号对象理解每个阶段的全部内容。新增一种处理过程时，通常增加相应的结果表即可。
+
+\texttt{src/semantic.cpp} 的 \texttt{symbol\_for} 为声明分配稳定的身份：
+\begin{lstlisting}[language=C++]
+SymbolId symbol_for(ast::NodeId node) {
+  auto [entry, inserted] =
+      declaration_symbols_.try_emplace(node, next_symbol_);
+  if (inserted)
+    ++next_symbol_.value;
+  return entry->second;
+}
+\end{lstlisting}
+同一声明被查询多次时，返回的是同一符号。新声明才消耗新的编号。这里没有把节点编号直接强制转换为符号编号；语法树中很多节点根本不是声明，二者的数量与用途都不同。
+
+\section{作用域：从内层向外层寻找声明}
+名字的含义还依赖它所在的区域。下面两个 \lstinline[language=Rustless]|x| 拼写相同，类型却不同。
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let mut x = 1;
+    {
+        let x = true;
+        if x { printInt(2); }
+    }
+    x = x + 1;
+}
+\end{lstlisting}
+内层的 \lstinline[language=Rustless]|if x| 使用布尔变量；退出内层块之后，最后的加法使用外层整数变量。把所有局部名字保存到同一个永不恢复的表中，就会失去这种关系。
+
+当前分析器使用一组作用域表。进入块时压入一个表，退出块时移除它。查找从最内层开始，只有在该层找不到名字时才继续向外。下面是 \texttt{src/semantic.cpp} 中 \texttt{lookup} 的实际实现：
+\begin{lstlisting}[language=C++]
+Binding *lookup(const std::string &name) {
+  for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
+    if (auto found = it->find(name); found != it->end())
+      return &found->second;
+  return nullptr;
+}
+\end{lstlisting}
+这个短小算法直接对应词法作用域的含义。每层散列表使常见情况下的单层查找较快，整体查找次数仍与嵌套深度有关。不能仅因为使用散列表，就把整个作用域查找称为常数时间。对于当前语言子集，层数通常有限，这种明确的结构比过早引入复杂缓存更容易理解。
+
+下图追踪同名变量在内外层块中的查找，说明退出内层后为何恢复外层声明。箭头表示一次名字查找访问的方向，而不是程序执行的控制流。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=7mm,
+  every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (inner) {内层块：\texttt{x : bool}};
+\node (outer) [below=of inner] {函数块：\texttt{x : i32}};
+\node (fn) [below=of outer] {函数参数作用域};
+\node (query) [left=18mm of inner] {块内查询 \texttt{x}};
+\node (after) [right=18mm of outer] {退出内层后的查询};
+\draw[->] (query) -- (inner);
+\draw[->] (inner) -- (outer);
+\draw[->] (outer) -- (fn);
+\draw[->] (after) -- (outer);
+\end{tikzpicture}
+\caption{作用域栈与遮蔽}
+\end{figure}
+
+\section{初始化表达式与绑定建立的顺序}
+\lstinline[language=Rustless]|let x = x + 1;| 中，右侧的 \lstinline[language=Rustless]|x| 应当在新绑定建立之前解释。假设外层已经有一个 \lstinline[language=Rustless]|x|，右侧就可以使用它。若先插入新名字再检查初始化表达式，就会让一个尚未得到类型和值的声明遮蔽所需的旧声明。
+
+\texttt{check\_block} 因而先解析可选类型注解，再检查初始化表达式，确定绑定类型，最后记录符号并将绑定放入当前作用域。每个步骤需要的信息由前一步提供。这是一个小规模的例子，却揭示了分析顺序的一般原则：先后次序应当由含义的依赖决定，不能只由实现中调用哪个函数方便决定。
+
+局部遮蔽与重复参数还需要分别处理。局部变量可以依据语言规则遮蔽已有名字，函数签名却不能让两个同名参数同时占据同一参数位置。当前实现对参数名与关联成员重复进行检查。这些规则应当在负责相应声明的地方明确给出，不能依赖散列表覆盖旧值后的偶然结果。
+
+\section{先认识声明，再检查函数体}
+下面的函数调用写在定义之前。
+\begin{lstlisting}[language=Rustless]
+fn main() { printInt(twice(3)); }
+fn twice(x: i32) -> i32 { x + x }
+\end{lstlisting}
+逐行读源码当然可以建立语法树，但如果逐行完成全部语义检查，就会在检查 \lstinline[language=Rustless]|main| 时尚不知道 \lstinline[language=Rustless]|twice| 的签名。语言若允许这样的定义顺序，分析器必须先获得完整声明信息。
+
+当前 \texttt{Analyzer::run} 按信息依赖安排主要步骤。下面摘录其中负责顺序的部分；其他结果整理代码在原函数中。
+\begin{lstlisting}[language=C++]
+collect_items();
+resolve_declarations();
+// Callable declarations are indexed before bodies are checked.
+validate_constants();
+validate_layouts_and_derives();
+validate_entry();
+check_functions();
+\end{lstlisting}
+声明收集只回答有哪些名字及其所属关系。声明类型解析回答参数、返回值与字段具有什么类型。常量求值补足数组长度等编译时知识。有限布局与派生能力检查处理声明整体的要求。函数体检查再使用这些已准备的信息。把这些任务分开，使单个步骤拥有明确输入，也使错误较容易回到应负责的规则。
+
+下图按信息依赖安排分析阶段，解释函数体检查为什么需要先得到完整声明。图中入口检查与声明整体检查都先于成功结果的发布；发布的含义将在第十三章展开。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=7mm,
+  every node/.style={draw,rounded corners,align=center,font=\small,text width=40mm}]
+\node (collect) {收集声明与身份};
+\node (types) [below=of collect] {解析签名与字段类型};
+\node (const) [below=of types] {常量与数组长度};
+\node (layout) [right=17mm of const] {有限布局与派生能力};
+\node (body) [above=of layout] {入口与函数体检查};
+\node (result) [above=of body] {完整检查后发布结果};
+\draw[->] (collect) -- (types);
+\draw[->] (types) -- (const);
+\draw[->] (const) -- (layout);
+\draw[->] (layout) -- (body);
+\draw[->] (body) -- (result);
+\end{tikzpicture}
+\caption{分析阶段的信息依赖}
+\end{figure}
+
+\section{关联声明与上下文中的 Self}
+\begin{lstlisting}[language=Rustless]
+struct Counter { value: i32 }
+impl Counter {
+    const STEP: i32 = 1;
+    fn new() -> Self { Self { value: 0 } }
+    fn get(&self) -> i32 { self.value }
+}
+fn main() {
+    let c = Counter::new();
+    printInt(c.get());
+}
+\end{lstlisting}
+\lstinline[language=Rustless]|Counter::new| 是关联函数，\lstinline[language=Rustless]|get| 带有接收者，因而可以用方法形式调用。\lstinline[language=Rustless]|Self| 的含义来自当前结构体或实现块；它不是任意位置都可使用的普通名字。分析器保存这一上下文，并把关联函数、关联常量的所属关系连接到结构体符号。
+
+当前初次查找仍使用限定名字组成的字符串，例如 \texttt{Counter::get}。这种做法对于有限的子集较直观。完成解析之后，函数类型与调用目标已经保存符号身份，因此后续过程可以依赖身份，而无需再从字符串的冒号中恢复所属关系。字符串展示与身份连接各承担合适的职责，是清晰设计的重要组成部分。
+
+\section{模块解析的后续问题}
+AST 中已经保存 \lstinline[language=Rustless]|use| 声明及其树状结构，但当前声明收集并没有完成导入绑定和完整模块解析。保存一种语法，并不等于已经赋予它全部语义。读者应当把这项边界与已经支持的局部作用域区别开来。
+
+将来引入模块时，需要回答路径从哪个模块开始、别名建立何种绑定、通配导入如何处理冲突、导入是否参与不同名字空间等问题。现有 \texttt{SymbolId} 和所属关系可以继续使用，初次名字查找则需要增加模块环境。由于下游依赖的是解析后的身份，这类扩展不必让类型检查之后的每个步骤都理解导入语法。
+
+\paragraph{本章小结与下一章。}
+名字的拼写用于寻找与展示，节点身份用于回到源码，符号身份用于连接声明。作用域决定查找的范围，分阶段分析使定义顺序不再偶然决定是否能够找到声明。找到声明之后，还需要解释其中的类型写法。下一章将从类型语法走向语义类型，并研究字面量与常量如何补足这些含义。
+
+\chapter{语义类型、字面量与常量}
+\label{chap:semantic-types}
+\section*{本章导读}
+\lstinline[language=Rustless]|[i32; N]| 在语法树中保存了类型名和一个长度表达式。类型检查真正需要的则是元素类型和已经确定的长度。本章解释这两种表示的联系，并区分严格的类型相等、上下文中的可转换关系与错误恢复。随后，读者将看到不可变的具体类型对象和 \texttt{TypeContext} 如何使类型的形状、身份与共享关系清楚可控。这些设计关系到规则的一致性，也关系到重复类型的保存与比较成本。
+
+\section{类型写法与类型含义}
+\begin{lstlisting}[language=Rustless]
+const N: usize = 3;
+fn first(values: &[i32; N]) -> i32 { values[0] }
+fn main() { printInt(first(&[1, 2, 3])); }
+\end{lstlisting}
+语法类型 \texttt{TypeSyntax} 需要保留括号、路径、生命周期名字及数组长度表达式等源码信息。语义类型不需要把同一个名字查找多次，也不需要在每次比较数组时重新计算 \lstinline[language=Rustless]|N|。因此，类型解析把这些语法节点解释为另一组对象：引用包含其所指类型，数组包含元素类型与长度，结构体类型包含对应声明的身份。
+
+\texttt{include/rx/semantic.hpp} 中的连接结构很小：
+\begin{lstlisting}[language=C++]
+struct TypeResolution {
+  ast::NodeId node{};
+  SemanticTypePtr type;
+};
+\end{lstlisting}
+它说明某一个类型语法节点已经被解释成哪个语义类型。保留这项连接可以同时满足两种需求：诊断仍可回到读者写下的位置，后续过程则直接查询含义。无需让一个类型对象同时承担语法细节和机器表示。
+
+下图并列呈现 \lstinline[language=Rustless]|&[i32; N]| 的写法与已求得长度的类型，说明 \texttt{TypeResolution} 连接的是两种表示。左侧的路径表达式保留来源，右侧的数组对象保存确定的长度。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=7mm and 15mm,
+  every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (sr) {引用类型语法};
+\node (sa) [below=of sr] {数组类型语法};
+\node (si) [below left=of sa] {路径 \texttt{i32}};
+\node (sn) [below right=of sa] {表达式 \texttt{N}};
+\node (tr) [right=48mm of sr] {不可变 Ref 类型};
+\node (ta) [below=of tr] {Array：长度 3};
+\node (ti) [below=of ta] {I32 类型};
+\draw[->] (sr) -- (sa);
+\draw[->] (sa) -- (si);
+\draw[->] (sa) -- (sn);
+\draw[->] (tr) -- (ta);
+\draw[->] (ta) -- (ti);
+\draw[->,dashed] (sr) -- node[above,draw=none] {解析结果} (tr);
+\end{tikzpicture}
+\caption{类型语法与语义类型}
+\end{figure}
+
+\section{结构相等、声明身份与特殊类型}
+两个数组类型相等，需要元素类型相等并且长度相等。两个引用类型相等，还需要引用可变性一致。对于结构体，仅比较字段形状则不够：两个分别声明的结构体即使字段相同，也不应自动成为同一种类型。当前结构体类型以 \texttt{SymbolId} 表达这种名义身份。
+
+\begin{lstlisting}[language=Rustless]
+struct Meter { value: i32 }
+struct Second { value: i32 }
+fn take(x: Meter) {}
+fn main() {
+    let s = Second { value: 1 };
+    // take(s);  // A different declaration, hence a different type.
+}
+\end{lstlisting}
+注释中的调用是本节的错误例子，不是应当通过检查的程序。结构相似并没有抹去声明所赋予的含义。函数项也保存声明身份；一个局部变量可以保存某个函数项，但局部绑定身份与那个函数的身份仍然不同。
+
+当前 \texttt{same\_type} 是严格相等判断，不进行隐式转换，也不为了诊断而把 Error 当作任何类型。分析器另有 \texttt{same}，仅在错误恢复时放宽关系：
+\begin{lstlisting}[language=C++]
+bool same(const TyPtr &lhs, const TyPtr &rhs) {
+  return lhs && rhs && (lhs->kind() == Ty::Kind::Error ||
+                        rhs->kind() == Ty::Kind::Error ||
+                        same_type(lhs, rhs));
+}
+\end{lstlisting}
+将这两种关系分开很重要。严格相等回答对象代表的类型是否相同；恢复兼容只为了避免在一个已知错误后不断报告重复后果。Never 也不能混入普通相等：它没有正常产生结果，因而可以在某些期待其他类型的上下文中使用，这是控制流与转换规则，而不是说 Never 就等于那个类型。
+
+\section{数值拼写与整数类型的决定}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let decimal = 10;
+    let binary: u32 = 0b1_010;
+    let octal = 0o12usize;
+    let hexadecimal = 0xai32;
+    printInt(decimal + hexadecimal);
+}
+\end{lstlisting}
+词法阶段已经说明一个整数字面量使用什么进制以及是否带有后缀。语义阶段应使用这些已确定的信息来解码，不能在不同表达式规则中各写一份猜测字符串的算法。\texttt{integer\_magnitude} 验证后缀和进制前缀、去除分隔符，再使用 \texttt{from\_chars} 得到幅值。
+
+数值解码回答字面量表示哪个数，类型决定回答它以什么类型参与程序。当前 \texttt{literal\_type} 优先使用明确后缀；没有后缀时，若存在整数预期类型，就使用该类型；再没有这样的上下文，则默认 i32。因而 \lstinline[language=Rustless]|let x = 1;|、\lstinline[language=Rustless]|let x: u32 = 1;|、\lstinline[language=Rustless]|let x = 1usize;| 在类型决定上具有不同信息来源。
+
+下图把拼写解码与类型决定分开，再展示它们如何共同进入范围检查。两条路径分别回答“是什么数”和“是什么类型”，不应让某一条路径替代另一条。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 13mm,
+  every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (spelling) {进制、数字、分隔符};
+\node (magnitude) [below=of spelling] {解码幅值};
+\node (context) [right=of spelling] {后缀、预期类型、默认类型};
+\node (type) [below=of context] {确定整数类型};
+\node (check) [below right=9mm and -2mm of magnitude] {目标范围检查};
+\draw[->] (spelling) -- (magnitude);
+\draw[->] (context) -- (type);
+\draw[->] (magnitude) -- (check);
+\draw[->] (type) -- (check);
+\end{tikzpicture}
+\caption{字面量的数值与类型}
+\end{figure}
+
+宿主 C++ 的整数宽度不能直接成为源语言整数宽度。当前目标模型以 32 位整数为基础，因此使用较宽的宿主整数解码幅值，只是为了安全检查范围。它不表示语言已经支持任意宽度整数。若未来引入更多目标位宽，字面量解释、常量保存、布局与后端运算都应依赖同一目标描述。
+
+\section{局部预期类型的传递}
+预期类型可以来自类型注解、函数参数、返回值和数组元素。考虑：
+\begin{lstlisting}[language=Rustless]
+fn take(x: u32) {}
+fn answer() -> usize { 3 }
+fn main() {
+    take(1);
+    let values: [u32; 2] = [1, 2];
+}
+\end{lstlisting}
+检查 \lstinline[language=Rustless]|take(1)| 时，参数签名把 u32 传给字面量；检查函数 \lstinline[language=Rustless]|answer| 的尾表达式时，返回注解把 usize 传给它；检查数组时，外层数组注解将元素预期类型传给各元素。
+
+这种方式使上下文传递可见，适合当前子集。它不是完整的约束求解式类型推断。当前实现没有为每个未知类型建立推断变量，再统一求解跨表达式的约束。教材可以从这个较小模型讲清上下文如何流动，随后再讨论更一般的推断器为什么需要额外表示。
+
+预期类型也不能成为掩盖不兼容类型的工具。带后缀的 \lstinline[language=Rustless]|1i32| 仍保留明确类型，把它传给期待 u32 的参数，应当由兼容规则判断能否使用。括号表达式需要特别谨慎：上下文可以穿过括号帮助内部字面量决定类型，而实际使用时的转换应记录在所使用的括号表达式上，避免内外两层重复执行转换。
+
+\section{常量依赖与计算状态}
+\begin{lstlisting}[language=Rustless]
+const N: usize = M;
+const M: usize = 3;
+fn main() {
+    let values: [i32; N] = [0; N];
+    printInt(values[0]);
+}
+\end{lstlisting}
+常量不能简单按源码顺序计算，因为 \lstinline[language=Rustless]|N| 先出现却依赖 \lstinline[language=Rustless]|M|。当前实现对常量类型与值分别保存访问状态。尚未处理的常量开始计算后进入“计算中”；依赖完成后进入“完成”；发生错误则进入“失败”。若再次访问一个仍在计算中的常量，就说明当前依赖路径形成了环。
+
+\texttt{ConstantInfo} 的两组状态分别服务于类型和取值：
+\begin{lstlisting}[language=C++]
+enum class TypeState {
+  Fresh, Resolving, Done, Failed
+} type_state{TypeState::Fresh};
+enum class State { Fresh, Evaluating, Done, Failed };
+State state{State::Fresh};
+\end{lstlisting}
+类型依赖与值依赖相互关联，但不完全相同。例如数组类型的长度会引入常量依赖。分开记录可以明确地说明在哪一项任务中发现了递归，而不会把所有未完成状态混成一个布尔标记。
+
+下图比较可完成的依赖链与环形依赖，并用访问状态解释环是如何被发现的。箭头表示“求左侧需要先求右侧”。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 15mm,
+ every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (n) {N：计算中};
+\node (m) [right=of n] {M：得到 3};
+\node (done) [right=of m] {N：完成};
+\node (a) [below=15mm of n] {A：计算中};
+\node (b) [right=of a] {B：计算中};
+\node (cycle) [right=of b] {再次访问 A};
+\draw[->] (n) -- (m);
+\draw[->] (m) -- (done);
+\draw[->] (a) -- (b);
+\draw[->] (b) -- (cycle);
+\draw[->] (cycle.south) to[bend left=25] (a.south);
+\end{tikzpicture}
+\caption{常量依赖与环检测}
+\end{figure}
+
+\section{当前常量表达式的范围}
+当前语法允许整数、布尔字面量、路径、负号和括号作为常量表达式。例如 \lstinline[language=Rustless]|const NEG: i32 = -1;| 与 \lstinline[language=Rustless]|const N: usize = (M);| 在这一范围内。\lstinline[language=Rustless]|const N: usize = 1 + 2;| 则不能用来展示已经支持的通用常量折叠，因为该写法不在当前 \texttt{constValue} 规则中。
+
+常量求值使用 AST 的具体载荷 Visitor。整数分支解码幅值，布尔分支得到真假值，路径分支查询已有常量，括号分支递归，负号分支检查带符号类型并取负。它们仍记录表达式事实，因此常量不是游离于语义结果之外的另一套未检查语法。
+
+扩大常量子集时，需要决定算术溢出、除零、移位及允许副作用的规则。较清楚的方向是让常量解释器消费已经确定的运算含义，与运行时代码生成共享语言规则。否则，同一表达式可能在编译期与运行期产生不同结果。是否需要完整解释器，应由支持的常量语法决定，而不必为了形式上的完整立即增加大型机制。
+
+\section{为什么语义类型也需要具体形状}
+语法节点已经使用具体载荷表达形状，语义类型也需要同样清楚的结构。若类型对象只有 \texttt{kind}、\texttt{name}、\texttt{element}、\texttt{length} 和一个布尔标志，就必须依赖约定说明哪些字段有效。一个缺少元素的 Array 或同时带着无关长度的 Bool，仍可能由普通构造产生。
+
+当前 \texttt{include/rx/semantic\_type.hpp} 已把这些形状分开。下面是其中的实际定义：
+\begin{lstlisting}[language=C++]
+struct StructType {
+  SymbolId symbol;
+  std::string name;
+};
+struct ArrayType {
+  SemanticTypePtr element;
+  std::uint64_t length;
+};
+struct RefType {
+  SemanticTypePtr element;
+  ast::Mutability mutability;
+};
+struct FunctionType {
+  SymbolId symbol;
+  std::string name;
+};
+\end{lstlisting}
+具体载荷说明每种类型需要什么信息。结构体与函数项使用声明身份；数组使用元素和长度；引用使用所指类型和引用可变性。读取一个错误类别的查询，例如对 Bool 调用 \texttt{element()}，不会悄悄返回一个默认空字段，而会指出调用者使用了不适用的操作。
+
+类型对象的构造也受到约束。\texttt{SemanticType} 的构造函数是私有的，\texttt{TypeContext} 提供分别对应这些形状的构造函数。元素不能为空，引用可变性必须是合法枚举值，名义类型必须有非零身份和名字。这使类型形状的检查集中在创建时，而不必让每个消费者都写一份防御性的字段解释。
+
+\section{不可变类型与 TypeContext 唯一化}
+当前类型句柄为：
+\begin{lstlisting}[language=C++]
+class SemanticType;
+using SemanticTypePtr = std::shared_ptr<const SemanticType>;
+\end{lstlisting}
+这里的 const 作用于所指对象，而不只是指针变量。查询拿到句柄之后不能把已经确认的 i32 数组改成布尔数组。不可变性因此保护了先前判断的含义，而不只是让接口看起来只读。
+
+\texttt{TypeContext} 还将相同类型归并为共享的对象。数组的键包含元素身份和长度，引用的键包含元素身份和可变性，结构体和函数项的键包含声明身份。元素先被归并，外层对象的键便可以引用已经稳定的元素对象。相同上下文中反复出现的 \lstinline[language=Rustless]|&i32| 不必每次都创建一个新对象。
+
+下面摘录 \texttt{src/semantic\_type.cpp} 的键构造与复用逻辑中的代表性部分：
+\begin{lstlisting}[language=C++]
+if (key.kind == K::Array)
+  key.length = value.length();
+if (key.kind == K::Ref)
+  key.mutability = value.is_mutable() ? ast::Mutability::Mutable
+                                      : ast::Mutability::Immutable;
+if (const auto found = impl_->types.find(key);
+    found != impl_->types.end()) {
+  return found->second;
+}
+\end{lstlisting}
+实际函数还验证名义身份的一致性并处理内建函数类型。上面的摘录用于解释复用过程，没有省略一个额外的公开可变类型入口。
+
+下图将多个语法写法连接到同一不可变类型对象，说明重复表示怎样被归并。共享的是语义含义，语法节点仍然分别保留自己的源码位置。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 18mm,
+ every node/.style={draw,rounded corners,align=center,font=\small}]
+\node (a) {参数中的 \texttt{\&i32}};
+\node (b) [below=of a] {局部注解中的 \texttt{\&i32}};
+\node (c) [below=of b] {借用结果中的 \texttt{\&i32}};
+\node (ref) [right=of b] {共享不可变 Ref};
+\node (int) [right=of ref] {共享不可变 I32};
+\draw[->] (a) -- (ref);
+\draw[->] (b) -- (ref);
+\draw[->] (c) -- (ref);
+\draw[->] (ref) -- (int);
+\end{tikzpicture}
+\caption{类型唯一化保持语法位置独立}
+\end{figure}
+
+唯一化可能减少重复对象，并使同一上下文内的常见相等判断先通过指针比较快速完成。不过建立键、查表和维护共享对象也有成本。当前表使用有序映射，因此查找并非无条件的常数时间；跨上下文类型仍需要严格的形状或身份比较。共享指针让导出类型可以比创建它的上下文活得更久，同时带来引用计数成本。讲清这些条件，比笼统声称某种表示一定更快更有帮助。
+
+这一方向与现代编译器区分类型语法和唯一化语义类型的做法一致。Rust 编译器开发指南在 \href{https://rustc-dev-guide.rust-lang.org/ty.html}{类型表示章节}中介绍了这样的区分与类型上下文；Rustless 使用较小的 C++ 表示来实现当前子集所需的部分，而没有引入完整 Rust 类型系统。
+
+\paragraph{本章小结与下一章。}
+类型语法保存写法，语义类型保存可比较的含义。具体载荷和受控构造限制了非法形状，不可变性保证已有判断不会被查询者修改，唯一化管理重复类型。预期类型与常量补足局部上下文和编译时知识。下一章将在这些类型之外，继续解释表达式的存储位置、可变权限和有序转换。
