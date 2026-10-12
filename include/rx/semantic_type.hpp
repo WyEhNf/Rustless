@@ -3,8 +3,8 @@
 #include "rx/ast/names.hpp"
 #include "rx/builtin.hpp"
 #include "rx/symbol.hpp"
-#include <concepts>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -87,8 +87,6 @@ private:
   Data data_;
 };
 
-// A context owns canonical immutable types; exported pointers retain their
-// lifetime independently of the context.
 class TypeContext final {
 public:
   TypeContext();
@@ -112,8 +110,6 @@ private:
   SemanticTypePtr canonical(SemanticTypePtr value);
 };
 
-// Strict equality does not perform coercions or error recovery. Nominal
-// SymbolIds must belong to the same declaration identity space.
 bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right);
 std::string type_name(const SemanticTypePtr &type);
 
@@ -122,37 +118,41 @@ template <class Payload> const Payload *get_if(const SemanticType &type) {
 }
 
 namespace detail {
-template <class V, class Data> struct SemanticCoverage;
-template <class V, class... Payloads>
-struct SemanticCoverage<V, std::variant<Payloads...>> {
-  static consteval bool compatible() {
-    if constexpr ((std::is_invocable_v<V &, const SemanticType &,
-                                       const Payloads &> &&
-                   ...)) {
+template <class Visitor, class Data> struct SemanticCoverage;
+template <class Visitor, class... Payloads>
+struct SemanticCoverage<Visitor, std::variant<Payloads...>> {
+  static constexpr bool compatible() {
+    constexpr bool accepts_all_payloads =
+        (std::is_invocable_v<Visitor &, const SemanticType &,
+                             const Payloads &> &&
+         ...);
+    if constexpr (accepts_all_payloads) {
       using First = std::variant_alternative_t<0, std::variant<Payloads...>>;
       using Result =
-          std::invoke_result_t<V &, const SemanticType &, const First &>;
-      return (
-          std::same_as<Result, std::invoke_result_t<V &, const SemanticType &,
-                                                    const Payloads &>> &&
-          ...);
+          std::invoke_result_t<Visitor &, const SemanticType &, const First &>;
+      constexpr bool returns_same_type =
+          (std::is_same_v<Result,
+                          std::invoke_result_t<Visitor &, const SemanticType &,
+                                               const Payloads &>> &&
+           ...);
+      return returns_same_type;
     }
     return false;
   }
 };
-} // namespace detail
+}
 
-template <class V>
-concept SemanticTypeVisitor =
-    detail::SemanticCoverage<V, SemanticType::Data>::compatible();
+template <class Visitor>
+inline constexpr bool SemanticTypeVisitor =
+    detail::SemanticCoverage<Visitor, SemanticType::Data>::compatible();
 
-template <class V>
-  requires SemanticTypeVisitor<V>
-decltype(auto) visit(const SemanticType &type, V &&visitor) {
+template <class Visitor,
+          std::enable_if_t<SemanticTypeVisitor<Visitor>, int> = 0>
+decltype(auto) visit(const SemanticType &type, Visitor &&visitor) {
   return std::visit(
       [&](const auto &payload) -> decltype(auto) {
         return std::invoke(visitor, type, payload);
       },
       type.data());
 }
-} // namespace rx
+}
