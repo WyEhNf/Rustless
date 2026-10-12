@@ -1,6 +1,7 @@
 #pragma once
 
-#include "rx/ast/base.hpp"
+#include "rx/ast/node.hpp"
+#include "rx/builtin.hpp"
 #include "rx/semantic_type.hpp"
 #include <variant>
 #include <vector>
