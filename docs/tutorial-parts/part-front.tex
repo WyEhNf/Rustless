@@ -697,3 +697,648 @@ variant 对象需要足够的空间容纳最大的活动载荷，并保存判别
 更紧凑的布局可能有利于遍历，也可能使构造和改写更复杂。虚函数对象也有各自的存储与分派代价。应根据实际节点尺寸、分配次数、访问热点与维护需求比较，而不应把任何一种机制当作普遍最优。
 
 本章明确了所有节点共同遵守的原则。下一章将阅读名字、类型语法和声明，观察这些原则怎样落到完整语言子集中的具体字段。
+
+\chapter{名字、类型语法与声明的组织}
+\label{chap:front-declarations}
+
+\section*{导读}
+名字既出现在变量绑定中，也出现在路径、类型和导入中；相似的拼写并不保证相同的用途。本章先阅读名字与路径，再进入类型语法、函数、结构体和实现块，最后讨论导入树与生命周期约束。各节都以“这项信息属于哪一层结构”为线索，说明为什么名字、可变性、类型实参和接收者不能被平铺在一个通用记录中。语义分析将以这些清楚的结构为输入，进一步确定声明与类型的含义。
+
+\section{Identifier、Binding 与 Mutability}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let value = 1;
+    let mut counter = value;
+    counter += 1;
+}
+\end{lstlisting}
+\texttt{value} 和 \texttt{counter} 的声明包含名字与绑定可变性，但表达式中的 \texttt{value} 只是一次名字引用。名字本身不应永久带有“可变变量”的意义：同一个拼写可以在别的作用域中绑定不同声明，字段与函数也有名字。可变性应属于当前绑定的语法位置。
+
+\path{E:/RComplier/Rustless/include/rx/ast/names.hpp} 使用下列真实定义：
+\begin{lstlisting}[language=C++]
+struct Identifier {
+  std::string text;
+  Span span;
+};
+struct LifetimeName {
+  std::string text;
+  Span span;
+};
+enum class Mutability { Immutable, Mutable };
+struct Binding {
+  Identifier name;
+  Mutability mutability;
+};
+\end{lstlisting}
+Identifier 与 LifetimeName 可以采用相似的存储，却以不同 C++ 类型表达用途。Mutability 使用枚举，使调用者写出 Immutable 或 Mutable，而不用解释某个通用 bool 在此处是否表示“可变”“取反”或“省略”。专业而清楚的数据结构，常常由这种局部区分积累而成。
+
+这些值记录保存范围，却不都具有 NodeId。每个字符名字都分配独立身份未必必要；只有需要独立事实与结构遍历的承载节点才进入统一 owner 集合。选择身份粒度时，需要考察后续查询的对象，而不应机械地令所有 struct 都继承 Node。
+
+\section{路径按段保存}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let values = Vec::<i32>::new();
+}
+\end{lstlisting}
+路径由多个段组成。这里的类型实参 \texttt{i32} 属于 \texttt{Vec} 段，\texttt{new} 是随后的一段。若只保存一个名字数组和一个总类型实参数组，便难以知道参数原来附着在哪里。对语法观察片段 \texttt{Foo<'a, i32>::Bar<u32>}，这项问题尤其明显：两个段各有自己的实参。
+
+真实路径定义位于 \path{E:/RComplier/Rustless/include/rx/ast/path.hpp}。下面的摘录把段级关系完整展示出来：
+\begin{lstlisting}[language=C++]
+struct SelfValue { Span span; };
+struct SelfType { Span span; };
+using PathName = std::variant<Identifier, SelfValue, SelfType>;
+using GenericArgument = std::variant<TypePtr, LifetimeName>;
+struct GenericArguments {
+  Span span;
+  std::vector<GenericArgument> values;
+};
+struct PathSegment {
+  PathName name;
+  std::optional<GenericArguments> arguments;
+  Span span;
+};
+struct Path {
+  Span span;
+  std::vector<PathSegment> segments;
+};
+\end{lstlisting}
+\texttt{self} 是值路径中的特殊名字，\texttt{Self} 则代表当前实现目标类型的语法写法。把它们作为 PathName 的分支，可以使语义分析按其角色解释，而不是在任意 Identifier 中反复比较特定字符串。
+
+GenericArgument 又区分 TypePtr 与 LifetimeName。二者在语法上可以出现在同一个实参列表中，却不具有相同的子结构。类型实参可能继续包含引用或数组；生命周期名只是其专属记录。保留段序列与列表范围，还能精确指出错误实参所在的位置。
+
+下图呈现两个路径段分别拥有实参列表的关系，说明前述“实参属于段”的结构要求。该路径用于观察语法，不假定对应的类型声明已在当前语义子集中实现。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,font=\small,
+ box/.style={draw,rounded corners,align=center,text width=34mm}]
+\node[box] (path) {Path：有序段序列};
+\node[box,below left=10mm and 9mm of path] (foo) {段 Foo};
+\node[box,below right=10mm and 9mm of path] (bar) {段 Bar};
+\node[box,below=of foo] (fa) {实参：\texttt{'a}、\texttt{i32}};
+\node[box,below=of bar] (ba) {实参：\texttt{u32}};
+\draw[->] (path)--(foo); \draw[->] (path)--(bar);
+\draw[->] (foo)--(fa); \draw[->] (bar)--(ba);
+\end{tikzpicture}
+\caption{路径实参附着于各自的路径段。}
+\end{figure}
+\texttt{path\_name} 可以为了显示或查找把段名拼接成字符串，但这个辅助结果不能替代完整 Path。把它当作显示工具和把它当作语法结构，是不同的使用方式。
+
+\section{五种类型语法}
+类型语法描述程序怎样写出类型，尚不是语义类型本身。当前 TypeSyntax 的五个分支分别表达单位、路径、引用、数组和括号。
+\begin{lstlisting}[language=Rustless]
+const N: usize = 3;
+fn read<'a>(x: &'a i32) -> i32 { *x }
+fn change(x: &mut i32) { *x = 2; }
+fn main() {
+    let unit: () = ();
+    let value: (i32) = 1;
+    let values: [i32; N] = [1, 2, 3];
+}
+\end{lstlisting}
+UnitType 没有孩子，因为 \texttt{()} 本身就确定这种写法。PathType 保存路径，使 \texttt{i32}、用户结构体名字及容器路径共用路径结构。ReferenceType 保存 referent、可变性与可选生命周期。ArrayType 同时有元素类型与长度表达式。ParenType 则拥有被括起来的类型语法。
+
+下列真实摘录来自 \path{E:/RComplier/Rustless/include/rx/ast/type.hpp}：
+\begin{lstlisting}[language=C++]
+struct ReferenceType {
+  std::optional<LifetimeName> lifetime;
+  Mutability mutability;
+  TypePtr referent;
+};
+struct ArrayType {
+  TypePtr element;
+  ExprPtr length;
+};
+struct ParenType { TypePtr inner; };
+struct TypeSyntax : Node {
+  using Data =
+      std::variant<UnitType, PathType, ReferenceType, ArrayType, ParenType>;
+  explicit TypeSyntax(Data value) : data(std::move(value)) {}
+  Data data;
+};
+\end{lstlisting}
+\texttt{[i32; N]} 的 length 没有被提前压缩成一个数字。构树器只知道它是一段允许的常量语法，语义阶段才解析 N 的声明并得到长度。若 AST 在尚未完成名字解析时就强迫保存最终长度，构树器便会承担另一阶段的责任。
+
+嵌套引用也应逐层阅读。语法片段 \texttt{\&\&'a mut i32} 的外层不可变，内层具有生命周期 \texttt{'a} 与 Mutable。每层是一个 ReferenceType，因此任意深度可以沿 referent 继续表达，不需要额外的“引用层数”字段。
+
+下图呈现上述两层引用，说明生命周期与 mut 信息必须附着在正确的层上。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=9mm,
+ box/.style={draw,rounded corners,text width=78mm,align=center,font=\small}]
+\node[box] (o) {ReferenceType：Immutable，未写生命周期};
+\node[box,below=of o] (i) {ReferenceType：Mutable，生命周期 \texttt{'a}};
+\node[box,below=of i] (t) {PathType：\texttt{i32}};
+\draw[->] (o)--node[right,font=\small]{referent}(i);
+\draw[->] (i)--node[right,font=\small]{referent}(t);
+\end{tikzpicture}
+\caption{两层引用复用同一种结构，各层保存自己的属性。}
+\end{figure}
+在语义阶段，\texttt{(i32)} 与 \texttt{i32} 可以解释成同一种类型；在 AST 中，前者仍保留括号与范围。语法层保存写法，语义层保存解释结果，两者通过节点身份建立联系。这样的分离也为以后类型别名、诊断展开和规范化留下空间。
+
+\section{函数签名与接收者}
+\begin{lstlisting}[language=Rustless]
+struct Counter { value: i32 }
+impl Counter {
+    fn read(&self) -> i32 { self.value }
+    fn set(&mut self, next: i32) { self.value = next; }
+    fn consume(self) -> i32 { self.value }
+    fn update(mut self) -> i32 {
+        self.value += 1;
+        self.value
+    }
+}
+\end{lstlisting}
+普通参数写出绑定和类型。接收者则使用 self 的专门语法：值接收者与引用接收者可以各自可变，引用接收者还可以带生命周期。这几种形式不应挤进一个“第零个普通参数”的特殊约定，因为其类型来自 impl 目标与接收方式，而不一定直接写在源码中。
+
+\path{E:/RComplier/Rustless/include/rx/ast/item.hpp} 的真实定义如下：
+\begin{lstlisting}[language=C++]
+struct ValueSelf { Mutability mutability; };
+struct ReferenceSelf {
+  Mutability mutability;
+  std::optional<LifetimeName> lifetime;
+};
+struct SelfParam : Node {
+  std::variant<ValueSelf, ReferenceSelf> data;
+};
+struct Parameter : Node {
+  Binding binding;
+  TypePtr type;
+};
+struct FunctionSignature {
+  std::optional<SelfParam> receiver;
+  std::vector<Parameter> parameters;
+  std::optional<TypePtr> return_annotation;
+};
+\end{lstlisting}
+签名与函数体分开，使声明收集可以先读取参数和返回注解，随后检查函数体。返回注解使用 optional，保存“没有写出”这一语法事实；它不是“最终返回类型不确定”的永久表示。语言规则稍后解释缺省返回与函数体结果的关系。
+
+Function 还拥有名字、可选生命周期形参、可选 where 和必需 Block。接收者自身具有身份，因此方法事实可以独立关联接收方式与参数类型。结构分开之后，分析器能够准确说明是普通参数错误、接收者错误还是返回注解错误。
+
+\section{结构体字段、常量与 derive}
+\begin{lstlisting}[language=Rustless]
+#[derive(Copy, Clone, PartialEq, Eq)]
+struct Pair {
+    left: i32,
+    right: i32,
+}
+const N: usize = 2;
+fn main() {
+    let pair = Pair { right: 2, left: 1 };
+    let values: [i32; N] = [pair.left, pair.right];
+}
+\end{lstlisting}
+结构体声明中的字段保存类型，构造表达式中的字段保存值。\texttt{left: i32} 与 \texttt{left: 1} 的表面形式相似，所描述的关系却不同。当前 AST 分别使用 StructField 与 FieldInit，后者在表达式头文件中定义。
+\begin{lstlisting}[language=C++]
+struct StructField : Node {
+  Identifier name;
+  TypePtr type;
+};
+struct FieldInit : Node {
+  Identifier name;
+  ExprPtr value;
+};
+struct Constant : Node {
+  Identifier name;
+  TypePtr type;
+  ExprPtr value;
+};
+\end{lstlisting}
+摘录分别来自 \path{E:/RComplier/Rustless/include/rx/ast/item.hpp} 与 \path{E:/RComplier/Rustless/include/rx/ast/expr.hpp}。声明字段和初始化字段各有身份与位置，语义分析可以检查缺字段、重复字段与值类型，而不必猜测一种通用“字段记录”当前保存的是类型还是值。
+
+常量声明具有必需类型和常量语法值。当前 const 子集较有限，不能把任意加法表达式都当作已实现的常量初始化能力。数组长度可以引用常量，语义阶段按照依赖解释它们；AST 不提前执行这种解释。
+
+derive 属性保存属性范围及有序 DeriveName 序列，每个名字记录 DeriveKind 和范围。支持的名字为 Copy、Clone、PartialEq、Eq。它们表达请求哪些语义能力，不意味着构树器已经产生复制或比较的机器代码。属性属于结构体的语法数据，能力检查和运行实现还有各自的阶段。
+
+\section{Impl 与源码顺序}
+一个实现块可以交错包含常量与函数：
+\begin{lstlisting}[language=Rustless]
+struct Counter { value: i32 }
+impl Counter {
+    const START: i32 = 0;
+    fn read(&self) -> i32 { self.value }
+    const STEP: i32 = 1;
+}
+fn main() {}
+\end{lstlisting}
+若分别用一个 functions 容器和一个 constants 容器保存成员，原始交错顺序就会丢失。重建 AST 输出、按源码遍历或定位声明时，都可能需要额外排序。当前使用混合 variant 序列，使成员顺序成为表示本身的一项性质。
+
+真实定义如下：
+\begin{lstlisting}[language=C++]
+using ImplMember = std::variant<Function, Constant>;
+struct Impl : Node {
+  std::optional<GenericParameters> generics;
+  TypePtr target;
+  std::optional<WhereClause> where_clause;
+  std::vector<ImplMember> members;
+};
+using Item = std::variant<Use, Function, Struct, Constant, Impl>;
+\end{lstlisting}
+这段代码来自 \path{E:/RComplier/Rustless/include/rx/ast/item.hpp}。Impl 的 target 是类型语法，不是只有一个未经解释的结构体名字。Item 则说明编译单元允许哪些顶层声明。这些封闭集合有利于完整处理：新增一类顶层 item 时，分派与关键分析可以要求显式说明如何处理它。
+
+下图把编译单元、顶层 item 和混合实现成员放在一起，呈现前述声明包含关系与源码顺序。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,
+ box/.style={draw,rounded corners,font=\small,align=center,text width=39mm}]
+\node[box] (c) {Crate\\source 与 items};
+\node[box,below=of c] (it) {Item\\Use / Function / Struct\\Constant / Impl};
+\node[box,below=of it] (im) {Impl\\target 与 members};
+\node[box,below=of im] (ms) {有序 ImplMember\\Constant、Function、Constant};
+\draw[->] (c)--(it); \draw[->] (it)--(im); \draw[->] (im)--(ms);
+\end{tikzpicture}
+\caption{不同声明层次使用各自的联合，成员序列保留原始交错顺序。}
+\end{figure}
+源码顺序不意味着声明必须按该顺序才能被引用。语义分析可以先收集所有声明以支持前向调用，但这项分析策略不应迫使 AST 改变顺序。表示负责保留事实，分析负责选择处理次序。
+
+\section{use 是一棵共享前缀的树}
+下面的例子用于观察导入语法；当前项目没有完整模块解析，不能据此假定这些模块和导入已经获得可执行含义。
+\begin{lstlisting}[language=Rustless]
+use ::crate::io::{
+    read as r,
+    write as _,
+    nested::{leaf, *},
+    *,
+};
+\end{lstlisting}
+分组导入共享一个前缀，却可以继续包含不同的目标。单名导入可以有 alias；通配导入没有这个字段；分组导入拥有更多 UseTree。由此可以推导出三种目标载荷，而不是一个同时具有 alias、flag 和 children 的通用目标结构。
+
+真实摘录来自 \path{E:/RComplier/Rustless/include/rx/ast/use.hpp}：
+\begin{lstlisting}[language=C++]
+struct NameImport { std::optional<UseAlias> alias; };
+struct GlobImport {};
+struct UseTree;
+struct GroupImport { std::vector<UseTree> children; };
+struct UseTree : Node {
+  UsePath prefix;
+  std::variant<NameImport, GlobImport, GroupImport> target;
+};
+struct Use : Node { UseTree tree; };
+\end{lstlisting}
+UsePath 区分相对根与绝对根，每段又区分普通 Identifier 与 self、super、crate 关键字。UseAlias 区分普通 Identifier 和 UnderscoreAlias，因此 \texttt{as \_} 不会被误认为一个名字就是下划线的普通导入绑定。
+
+下图将嵌套导入的共有前缀只画一次，呈现 prefix 与 target 怎样组织分组。每个孩子仍有自己的前缀与目标，而不是提前展开成若干丢失来源的字符串。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,
+ box/.style={draw,rounded corners,font=\small,align=center,text width=29mm}]
+\node[box] (root) {prefix：crate::io\\GroupImport};
+\node[box,below left=12mm and 22mm of root] (read) {read\\NameImport：as r};
+\node[box,below=of root] (nest) {nested\\GroupImport};
+\node[box,below right=12mm and 22mm of root] (glob) {空 prefix\\GlobImport};
+\node[box,below left=12mm and 0mm of nest] (leaf) {leaf\\NameImport};
+\node[box,below right=12mm and 0mm of nest] (star) {空 prefix\\GlobImport};
+\draw[->] (root)--(read); \draw[->] (root)--(nest); \draw[->] (root)--(glob);
+\draw[->] (nest)--(leaf); \draw[->] (nest)--(star);
+\end{tikzpicture}
+\caption{分组目标递归形成导入树，名字与通配目标保有各自形状。}
+\end{figure}
+以后实现导入解析时，可以从这棵树递归计算有效路径、处理 alias 和名称冲突。AST 结构为该算法提供了清楚的输入，却没有代替模块身份、查找规则与可见性规则。
+
+\section{生命周期参数与 where}
+\begin{lstlisting}[language=Rustless]
+struct Borrowed<'a: 'b, 'b>
+where 'a: 'b, &'a i32: 'b {
+    value: &'a i32,
+}
+fn read<'a>(x: &'a i32) -> i32 { *x }
+\end{lstlisting}
+生命周期形参可以带约束；where 又可以约束一个生命周期或一种类型。二者左侧的结构不同：生命周期谓词的 subject 是 LifetimeName，类型谓词的 subject 是 TypePtr。把它们区分为不同载荷，能够防止消费者把类型语法当成一个裸名字读取。
+
+来自 \path{E:/RComplier/Rustless/include/rx/ast/generics.hpp} 的真实摘录如下：
+\begin{lstlisting}[language=C++]
+struct LifetimeParameter : Node {
+  LifetimeName name;
+  std::vector<LifetimeName> bounds;
+};
+struct LifetimePredicate : Node {
+  LifetimeName subject;
+  std::vector<LifetimeName> bounds;
+};
+struct TypePredicate : Node {
+  TypePtr subject;
+  std::vector<LifetimeName> bounds;
+};
+using WherePredicate = std::variant<LifetimePredicate, TypePredicate>;
+\end{lstlisting}
+GenericParameters 与 WhereClause 保存范围及相应序列；具体形参和谓词是有身份的节点。当前形参语法只有生命周期形参，不能从 GenericArgument 中允许 TypePtr 推导出已经支持 \texttt{fn f<T>}。形参声明与实参使用是不同位置，也需要不同规则。
+
+下图比较两类 where 谓词的子结构，说明其左侧为什么使用不同 C++ 类型。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=11mm,font=\small,
+ box/.style={draw,rounded corners,align=center,text width=43mm}]
+\node[box] (l) {LifetimePredicate\\subject：LifetimeName};
+\node[box,right=of l] (t) {TypePredicate\\subject：TypePtr};
+\node[box,below=of l] (lb) {bounds：生命周期名序列};
+\node[box,below=of t] (tb) {bounds：生命周期名序列};
+\draw[->] (l)--(lb); \draw[->] (t)--(tb);
+\end{tikzpicture}
+\caption{谓词共享某些信息，但 subject 的结构不同。}
+\end{figure}
+保存生命周期语法不等于完成生命周期推断与借用检查。当前教程在 AST 层说明这些信息如何被忠实组织；若后续增加相应语义分析，就应从这些专属结构读取输入，并明确哪些约束已经验证。声明建立了可被引用的结构，下一章继续阅读程序中的表达式、语句与控制。
+
+\chapter{表达式、语句与块：完整结构的阅读}
+\label{chap:front-expressions}
+
+\section*{导读}
+表达式既包括数字和加法，也包括数组、调用、分支与跳转。它们共同属于表达式家族，却具有不同的子结构。本章按这些结构关系阅读全部载荷，再说明语句与块值。每次观察例子时，可以依次询问：哪些孩子必需，哪些可选，哪些构成有序序列，哪些只是名字或枚举？这种问题比记忆 operands 的下标约定更有助于建立可维护的 AST。
+
+\section{原子与括号}
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let number = 0b1_010u32;
+    let flag = false;
+    let unit = ();
+    let name = number;
+    let grouped = (number);
+}
+\end{lstlisting}
+IntegerExpr、BooleanExpr 和 UnitExpr 不拥有表达式孩子。PathExpr 保存 Path；ParenExpr 则拥有一个必需 inner。单位值 \texttt{()} 与空 optional 不同：前者是一个明确表达式，后者说明源码没有提供表达式。
+
+真实整数定义位于 \path{E:/RComplier/Rustless/include/rx/ast/literal.hpp}：
+\begin{lstlisting}[language=C++]
+struct IntegerLiteral {
+  std::string spelling;
+  IntegerBase base;
+  std::optional<IntegerSuffix> suffix;
+  // parse(...) identifies the base and optional suffix.
+};
+struct IntegerExpr { IntegerLiteral literal; };
+struct BooleanExpr { bool value; };
+struct UnitExpr {};
+\end{lstlisting}
+其中 parse 的实现被删去并以说明注释标记；其余字段与定义保持原样。spelling 用于保留原始写法，base 与 suffix 则供后续读取已识别的信息。幅值解码和目标范围检查不在这个记录中完成，因此消费者不应仅凭 IntegerLiteral 已建立，就假定数值一定适合目标整数类型。
+
+保留 ParenExpr 使括号仍有身份和范围。某些分析只关心内部结构，可以使用 \texttt{unparen}，其真实代码位于 \path{E:/RComplier/Rustless/include/rx/ast/expr.hpp}：
+\begin{lstlisting}[language=C++]
+inline const ExprPtr &unparen(const ExprPtr &expr) {
+  if (auto *paren = get_if<ParenExpr>(*expr))
+    return unparen(paren->inner);
+  return expr;
+}
+\end{lstlisting}
+这个辅助函数返回现有子节点的引用，不建立一棵删掉括号的新树。选择忽略括号是处理过程的决定；其源码信息仍保留给其他过程。它也不自动解释括号内表达式的使用处转换，语义事实仍需要以明确节点和输入边为依据。
+
+\section{运算符成为枚举}
+二元运算有一个共同形状，却包含多种运算。当前 BinaryOp 明确列出十八种：加、减、乘、除、余数；按位与、或、异或；左移、右移；相等、不等与四种顺序比较；逻辑与、逻辑或。它们可以使用同一个 BinaryExpr，因为都需要左右表达式，同时通过枚举保留准确操作。
+
+下例将全部二元家族放在合法类型的上下文中，目的是观察语法载荷；其中逻辑运算的短路执行将在 IR 章节继续解释。
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let x: i32 = 8;
+    let y: i32 = 2;
+    let a = x + y; let b = x - y; let c = x * y;
+    let d = x / y; let e = x % y;
+    let f = x & y; let g = x | y; let h = x ^ y;
+    let i = x << 1; let j = x >> 1;
+    let k = x == y; let l = x != y;
+    let m = x < y; let n = x <= y;
+    let o = x > y; let p = x >= y;
+    let q = true && false; let r = true || false;
+}
+\end{lstlisting}
+UnaryOp 区分 Negate、Not 与 Dereference，分别对应 \texttt{-x}、\texttt{!x} 和 \texttt{*r}。BorrowExpr 则专门保存可变性和操作数；\texttt{\&x} 与 \texttt{\&mut x} 不依赖一个含义随种类改变的通用 flag。
+
+AssignExpr 与 CompoundAssignExpr 也分开定义。普通赋值只有 target 和 value，复合赋值还拥有自己的操作枚举与操作符范围。两种枚举使用不同 C++ 类型，不能无意把 Eq 或 LogicalAnd 当成复合赋值操作。
+\begin{lstlisting}[language=Rustless]
+fn main() {
+    let mut x: i32 = 8;
+    x = 2;
+    x += 1; x -= 1; x *= 2; x /= 2; x %= 3;
+    x &= 7; x |= 1; x ^= 2; x <<= 1; x >>= 1;
+    let shared = &x;
+    let value = *shared;
+    let negative = -value;
+    let bits = !value;
+    let changed = value as u32;
+}
+\end{lstlisting}
+CastExpr 以 value 和 target\_type 保存转换。转换目标是类型语法，不能与另一个表达式孩子混在同一个操作数数组中。\texttt{as} 的合法性和具体转换规则仍需 semantic 决定。
+
+\path{E:/RComplier/Rustless/include/rx/ast/operators.hpp} 将文字解析限制在 parser 边界，提供 binary\_operator、unary\_operator 和 compound\_operator。后续过程读取枚举，就不必每次比较 \texttt{"+"}、\texttt{"+="} 或 \texttt{"&&"}。这减少了字符串判定的重复，也使未知操作不能悄悄退入某个默认解释。
+
+\section{数组与结构体构造}
+\begin{lstlisting}[language=Rustless]
+struct Pair { left: i32, right: i32 }
+fn main() {
+    let list = [1, 2, 3];
+    let repeated = [0; 3usize];
+    let empty: [i32; 0] = [];
+    let pair = Pair { right: 2, left: 1 };
+}
+\end{lstlisting}
+列表数组具有一个元素序列；重复数组具有一个元素表达式和一个计数表达式。把重复数组写为“只有一个元素的列表，再设置 flag”，会使每个消费者重新解释两个字段之间的约定。当前使用 ArrayExpr 与 RepeatArrayExpr 两种载荷，把两种形状直接区分。
+
+真实定义来自 \path{E:/RComplier/Rustless/include/rx/ast/expr.hpp}：
+\begin{lstlisting}[language=C++]
+struct ArrayExpr { std::vector<ExprPtr> elements; };
+struct RepeatArrayExpr {
+  ExprPtr element;
+  ExprPtr count;
+};
+struct FieldInit : Node {
+  Identifier name;
+  ExprPtr value;
+};
+struct StructExpr {
+  Path path;
+  std::vector<FieldInit> fields;
+};
+\end{lstlisting}
+结构体构造拥有路径与 FieldInit 序列。初始化顺序按源码保存，因此上例先出现 right，再出现 left；结构体声明的字段顺序却是 left、right。两种顺序必须分别保留。语义分析检查名字和类型，布局采用声明字段顺序，lowering 则依据语言规则处理值的求值与放置。
+
+下图比较列表、重复与带名字的初始化结构，呈现前述三种聚合所需的不同孩子关系。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=8mm,font=\small,
+ box/.style={draw,rounded corners,align=center,text width=33mm}]
+\node[box] (a) {ArrayExpr};
+\node[box,right=of a] (r) {RepeatArrayExpr};
+\node[box,right=of r] (s) {StructExpr};
+\node[box,below=of a] (av) {elements\\1、2、3};
+\node[box,below=of r] (rv) {element：0\\count：3};
+\node[box,below=of s] (sv) {path 与 fields\\right：2、left：1};
+\draw[->] (a)--(av); \draw[->] (r)--(rv); \draw[->] (s)--(sv);
+\end{tikzpicture}
+\caption{聚合形状不同，其结构性孩子也不同。}
+\end{figure}
+重复数组的元素如何求值和复制、空数组怎样得到元素类型，并不是“孩子有几项”能够决定的问题。AST 明确形状之后，语义与 lowering 才可以各自解释这些规则，而不用先辨认某个 flag 的含义。
+
+\section{调用与投影}
+\begin{lstlisting}[language=Rustless]
+struct Pair { values: [i32; 2] }
+impl Pair { fn get(&self) -> i32 { self.values[0] } }
+fn echo(x: i32) -> i32 { x }
+fn main() {
+    let p = Pair { values: [1, 2] };
+    let a = echo(p.get());
+    let b = p.values[0];
+}
+\end{lstlisting}
+CallExpr 的 callee 是表达式，arguments 是普通参数序列。MethodCallExpr 的 receiver 是接收者表达式，method 是名字，generic\_args 是可选的段级实参，arguments 仍只保存括号中的普通参数。接收者因此不会被误计入源码参数列表。
+\begin{lstlisting}[language=C++]
+struct MethodCallExpr {
+  ExprPtr receiver;
+  Identifier method;
+  std::optional<GenericArguments> generic_args;
+  std::vector<ExprPtr> arguments;
+};
+struct FieldExpr {
+  ExprPtr base;
+  Identifier field;
+};
+struct IndexExpr {
+  ExprPtr base;
+  ExprPtr index;
+};
+\end{lstlisting}
+这些是 expr.hpp 中的真实定义。字段投影拥有名字，索引投影拥有一个表达式。\texttt{p.values} 和 \texttt{p.get()} 虽然都使用点号，却分别表示选择字段和调用方法；两种结构不能仅靠“是否有附件”的模糊约定区分。
+
+AST 保存的 method 名字与最终函数目标也需要区分。\texttt{p.get()} 的语义可能要求接收者自动解引用和借用，最后调用某个关联声明。那些结论由语义事实保存，AST 继续忠实描述源码的 receiver 和参数。
+
+当前 grammar 允许方法段保存类型实参，实际语义子集并不因此支持任意泛型方法。复杂链 \texttt{x.foo::<i32>(1).bar[0]} 可以用于检查 parser 与构树结果，但若没有相应声明，就只能标为语法观察例子。这是把语法结构与语言能力分开的又一处必要说明。
+
+\section{块、if 与 else-if}
+\begin{lstlisting}[language=Rustless]
+fn choose(value: i32) -> i32 {
+    let prepared = { let base = value + 1; base };
+    if prepared < 0 { 0 }
+    else if prepared < 10 { prepared }
+    else { 10 }
+}
+\end{lstlisting}
+BlockExpr 拥有一个 Block；IfExpr 拥有条件、then\_block 和可选 else\_branch。else 的内容既可能是最终 Block，也可能是下一层 IfBranch。后者保有自己的 NodeId 与范围，但不需要伪造一个只为了包装条件的额外普通块。
+
+真实定义如下：
+\begin{lstlisting}[language=C++]
+using ElseBranch = std::variant<Box<Block>, Box<IfBranch>>;
+struct IfExpr {
+  ExprPtr condition;
+  Box<Block> then_block;
+  std::optional<ElseBranch> else_branch;
+};
+struct IfBranch : Node {
+  explicit IfBranch(IfExpr value) : data(std::move(value)) {}
+  IfExpr data;
+};
+\end{lstlisting}
+IfBranch 复用 IfExpr 的结构，但提供有身份的承载层。这样，else-if 既不被错误地当成无身份普通记录，也不需要在 Expr::Data 中再增加一种与 IfExpr 几乎相同的载荷。统一访问接口可以读取其 owner 与 data。
+
+下图展开 ElseBranch 的两种分支，呈现下一层条件和最终 else 块怎样分别拥有身份。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,
+ box/.style={draw,rounded corners,font=\small,align=center,text width=36mm}]
+\node[box] (e) {Expr / IfExpr};
+\node[box,below left=12mm and 7mm of e] (th) {then：Block};
+\node[box,below right=12mm and 7mm of e] (ei) {else：IfBranch\\另一个 IfExpr};
+\node[box,below left=12mm and 0mm of ei] (th2) {then：Block};
+\node[box,below right=12mm and 0mm of ei] (end) {else：Block};
+\draw[->] (e)--(th); \draw[->] (e)--(ei);
+\draw[->] (ei)--(th2); \draw[->] (ei)--(end);
+\end{tikzpicture}
+\caption{else-if 继续递归条件结构，最终 else 保持块结构。}
+\end{figure}
+IfExpr 没有规定两侧最终类型，也没有说明哪些语句真的执行。它仅提供足够清楚的输入，供语义阶段检查条件与分支合并，供 lowering 建立实际控制流。
+
+\section{循环与跳转}
+\begin{lstlisting}[language=Rustless]
+fn search() -> i32 {
+    let answer = loop {
+        break 42;
+    };
+    let mut count = 0;
+    while count < 3 {
+        count += 1;
+        if count == 2 { continue; }
+        if count == 3 { break; }
+    }
+    return answer;
+}
+\end{lstlisting}
+LoopExpr 只有 body，WhileExpr 则有 condition 与 body。BreakExpr 可以带值，ContinueExpr 没有值，ReturnExpr 也可以带值。这些差别由专属载荷表达：
+\begin{lstlisting}[language=C++]
+struct LoopExpr { Box<Block> body; };
+struct WhileExpr {
+  ExprPtr condition;
+  Box<Block> body;
+};
+struct BreakExpr { std::optional<ExprPtr> value; };
+struct ContinueExpr {};
+struct ReturnExpr { std::optional<ExprPtr> value; };
+\end{lstlisting}
+这些定义来自 expr.hpp。树中的 break 并没有一条指向目标循环的拥有边，return 也没有拥有函数声明。控制目标由上下文解释，后续可以记录解析结果或直接在转换环境中维护目标。若将父节点反向指针随意加入拥有结构，便可能制造环和复杂寿命；应先判断需要的是查询关系还是拥有关系。
+
+AST 允许描述 \texttt{break 42}，却不自动保证它位于允许值退出的循环。\texttt{continue} 的合法位置、while 中 break 是否允许值，以及返回值与签名的关系，都属于 semantic。结构完整与控制合法是两个需要分别检查的承诺。
+
+\section{三种语句与块值}
+\begin{lstlisting}[language=Rustless]
+fn result() -> i32 {
+    ;
+    let x: i32 = 1;
+    printInt(x);
+    x + 2
+}
+\end{lstlisting}
+EmptyStmt 表示源码中的单独分号。LetStmt 具有 Binding、可选注解与必需 initializer。ExprStmt 具有表达式及分号终止方式。Block 则在语句序列之外保存可选 tail。
+
+\path{E:/RComplier/Rustless/include/rx/ast/stmt.hpp} 的真实摘录如下：
+\begin{lstlisting}[language=C++]
+enum class Termination { Semicolon, Omitted };
+struct EmptyStmt {};
+struct LetStmt {
+  Binding binding;
+  std::optional<TypePtr> annotation;
+  ExprPtr initializer;
+};
+struct ExprStmt {
+  ExprPtr expression;
+  Termination termination;
+};
+struct Stmt : Node {
+  using Data = std::variant<EmptyStmt, LetStmt, ExprStmt>;
+  explicit Stmt(Data value) : data(std::move(value)) {}
+  Data data;
+};
+struct Block : Node {
+  std::vector<StmtPtr> statements;
+  std::optional<ExprPtr> tail;
+};
+\end{lstlisting}
+给 \texttt{x + 2} 加上分号，会把它移入 statements 中的 ExprStmt，tail 变为缺席。块的语义结果由此改变，但并不是 ExprStmt 的表达式载荷变成另一种加法。改变的是所属结构和终止方式。
+
+下图比较同一末尾表达式有无分号时的归属，呈现 statements 与 tail 分离的意义。
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=10mm,
+ box/.style={draw,rounded corners,align=center,font=\small,text width=48mm}]
+\node[box] (a) {无分号：Block};
+\node[box,right=of a] (b) {有分号：Block};
+\node[box,below=of a] (at) {statements：此前语句\\tail：BinaryExpr};
+\node[box,below=of b] (bt) {statements：此前语句与 ExprStmt\\tail：缺席};
+\draw[->] (a)--(at); \draw[->] (b)--(bt);
+\end{tikzpicture}
+\caption{分号改变块内归属，表达式自身的具体形状仍然清楚。}
+\end{figure}
+Omitted 并不表示每条无分号语句都是块值。块类表达式在语句位置有自己的 grammar，构造器还会判断最后一项怎样归入 tail。保留终止方式使这项整理可解释，也使打印器能够反映源码结构。
+
+\section{完整结构与后续解释}
+Expr::Data 完整列出了二十五种载荷。下面是 expr.hpp 中的真实全集定义：
+\begin{lstlisting}[language=C++]
+struct Expr : Node {
+  using Data =
+      std::variant<IntegerExpr, BooleanExpr, UnitExpr, PathExpr, ParenExpr,
+                   ArrayExpr, RepeatArrayExpr, StructExpr, BlockExpr, IfExpr,
+                   LoopExpr, WhileExpr, UnaryExpr, BorrowExpr, BinaryExpr,
+                   AssignExpr, CompoundAssignExpr, CastExpr, CallExpr,
+                   MethodCallExpr, FieldExpr, IndexExpr, BreakExpr,
+                   ContinueExpr, ReturnExpr>;
+  explicit Expr(Data value) : data(std::move(value)) {}
+  Data data;
+};
+\end{lstlisting}
+这一列表不是一份保证所有载荷使用相同字段的声明，而是一份封闭的形状集合。前文每个语法家族都能在列表中找到准确位置，Stmt 的三种形状也有独立联合。查看集合即可知道完整处理需要面对哪些分支。
+
+结构性孩子通常按源码顺序枚举，便于确定的打印和观察。但树遍历不是程序执行：\texttt{false && expensive()} 的右孩子仍存在于 AST 中，却不会在短路执行中总被计算；while 的 body 是一个孩子，运行时可以进入多次或零次。Visitor 负责选择处理规则，控制流则需要语义和 IR 的进一步表示。
+
+下一章将使用这份完整节点集合，讨论同一棵树怎样服务于打印、类型检查和其他过程。专属载荷提供清楚的数据，Visitor 再提供按具体数据选择规则的方法。
