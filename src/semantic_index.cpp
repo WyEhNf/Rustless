@@ -164,6 +164,19 @@ void SemanticIndex::validate_links() const {
             require_type(adjustment.target);
         }
       }
+    if (fact->unary) {
+      require_type(fact->unary->result);
+      require_type(fact->unary->operand.effective_type);
+      (void)expression(fact->unary->operand.node);
+      for (const auto &adjustment : fact->unary->operand.adjustments)
+        require_type(adjustment.target);
+    }
+    if (fact->receiver) {
+      require_type(fact->receiver->effective_type);
+      (void)expression(fact->receiver->node);
+      for (const auto &adjustment : fact->receiver->adjustments)
+        require_type(adjustment.target);
+    }
   }
   for (const auto &[_, fact] : types_)
     require_type(fact->type);
@@ -538,6 +551,43 @@ void SemanticIndex::validate_shapes() const {
       if (fact.binary.has_value() != std::same_as<P, ast::BinaryExpr> ||
           fact.compound.has_value() != std::same_as<P, ast::CompoundAssignExpr>)
         throw std::invalid_argument("resolved operation attached to wrong AST kind");
+      if (fact.unary.has_value() != std::same_as<P, ast::UnaryExpr>)
+        throw std::invalid_argument("resolved unary attached to wrong AST kind");
+      constexpr bool receiver_kind = std::same_as<P, ast::MethodCallExpr> ||
+                                     std::same_as<P, ast::FieldExpr> ||
+                                     std::same_as<P, ast::IndexExpr>;
+      if (fact.receiver.has_value() != receiver_kind)
+        throw std::invalid_argument("receiver use attached to wrong AST kind");
+      if (fact.receiver)
+        validate_operand(*this, *fact.receiver);
+      if (!fact.adjustments.empty())
+        validate_operand(*this, OperandSemantics{
+            node.id, fact.adjustments.back().target, fact.adjustments});
+      if constexpr (std::same_as<P, ast::UnaryExpr>) {
+        const auto &unary = *fact.unary;
+        constexpr std::array operations{UnaryOperation::Negate,
+                                        UnaryOperation::Complement,
+                                        UnaryOperation::Dereference};
+        if (unary.operand.node != payload.operand->id ||
+            unary.operation != operations.at(static_cast<std::size_t>(payload.op)))
+          throw std::invalid_argument("resolved unary does not match AST operand");
+        validate_operand(*this, unary.operand);
+        require_equivalent(fact.type, unary.result);
+        const auto &operand_type = unary.operand.effective_type;
+        if (unary.operation == UnaryOperation::Dereference) {
+          if (operand_type->kind() != K::Ref && operand_type->kind() != K::Box)
+            throw std::invalid_argument("unary dereference has no referent type");
+          require_equivalent(unary.result, operand_type->element());
+        } else {
+          require_equivalent(unary.result, operand_type);
+          const auto kind = operand_type->kind();
+          if (unary.operation == UnaryOperation::Negate
+                  ? (kind != K::I32 && kind != K::Isize)
+                  : (kind != K::I32 && kind != K::Isize && kind != K::U32 &&
+                     kind != K::Usize && kind != K::Bool))
+            throw std::invalid_argument("unary operator is invalid for operand type");
+        }
+      }
       if constexpr (std::same_as<P, ast::BinaryExpr>) {
         validate_operation(*this, *fact.binary, *payload.left, *payload.right,
                            payload.op);
