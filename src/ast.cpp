@@ -158,57 +158,45 @@ private:
         },
     };
     for (const auto &predicate : value->predicates)
-      visit(predicate,
-            Overloaded{[&](const Node &, const LifetimePredicate &p) {
-                         indent(level + 1);
-                         out_ << p.subject.text;
-                         bounds(p.bounds);
-                         out_ << '\n';
-                       },
-                       [&](const Node &, const TypePredicate &p) {
-                         indent(level + 1);
-                         type(p.subject);
-                         bounds(p.bounds);
-                         out_ << '\n';
-                       }});
+      visit(predicate, print_predicate);
   }
   void use_tree(const UseTree &tree) {
     if (tree.prefix.root == PathRoot::Absolute)
       out_ << "::";
-    for (std::size_t i = 0; i < tree.prefix.segments.size(); ++i) {
-      if (i)
+    for (std::size_t index = 0; index < tree.prefix.segments.size(); ++index) {
+      if (index)
         out_ << "::";
-      out_ << name_text(tree.prefix.segments[i]);
+      out_ << name_text(tree.prefix.segments[index]);
     }
-    visit(tree,
-          Overloaded{[&](const UseTree &, const NameImport &name) {
-                       if (name.alias) {
-                         out_ << " as ";
-                         std::visit(Overloaded{[&](const Identifier &value) {
-                                                 out_ << value.text;
-                                               },
-                                               [&](const UnderscoreAlias &) {
-                                                 out_ << '_';
-                                               }},
-                                    *name.alias);
-                       }
-                     },
-                     [&](const UseTree &owner, const GlobImport &) {
-                       if (!owner.prefix.segments.empty())
-                         out_ << "::";
-                       out_ << '*';
-                     },
-                     [&](const UseTree &owner, const GroupImport &group) {
-                       if (!owner.prefix.segments.empty())
-                         out_ << "::";
-                       out_ << '{';
-                       for (std::size_t i = 0; i < group.children.size(); ++i) {
-                         if (i)
-                           out_ << ", ";
-                         use_tree(group.children[i]);
-                       }
-                       out_ << '}';
-                     }});
+    auto print_import = Overloaded{
+        [&](const UseTree &, const NameImport &name) {
+          if (name.alias) {
+            out_ << " as ";
+            auto print_alias = Overloaded{
+                [&](const Identifier &value) { out_ << value.text; },
+                [&](const UnderscoreAlias &) { out_ << '_'; },
+            };
+            std::visit(print_alias, *name.alias);
+          }
+        },
+        [&](const UseTree &owner, const GlobImport &) {
+          if (!owner.prefix.segments.empty())
+            out_ << "::";
+          out_ << '*';
+        },
+        [&](const UseTree &owner, const GroupImport &group) {
+          if (!owner.prefix.segments.empty())
+            out_ << "::";
+          out_ << '{';
+          for (std::size_t index = 0; index < group.children.size(); ++index) {
+            if (index)
+              out_ << ", ";
+            use_tree(group.children[index]);
+          }
+          out_ << '}';
+        },
+    };
+    visit(tree, print_import);
   }
   void declaration(const Use &value, int level) {
     heading("Use", value, level);
@@ -228,17 +216,20 @@ private:
       const auto &self = *value.signature.receiver;
       indent(level + 1);
       out_ << "Self ";
-      visit(self, Overloaded{[&](const SelfParam &, const ValueSelf &p) {
-                               if (p.mutability == Mutability::Mutable)
-                                 out_ << "mut ";
-                             },
-                             [&](const SelfParam &, const ReferenceSelf &p) {
-                               out_ << '&';
-                               if (p.lifetime)
-                                 out_ << p.lifetime->text << ' ';
-                               if (p.mutability == Mutability::Mutable)
-                                 out_ << "mut ";
-                             }});
+      auto print_receiver = Overloaded{
+          [&](const SelfParam &, const ValueSelf &payload) {
+            if (payload.mutability == Mutability::Mutable)
+              out_ << "mut ";
+          },
+          [&](const SelfParam &, const ReferenceSelf &payload) {
+            out_ << '&';
+            if (payload.lifetime)
+              out_ << payload.lifetime->text << ' ';
+            if (payload.mutability == Mutability::Mutable)
+              out_ << "mut ";
+          },
+      };
+      visit(self, print_receiver);
       out_ << "self\n";
     }
     for (const auto &parameter : value.signature.parameters) {
@@ -297,8 +288,7 @@ private:
     }
     where_clause(value.where_clause, level + 1);
     for (const auto &member : value.members)
-      visit(member,
-            [&](const auto &, const auto &p) { declaration(p, level + 1); });
+      visit(member, [&](const auto &, const auto &payload) { declaration(payload, level + 1); });
   }
   void expression(const ExprPtr &value, int level);
   void block(const Block &value, int level);
@@ -309,6 +299,29 @@ private:
 
 void Printer::block(const Block &value, int level) {
   heading("Block", value, level);
+  auto print_statement = Overloaded{
+      [&](const Stmt &node, const EmptyStmt &) { heading("EmptyStmt", node, level + 1); },
+      [&](const Stmt &node, const LetStmt &payload) {
+        std::string label = "Let ";
+        if (payload.binding.mutability == Mutability::Mutable)
+          label += "mut ";
+        label += payload.binding.name.text;
+        heading(label, node, level + 1);
+        if (payload.annotation) {
+          indent(level + 2);
+          type(*payload.annotation);
+          out_ << '\n';
+        }
+        expression(payload.initializer, level + 2);
+      },
+      [&](const Stmt &node, const ExprStmt &payload) {
+        std::string label = "ExprStmt";
+        if (payload.termination == Termination::Omitted)
+          label += " omitted-semicolon";
+        heading(label, node, level + 1);
+        expression(payload.expression, level + 2);
+      },
+  };
   for (const auto &statement : value.statements)
     visit(*statement,
           Overloaded{[&](const Stmt &node, const EmptyStmt &) {
