@@ -11,4 +11,4 @@ struct VerificationError {
 };
 std::vector<std::string> verify_instruction(const Instruction &instruction);
 std::vector<VerificationError> verify(const Module &module);
-} // namespace rx::ir
+}
