@@ -13,7 +13,7 @@
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
-using K = rx::SemanticType::Kind;
+using TypeKind = rx::SemanticType::Kind;
 
 struct Program {
   rx::DiagnosticEngine diagnostics;
@@ -33,8 +33,8 @@ struct Program {
 const ast::Expr &expression(const Program &program, std::string_view text) {
   const ast::Expr *found = nullptr;
   ast::walk(*program.parsed.crate, [&](const auto &owner, const auto &) {
-    using Owner = std::remove_cvref_t<decltype(owner)>;
-    if constexpr (std::same_as<Owner, ast::Expr>)
+    using Owner = std::decay_t<decltype(owner)>;
+    if constexpr (std::is_same_v<Owner, ast::Expr>)
       if (program.parsed.crate->source.slice(owner.span) == text) {
         assert(!found);
         found = &owner;
@@ -65,10 +65,10 @@ fn main() {
   for (const auto text : {"b &= false", "b |= true", "b ^= false"}) {
     const auto &node = expression(program, text);
     const auto &fact = index.expression(node);
-    assert(fact.type->kind() == K::Unit && fact.compound);
+    assert(fact.type->kind() == TypeKind::Unit && fact.compound);
     assert(
         std::holds_alternative<rx::BitwiseOperation>(fact.compound->operation));
-    assert(fact.compound->left.effective_type->kind() == K::Bool);
+    assert(fact.compound->left.effective_type->kind() == TypeKind::Bool);
     const auto lowered =
         bridge.compound(node, *ast::get_if<ast::CompoundAssignExpr>(node));
     assert(lowered.operation.operand_type == ir::Type::I1);
@@ -93,18 +93,20 @@ fn main() {
     const auto &node = expression(program, text);
     const auto &payload = *ast::get_if<ast::BinaryExpr>(node);
     const auto &resolved = *index.expression(node).binary;
-    const std::size_t count = text == std::string_view("r + r") ? 1 : 2;
+    std::size_t count = 2;
+    if (text == std::string_view("r + r"))
+      count = 1;
     for (const auto *operand : {&resolved.left, &resolved.right}) {
       auto current = index.expression(operand->node).type;
-      assert(current->kind() == K::Ref);
+      assert(current->kind() == TypeKind::Ref);
       assert(operand->adjustments.size() == count);
       for (const auto &adjustment : operand->adjustments) {
         assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
-        assert(current->kind() == K::Ref);
+        assert(current->kind() == TypeKind::Ref);
         assert(rx::same_type(adjustment.target, current->element()));
         current = adjustment.target;
       }
-      assert(current->kind() == K::I32);
+      assert(current->kind() == TypeKind::I32);
       assert(rx::same_type(current, operand->effective_type));
     }
     assert(resolved.left.node == payload.left->id &&
@@ -137,11 +139,11 @@ fn main() {
     const auto &node = expression(program, text);
     const auto &resolved = *index.expression(node).binary;
     assert(std::holds_alternative<rx::StructuralEquality>(resolved.operation));
-    assert(resolved.left.effective_type->kind() == K::Box);
+    assert(resolved.left.effective_type->kind() == TypeKind::Box);
     const auto lowered =
         bridge.binary(node, *ast::get_if<ast::BinaryExpr>(node));
     const auto &operation = std::get<ir::StructuralEquality>(lowered.operation);
-    assert(operation.compared_type->kind() == K::Box);
+    assert(operation.compared_type->kind() == TypeKind::Box);
     assert(operation.negated == (text == std::string_view("a != b")));
     assert(lowered.result_type == ir::Type::I1);
   }
@@ -172,14 +174,14 @@ fn main() {
   assert(std::get<rx::FunctionTarget>(*callee_fact.callable).symbol ==
          function_symbol);
   const auto &call_fact = index.expression(call);
-  assert(call_fact.type->kind() == K::I32);
+  assert(call_fact.type->kind() == TypeKind::I32);
   assert(std::get<rx::FunctionTarget>(*call_fact.callable).symbol ==
          function_symbol);
   assert(call_fact.symbol == function_symbol);
   const auto &io_call = expression(program, "out(result)");
   const auto &io_callee = *ast::get_if<ast::CallExpr>(io_call)->callee;
   const auto &io_fact = index.expression(io_call);
-  assert(io_fact.type->kind() == K::Unit);
+  assert(io_fact.type->kind() == TypeKind::Unit);
   assert(std::get<rx::BuiltinTarget>(*io_fact.callable).builtin ==
          rx::BuiltinId::PrintInt);
   assert(rx::get_if<rx::BuiltinFunctionType>(*index.expression(io_callee).type)
@@ -190,8 +192,8 @@ fn main() {
   const auto &builtin =
       *rx::get_if<rx::BuiltinFunctionType>(*index.expression(vec_callee).type);
   assert(builtin.builtin == rx::BuiltinId::VecNew && builtin.owner);
-  assert(builtin.owner->kind() == K::Vec &&
-         builtin.owner->element()->kind() == K::I32);
+  assert(builtin.owner->kind() == TypeKind::Vec &&
+         builtin.owner->element()->kind() == TypeKind::I32);
   assert(rx::same_type(vec_fact.type, builtin.owner));
   assert(std::get<rx::BuiltinTarget>(*vec_fact.callable).builtin ==
          rx::BuiltinId::VecNew);
@@ -255,10 +257,10 @@ fn main() {
   for (const auto text : {"r.value + 1", "ar[0] + 1", "r.get() + 1"}) {
     const auto &node = expression(program, text);
     const auto &fact = index.expression(node);
-    assert(fact.binary->left.effective_type->kind() == K::I32);
+    assert(fact.binary->left.effective_type->kind() == TypeKind::I32);
     assert(fact.binary->left.adjustments.empty());
     const auto &left = index.expression(fact.binary->left.node);
-    assert(left.type->kind() == K::I32);
+    assert(left.type->kind() == TypeKind::I32);
     assert(left.receiver && left.adjustments.empty());
     assert(!left.receiver->adjustments.empty());
     assert(left.receiver->adjustments.front().kind ==
@@ -301,24 +303,27 @@ fn main() {
     const std::size_t count = 1;
     assert(operand.adjustments.size() == count);
     for (const auto &adjustment : operand.adjustments) {
-      assert(current->kind() == K::Ref);
+      assert(current->kind() == TypeKind::Ref);
       assert(adjustment.kind == rx::Adjustment::Kind::Dereference);
       assert(rx::same_type(adjustment.target, current->element()));
       current = adjustment.target;
     }
     assert(rx::same_type(current, operand.effective_type));
     assert(rx::same_type(current, fact.unary->result));
-    assert(fact.type->kind() ==
-           (text == std::string_view("!br") ? K::Bool : K::I32));
-    assert(fact.unary->operation == (text == std::string_view("-r")
-                                         ? rx::UnaryOperation::Negate
-                                         : rx::UnaryOperation::Complement));
+    auto expected_type = TypeKind::I32;
+    if (text == std::string_view("!br"))
+      expected_type = TypeKind::Bool;
+    assert(fact.type->kind() == expected_type);
+    auto expected_operation = rx::UnaryOperation::Complement;
+    if (text == std::string_view("-r"))
+      expected_operation = rx::UnaryOperation::Negate;
+    assert(fact.unary->operation == expected_operation);
   }
   const auto &explicit_fact = index.expression(expression(program, "*r"));
   assert(explicit_fact.unary->operation == rx::UnaryOperation::Dereference);
   assert(explicit_fact.unary->operand.adjustments.empty());
-  assert(explicit_fact.unary->operand.effective_type->kind() == K::Ref);
-  assert(explicit_fact.type->kind() == K::I32 && explicit_fact.is_place);
+  assert(explicit_fact.unary->operand.effective_type->kind() == TypeKind::Ref);
+  assert(explicit_fact.type->kind() == TypeKind::I32 && explicit_fact.is_place);
 }
 
 void dereference_result_coercion() {
@@ -336,13 +341,13 @@ fn main() {
   rx::SemanticIndex index(*program.parsed.crate, program.checked);
   unsigned checked = 0;
   ast::walk(*program.parsed.crate, [&](const auto &node, const auto &payload) {
-    if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
-                               ast::UnaryExpr>) {
+    if constexpr (std::is_same_v<std::decay_t<decltype(payload)>,
+                                 ast::UnaryExpr>) {
       if (program.parsed.crate->source.slice(node.span) != "*outer")
         return;
       const auto &fact = index.expression(node);
       assert(fact.unary->operand.adjustments.empty());
-      assert(fact.type->kind() == K::Ref && fact.type->is_mutable());
+      assert(fact.type->kind() == TypeKind::Ref && fact.type->is_mutable());
       assert(fact.adjustments.size() == 1);
       assert(fact.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
       assert(!fact.adjustments[0].target->is_mutable());
@@ -371,10 +376,10 @@ fn main() {
     const auto &right = index.expression(node).binary->right;
     assert(right.adjustments.size() == 2);
     assert(right.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
-    assert(right.adjustments[0].target->kind() == K::Ref &&
+    assert(right.adjustments[0].target->kind() == TypeKind::Ref &&
            !right.adjustments[0].target->is_mutable());
     assert(right.adjustments[1].kind == rx::Adjustment::Kind::Dereference);
-    assert(right.effective_type->kind() == K::I32);
+    assert(right.effective_type->kind() == TypeKind::I32);
     const auto lowered = bridge.binary(node, payload);
     assert(std::get<ir::ScalarArithmetic>(lowered.operation).op ==
            ir::BinaryOp::Add);
