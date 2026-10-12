@@ -608,6 +608,8 @@ void SemanticIndex::validate_shapes() const {
           throw std::invalid_argument("call target does not match callee identity");
       }
       if constexpr (std::same_as<P, ast::MethodCallExpr>) {
+        if (fact.receiver->node != payload.receiver->id)
+          throw std::invalid_argument("method receiver use points to wrong AST node");
         if (const auto *target = std::get_if<FunctionTarget>(&*fact.callable)) {
           const auto &record = symbol(target->symbol);
           auto receiver = expression(*payload.receiver).type;
@@ -618,6 +620,8 @@ void SemanticIndex::validate_shapes() const {
               record.name != receiver->name() + "::" + payload.method.text ||
               !function(target->symbol).receiver)
             throw std::invalid_argument("method target does not match receiver");
+          require_equivalent(fact.receiver->effective_type,
+                             function(target->symbol).receiver->type);
         } else {
           const auto builtin_target = std::get<BuiltinTarget>(*fact.callable).builtin;
           const auto name = payload.method.text;
@@ -674,6 +678,19 @@ void SemanticIndex::validate_shapes() const {
         if (!fact.symbol || symbol(*fact.symbol).kind != SymbolKind::Field)
           throw std::invalid_argument("field expression has no field symbol");
         require_equivalent(fact.type, symbol_type(*fact.symbol));
+        if (fact.receiver->node != payload.base->id ||
+            fact.receiver->effective_type->kind() != K::Struct ||
+            symbol(*fact.symbol).owner != fact.receiver->effective_type->symbol())
+          throw std::invalid_argument("field receiver use identity mismatch");
+      }
+      if constexpr (std::same_as<P, ast::IndexExpr>) {
+        if (fact.receiver->node != payload.base->id)
+          throw std::invalid_argument("index receiver use points to wrong AST node");
+        const auto &container = fact.receiver->effective_type;
+        if (container->kind() != K::Array && container->kind() != K::Vec)
+          throw std::invalid_argument("index receiver use is not a container");
+        require_equivalent(fact.type, container->element());
+        expect(expression(*payload.index).type, K::Usize);
       }
       if constexpr (std::same_as<P, ast::ArrayExpr>) {
         expect(fact.type, K::Array);
