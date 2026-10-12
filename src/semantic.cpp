@@ -1285,11 +1285,12 @@ private:
                 if (!block.tail && index + 1 == block.statements.size() &&
                     value.type->kind() == SemanticType::Kind::Never)
                   result = value.type;
-                else if (p.termination == ast::Termination::Omitted &&
-                         value.type->kind() != Ty::Kind::Unit &&
-                         value.type->kind() != Ty::Kind::Never)
-                  report(p.expression->span, "a non-final expression without a "
-                                             "semicolon must have unit type");
+                else if (payload.termination == ast::Termination::Omitted &&
+                         value.type->kind() != SemanticType::Kind::Unit &&
+                         value.type->kind() != SemanticType::Kind::Never)
+                  report(payload.expression->span,
+                         "a non-final expression without a "
+                         "semicolon must have unit type");
               }});
     }
     if (block.tail)
@@ -1300,37 +1301,40 @@ private:
   }
 
   ExprInfo check_if(const ast::Node &node, const ast::IfExpr &branch,
-                    const TyPtr &expected) {
-    auto condition = check_expr(branch.condition, ty(Ty::Kind::Bool));
-    if (!same(condition.type, ty(Ty::Kind::Bool)))
-      mismatch(branch.condition->span, condition.type, ty(Ty::Kind::Bool));
+                    const SemanticTypePtr &expected) {
+    auto condition =
+        check_expr(branch.condition, primitive_type(SemanticType::Kind::Bool));
+    if (!compatible_types(condition.type,
+                          primitive_type(SemanticType::Kind::Bool)))
+      mismatch(branch.condition->span, condition.type,
+               primitive_type(SemanticType::Kind::Bool));
     auto then_value = check_block(*branch.then_block, expected);
     if (!branch.else_branch) {
-      if (then_value.type->kind() != Ty::Kind::Unit &&
-          then_value.type->kind() != Ty::Kind::Never)
+      if (then_value.type->kind() != SemanticType::Kind::Unit &&
+          then_value.type->kind() != SemanticType::Kind::Never)
         report(node.span, "if without else requires a unit consequent");
-      return {ty(Ty::Kind::Unit)};
+      return {primitive_type(SemanticType::Kind::Unit)};
     }
     ast::NodeId else_id;
     auto else_value = std::visit(
-        ast::Overloaded{[&](const ast::Box<ast::Block> &p) {
-                          else_id = p->id;
-                          return check_block(*p, expected);
+        ast::Overloaded{[&](const ast::Box<ast::Block> &payload) {
+                          else_id = payload->id;
+                          return check_block(*payload, expected);
                         },
-                        [&](const ast::Box<ast::IfBranch> &p) {
-                          else_id = p->id;
-                          auto result =
-                              ast::visit(*p, [&](const ast::IfBranch &owner,
-                                                 const ast::IfExpr &payload) {
+                        [&](const ast::Box<ast::IfBranch> &payload) {
+                          else_id = payload->id;
+                          auto result = ast::visit(
+                              *payload, [&](const ast::IfBranch &owner,
+                                            const ast::IfExpr &payload) {
                                 return check_if(owner, payload, expected);
                               });
-                          record_node(*p, result);
+                          record_node(*payload, result);
                           return result;
                         }},
         *branch.else_branch);
-    if (then_value.type->kind() == Ty::Kind::Never)
+    if (then_value.type->kind() == SemanticType::Kind::Never)
       return else_value;
-    if (else_value.type->kind() == Ty::Kind::Never)
+    if (else_value.type->kind() == SemanticType::Kind::Never)
       return then_value;
     if (coercible(else_value.type, then_value.type)) {
       append_adjustments(
@@ -1348,17 +1352,19 @@ private:
   }
 
   ExprInfo check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr,
-                      const TyPtr &expected) {
+                      const SemanticTypePtr &expected) {
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
-    if (body.type->kind() != Ty::Kind::Unit &&
-        body.type->kind() != Ty::Kind::Never)
+    if (body.type->kind() != SemanticType::Kind::Unit &&
+        body.type->kind() != SemanticType::Kind::Never)
       report(loop_expr.body->span, "loop body must have unit type");
     auto loop = std::move(loops_.back());
     loops_.pop_back();
     if (loop.break_types.empty())
-      return {ty(Ty::Kind::Never)};
-    auto result = loop.expected ? loop.expected : loop.break_types.front();
+      return {primitive_type(SemanticType::Kind::Never)};
+    auto result = loop.break_types.front();
+    if (loop.expected)
+      result = loop.expected;
     for (const auto &value : loop.break_types)
       if (!coercible(value, result))
         mismatch(node.span, value, result);
@@ -1367,23 +1373,27 @@ private:
 
   ExprInfo check_while(const ast::Expr &node,
                        const ast::WhileExpr &while_expr) {
-    // A condition may only break or continue loops nested inside itself.
+
     auto surrounding_loops = std::move(loops_);
     loops_.clear();
-    auto condition = check_expr(while_expr.condition, ty(Ty::Kind::Bool));
+    auto condition = check_expr(while_expr.condition,
+                                primitive_type(SemanticType::Kind::Bool));
     loops_ = std::move(surrounding_loops);
-    if (!same(condition.type, ty(Ty::Kind::Bool)))
-      mismatch(while_expr.condition->span, condition.type, ty(Ty::Kind::Bool));
-    loops_.push_back({ty(Ty::Kind::Unit), {}});
-    auto body = check_block(*while_expr.body, ty(Ty::Kind::Unit));
-    if (body.type->kind() != Ty::Kind::Unit &&
-        body.type->kind() != Ty::Kind::Never)
+    if (!compatible_types(condition.type,
+                          primitive_type(SemanticType::Kind::Bool)))
+      mismatch(while_expr.condition->span, condition.type,
+               primitive_type(SemanticType::Kind::Bool));
+    loops_.push_back({primitive_type(SemanticType::Kind::Unit), {}});
+    auto body =
+        check_block(*while_expr.body, primitive_type(SemanticType::Kind::Unit));
+    if (body.type->kind() != SemanticType::Kind::Unit &&
+        body.type->kind() != SemanticType::Kind::Never)
       report(while_expr.body->span, "while body must have unit type");
     for (const auto &value : loops_.back().break_types)
-      if (value->kind() != Ty::Kind::Unit)
+      if (value->kind() != SemanticType::Kind::Unit)
         report(node.span, "break with a value is not allowed in while");
     loops_.pop_back();
-    return {ty(Ty::Kind::Unit)};
+    return {primitive_type(SemanticType::Kind::Unit)};
   }
 
   ExprInfo check_borrow(const ast::Expr &node, const ast::BorrowExpr &borrow) {
@@ -1392,28 +1402,30 @@ private:
     if (mutable_ref &&
         ((operand.is_place && !operand.is_mutable) || operand.access_locked))
       report(borrow.operator_span, "mutable borrow requires a mutable place");
-    return {compound(Ty::Kind::Ref, operand.type, mutable_ref)};
+    return {compound(SemanticType::Kind::Ref, operand.type, mutable_ref)};
   }
   ExprInfo check_unary(const ast::Expr &node, const ast::UnaryExpr &unary,
-                       const TyPtr &expected) {
-    auto operand =
-        check_expr(unary.operand,
-                   unary.op == ast::UnaryOp::Dereference ? TyPtr{} : expected);
+                       const SemanticTypePtr &expected) {
+    SemanticTypePtr expected_operand = expected;
+    if (unary.op == ast::UnaryOp::Dereference)
+      expected_operand.reset();
+    auto operand = check_expr(unary.operand, expected_operand);
     if (unary.op == ast::UnaryOp::Dereference) {
-      if (operand.type->kind() != Ty::Kind::Ref &&
-          operand.type->kind() != Ty::Kind::Box) {
+      if (operand.type->kind() != SemanticType::Kind::Ref &&
+          operand.type->kind() != SemanticType::Kind::Box) {
         report(node.span,
                "type " + type_name(operand.type) + " cannot be dereferenced");
         return {};
       }
       const bool shared_layer =
-          operand.type->kind() == Ty::Kind::Ref && !operand.type->is_mutable();
+          operand.type->kind() == SemanticType::Kind::Ref &&
+          !operand.type->is_mutable();
       const bool locked = operand.access_locked || shared_layer;
-      const bool mut =
-          (operand.type->kind() == Ty::Kind::Ref ? operand.type->is_mutable()
-                                                 : operand.is_mutable) &&
-          !locked;
-      ExprInfo result{operand.type->element(), true, mut, locked};
+      bool mutable_access = operand.is_mutable;
+      if (operand.type->kind() == SemanticType::Kind::Ref)
+        mutable_access = operand.type->is_mutable();
+      mutable_access = mutable_access && !locked;
+      ExprInfo result{operand.type->element(), true, mutable_access, locked};
       result.unary = ResolvedUnary{UnaryOperation::Dereference,
                                    operand_use(*unary.operand, operand, false),
                                    result.type};
@@ -1422,16 +1434,16 @@ private:
     auto use = operand_use(*unary.operand, operand);
     if (unary.op == ast::UnaryOp::Not) {
       if (!integer(use.effective_type) &&
-          use.effective_type->kind() != Ty::Kind::Bool)
+          use.effective_type->kind() != SemanticType::Kind::Bool)
         report(node.span, "operator ! requires bool or integer");
     } else if (!signed_integer(use.effective_type)) {
       report(node.span, "unary minus requires a signed integer");
     }
     ExprInfo result{use.effective_type};
-    result.unary =
-        ResolvedUnary{unary.op == ast::UnaryOp::Not ? UnaryOperation::Complement
-                                                    : UnaryOperation::Negate,
-                      std::move(use), result.type};
+    auto operation = UnaryOperation::Negate;
+    if (unary.op == ast::UnaryOp::Not)
+      operation = UnaryOperation::Complement;
+    result.unary = ResolvedUnary{operation, std::move(use), result.type};
     return result;
   }
 
@@ -1439,14 +1451,14 @@ private:
                                bool references = true, unsigned depth_limit = 1,
                                bool mutable_references = false) {
     OperandSemantics use{node.id, info.type, {}};
-    // Contextual coercions have already been recorded by check_expr.
+
     for (const auto &adjustment : info.adjustments) {
       use.adjustments.push_back(adjustment);
       use.effective_type = adjustment.target;
     }
     for (unsigned depth = 0;
          references && depth < depth_limit &&
-         use.effective_type->kind() == Ty::Kind::Ref &&
+         use.effective_type->kind() == SemanticType::Kind::Ref &&
          (mutable_references || !use.effective_type->is_mutable());
          ++depth) {
       use.effective_type = use.effective_type->element();
@@ -1464,13 +1476,16 @@ private:
     const bool ordering =
         binary.op == ast::BinaryOp::Lt || binary.op == ast::BinaryOp::Le ||
         binary.op == ast::BinaryOp::Gt || binary.op == ast::BinaryOp::Ge;
-    const auto depth = ordering ? std::numeric_limits<unsigned>::max() : 1;
+    unsigned depth = 1;
+    if (ordering)
+      depth = std::numeric_limits<unsigned>::max();
     auto lhs = operand_use(*binary.left, left, !logical, depth, ordering);
     auto rhs = operand_use(*binary.right, right, !logical, depth, ordering);
     if (ordering) {
-      auto l = left.type;
-      auto r = right.type;
-      if ((l->kind() == Ty::Kind::Ref) != (r->kind() == Ty::Kind::Ref))
+      auto left_type = left.type;
+      auto right_type = right.type;
+      if ((left_type->kind() == SemanticType::Kind::Ref) !=
+          (right_type->kind() == SemanticType::Kind::Ref))
         report(node.span, "ordering requires matching scalar operands");
       while (l->kind() == Ty::Kind::Ref && r->kind() == Ty::Kind::Ref) {
         if (l->is_mutable() && !r->is_mutable())
