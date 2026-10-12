@@ -32,8 +32,9 @@ TyPtr error_type() {
 
 bool same(const TyPtr &lhs, const TyPtr &rhs) {
   // Recovery compatibility is distinct from strict type identity.
-  return lhs && rhs && (lhs->kind() == Ty::Kind::Error ||
-                        rhs->kind() == Ty::Kind::Error || same_type(lhs, rhs));
+  return lhs && rhs &&
+         (lhs->kind() == Ty::Kind::Error || rhs->kind() == Ty::Kind::Error ||
+          same_type(lhs, rhs));
 }
 
 bool integer(const TyPtr &value) {
@@ -171,13 +172,18 @@ private:
   TyPtr ty(Ty::Kind kind) { return types_.primitive(kind); }
   TyPtr compound(Ty::Kind kind, TyPtr element, bool mutable_ref = false) {
     switch (kind) {
-    case Ty::Kind::Box: return types_.box(std::move(element));
-    case Ty::Kind::Vec: return types_.vector(std::move(element));
-    case Ty::Kind::Array: return types_.array(std::move(element), 0);
+    case Ty::Kind::Box:
+      return types_.box(std::move(element));
+    case Ty::Kind::Vec:
+      return types_.vector(std::move(element));
+    case Ty::Kind::Array:
+      return types_.array(std::move(element), 0);
     case Ty::Kind::Ref:
-      return types_.reference(std::move(element), mutable_ref
-          ? ast::Mutability::Mutable : ast::Mutability::Immutable);
-    default: throw std::logic_error("invalid compound type factory");
+      return types_.reference(std::move(element),
+                              mutable_ref ? ast::Mutability::Mutable
+                                          : ast::Mutability::Immutable);
+    default:
+      throw std::logic_error("invalid compound type factory");
     }
   }
   TyPtr structure_type(const std::string &name) {
@@ -578,7 +584,8 @@ private:
               if (!signed_integer(type))
                 report(node.span, "only signed constants may be negated");
               ExprInfo result{type};
-              result.unary = ResolvedUnary{UnaryOperation::Negate,
+              result.unary = ResolvedUnary{
+                  UnaryOperation::Negate,
                   OperandSemantics{p.operand->id, type, {}}, type};
               record_node(node, result);
               return {type, -value};
@@ -763,10 +770,12 @@ private:
           same(from->element(), to->element()))
         return true;
       auto current = from;
-      while (current->kind() == Ty::Kind::Ref || current->kind() == Ty::Kind::Box) {
+      while (current->kind() == Ty::Kind::Ref ||
+             current->kind() == Ty::Kind::Box) {
         current = current->element();
         if (to->kind() == Ty::Kind::Ref &&
-            (!to->is_mutable() || from->is_mutable()) && same(current, to->element()))
+            (!to->is_mutable() || from->is_mutable()) &&
+            same(current, to->element()))
           return true;
       }
     }
@@ -843,12 +852,13 @@ private:
     }
     if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref) {
       auto current = from;
-      while (current->kind() == Ty::Kind::Ref || current->kind() == Ty::Kind::Box) {
+      while (current->kind() == Ty::Kind::Ref ||
+             current->kind() == Ty::Kind::Box) {
         current = current->element();
         result.push_back({Adjustment::Kind::Dereference, current});
         if (same(current, to->element())) {
           result.push_back({to->is_mutable() ? Adjustment::Kind::BorrowMutable
-                                           : Adjustment::Kind::BorrowShared,
+                                             : Adjustment::Kind::BorrowShared,
                             to});
           return result;
         }
@@ -871,8 +881,9 @@ private:
     expression_facts_[node.id] = {
         node.id,           result.type,          result.is_place,
         result.is_mutable, result.access_locked, result.symbol,
-        result.target,     result.adjustments, result.callable,
-        result.binary,     result.compound, result.unary, result.receiver};
+        result.target,     result.adjustments,   result.callable,
+        result.binary,     result.compound,      result.unary,
+        result.receiver};
   }
   ExprInfo check_expr(const ast::ExprPtr &expression, TyPtr expected = {}) {
     return check_expr(*expression, std::move(expected));
@@ -1036,8 +1047,10 @@ private:
   }
 
   static BuiltinId io_builtin(std::string_view name) {
-    if (name == "getInt" || name == "get_i32") return BuiltinId::GetInt;
-    if (name == "printInt" || name == "print_i32") return BuiltinId::PrintInt;
+    if (name == "getInt" || name == "get_i32")
+      return BuiltinId::GetInt;
+    if (name == "printInt" || name == "print_i32")
+      return BuiltinId::PrintInt;
     return BuiltinId::PrintlnInt;
   }
   TyPtr builtin_path_type(const ast::Path &path, const std::string &name) {
@@ -1046,10 +1059,14 @@ private:
     BuiltinId id = BuiltinId::Clone;
     if (member == "new")
       id = owner == "Box" ? BuiltinId::BoxNew : BuiltinId::VecNew;
-    else if (member == "len") id = BuiltinId::Len;
-    else if (member == "is_empty") id = BuiltinId::IsEmpty;
-    else if (member == "push") id = BuiltinId::Push;
-    else if (member == "remove") id = BuiltinId::Remove;
+    else if (member == "len")
+      id = BuiltinId::Len;
+    else if (member == "is_empty")
+      id = BuiltinId::IsEmpty;
+    else if (member == "push")
+      id = BuiltinId::Push;
+    else if (member == "remove")
+      id = BuiltinId::Remove;
     if (structures_.contains(owner)) {
       auto type = structure_type(owner);
       if (!supports(type, "Clone", "", {}))
@@ -1062,9 +1079,8 @@ private:
       return types_.builtin(id);
     }
     auto element = resolve_type(*arguments.front());
-    return types_.builtin(id, compound(owner == "Box" ? Ty::Kind::Box
-                                                       : Ty::Kind::Vec,
-                                      element));
+    return types_.builtin(
+        id, compound(owner == "Box" ? Ty::Kind::Box : Ty::Kind::Vec, element));
   }
 
   static bool builtin_function(std::string_view name) {
@@ -1080,7 +1096,8 @@ private:
     const bool member = second == "new" || second == "clone" ||
                         second == "len" || second == "is_empty" ||
                         second == "push" || second == "remove";
-    const bool container_member = (first == "Vec" && member) ||
+    const bool container_member =
+        (first == "Vec" && member) ||
         (first == "Box" && (second == "new" || second == "clone"));
     return container_member ||
            (structures_.contains(first) && second == "clone");
@@ -1113,8 +1130,8 @@ private:
       }
     }
     auto result = types_.array(first.type, array.elements.size());
-    if (expected_element &&
-        (result->length() != expected->length() || !coercible(result, expected)))
+    if (expected_element && (result->length() != expected->length() ||
+                             !coercible(result, expected)))
       mismatch(node.span, result, expected);
     return {result};
   }
@@ -1131,8 +1148,8 @@ private:
     auto result = types_.array(first.type, length.value_or(0));
     if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
       report(node.span, "array repetition requires Copy");
-    if (expected_element &&
-        (result->length() != expected->length() || !coercible(result, expected)))
+    if (expected_element && (result->length() != expected->length() ||
+                             !coercible(result, expected)))
       mismatch(node.span, result, expected);
     return {result};
   }
@@ -1242,23 +1259,22 @@ private:
       return {ty(Ty::Kind::Unit)};
     }
     ast::NodeId else_id;
-    auto else_value =
-        std::visit(ast::Overloaded{[&](const ast::Box<ast::Block> &p) {
-                                     else_id = p->id;
-                                     return check_block(*p, expected);
-                                   },
-                                   [&](const ast::Box<ast::IfBranch> &p) {
-                                     else_id = p->id;
-                                     auto result = ast::visit(
-                                         *p, [&](const ast::IfBranch &owner,
+    auto else_value = std::visit(
+        ast::Overloaded{[&](const ast::Box<ast::Block> &p) {
+                          else_id = p->id;
+                          return check_block(*p, expected);
+                        },
+                        [&](const ast::Box<ast::IfBranch> &p) {
+                          else_id = p->id;
+                          auto result =
+                              ast::visit(*p, [&](const ast::IfBranch &owner,
                                                  const ast::IfExpr &payload) {
-                                           return check_if(owner, payload,
-                                                           expected);
-                                         });
-                                     record_node(*p, result);
-                                     return result;
-                                   }},
-                   *branch.else_branch);
+                                return check_if(owner, payload, expected);
+                              });
+                          record_node(*p, result);
+                          return result;
+                        }},
+        *branch.else_branch);
     if (then_value.type->kind() == Ty::Kind::Never)
       return else_value;
     if (else_value.type->kind() == Ty::Kind::Never)
@@ -1282,7 +1298,8 @@ private:
                       const TyPtr &expected) {
     loops_.push_back({expected, {}});
     auto body = check_block(*loop_expr.body);
-    if (body.type->kind() != Ty::Kind::Unit && body.type->kind() != Ty::Kind::Never)
+    if (body.type->kind() != Ty::Kind::Unit &&
+        body.type->kind() != Ty::Kind::Never)
       report(loop_expr.body->span, "loop body must have unit type");
     auto loop = std::move(loops_.back());
     loops_.pop_back();
@@ -1306,7 +1323,8 @@ private:
       mismatch(while_expr.condition->span, condition.type, ty(Ty::Kind::Bool));
     loops_.push_back({ty(Ty::Kind::Unit), {}});
     auto body = check_block(*while_expr.body, ty(Ty::Kind::Unit));
-    if (body.type->kind() != Ty::Kind::Unit && body.type->kind() != Ty::Kind::Never)
+    if (body.type->kind() != Ty::Kind::Unit &&
+        body.type->kind() != Ty::Kind::Never)
       report(while_expr.body->span, "while body must have unit type");
     for (const auto &value : loops_.back().break_types)
       if (value->kind() != Ty::Kind::Unit)
@@ -1329,30 +1347,36 @@ private:
     if (unary.op == ast::UnaryOp::Dereference) {
       if (operand.type->kind() != Ty::Kind::Ref &&
           operand.type->kind() != Ty::Kind::Box) {
-        report(node.span, "type " + type_name(operand.type) + " cannot be dereferenced");
+        report(node.span,
+               "type " + type_name(operand.type) + " cannot be dereferenced");
         return {};
       }
-      const bool shared_layer = operand.type->kind() == Ty::Kind::Ref &&
-                                !operand.type->is_mutable();
+      const bool shared_layer =
+          operand.type->kind() == Ty::Kind::Ref && !operand.type->is_mutable();
       const bool locked = operand.access_locked || shared_layer;
-      const bool mut = (operand.type->kind() == Ty::Kind::Ref
-                            ? operand.type->is_mutable() : operand.is_mutable) && !locked;
+      const bool mut =
+          (operand.type->kind() == Ty::Kind::Ref ? operand.type->is_mutable()
+                                                 : operand.is_mutable) &&
+          !locked;
       ExprInfo result{operand.type->element(), true, mut, locked};
       result.unary = ResolvedUnary{UnaryOperation::Dereference,
-                                  operand_use(*unary.operand, operand, false), result.type};
+                                   operand_use(*unary.operand, operand, false),
+                                   result.type};
       return result;
     }
     auto use = operand_use(*unary.operand, operand);
     if (unary.op == ast::UnaryOp::Not) {
-      if (!integer(use.effective_type) && use.effective_type->kind() != Ty::Kind::Bool)
+      if (!integer(use.effective_type) &&
+          use.effective_type->kind() != Ty::Kind::Bool)
         report(node.span, "operator ! requires bool or integer");
     } else if (!signed_integer(use.effective_type)) {
       report(node.span, "unary minus requires a signed integer");
     }
     ExprInfo result{use.effective_type};
-    result.unary = ResolvedUnary{unary.op == ast::UnaryOp::Not
-                                    ? UnaryOperation::Complement : UnaryOperation::Negate,
-                                std::move(use), result.type};
+    result.unary =
+        ResolvedUnary{unary.op == ast::UnaryOp::Not ? UnaryOperation::Complement
+                                                    : UnaryOperation::Negate,
+                      std::move(use), result.type};
     return result;
   }
 
@@ -1365,11 +1389,14 @@ private:
       use.adjustments.push_back(adjustment);
       use.effective_type = adjustment.target;
     }
-    for (unsigned depth = 0; references && depth < depth_limit &&
-           use.effective_type->kind() == Ty::Kind::Ref &&
-           (mutable_references || !use.effective_type->is_mutable()); ++depth) {
+    for (unsigned depth = 0;
+         references && depth < depth_limit &&
+         use.effective_type->kind() == Ty::Kind::Ref &&
+         (mutable_references || !use.effective_type->is_mutable());
+         ++depth) {
       use.effective_type = use.effective_type->element();
-      use.adjustments.push_back({Adjustment::Kind::Dereference, use.effective_type});
+      use.adjustments.push_back(
+          {Adjustment::Kind::Dereference, use.effective_type});
     }
     return use;
   }
@@ -1379,10 +1406,9 @@ private:
     auto right = check_expr(binary.right, left.type);
     const bool logical = binary.op == ast::BinaryOp::LogicalAnd ||
                          binary.op == ast::BinaryOp::LogicalOr;
-    const bool ordering = binary.op == ast::BinaryOp::Lt ||
-                          binary.op == ast::BinaryOp::Le ||
-                          binary.op == ast::BinaryOp::Gt ||
-                          binary.op == ast::BinaryOp::Ge;
+    const bool ordering =
+        binary.op == ast::BinaryOp::Lt || binary.op == ast::BinaryOp::Le ||
+        binary.op == ast::BinaryOp::Gt || binary.op == ast::BinaryOp::Ge;
     const auto depth = ordering ? std::numeric_limits<unsigned>::max() : 1;
     auto lhs = operand_use(*binary.left, left, !logical, depth, ordering);
     auto rhs = operand_use(*binary.right, right, !logical, depth, ordering);
@@ -1393,24 +1419,30 @@ private:
         report(node.span, "ordering requires matching scalar operands");
       while (l->kind() == Ty::Kind::Ref && r->kind() == Ty::Kind::Ref) {
         if (l->is_mutable() && !r->is_mutable())
-          report(node.span, "ordering cannot coerce a mutable left reference to a shared right reference");
-        l = l->element(); r = r->element();
+          report(node.span, "ordering cannot coerce a mutable left reference "
+                            "to a shared right reference");
+        l = l->element();
+        r = r->element();
       }
     }
-    auto operation = resolve_operation(binary.op, lhs.effective_type, rhs.effective_type);
+    auto operation =
+        resolve_operation(binary.op, lhs.effective_type, rhs.effective_type);
     if (!operation) {
       report(node.span, "operator " + std::string(ast::spelling(binary.op)) +
-                           " is not defined for " + type_name(lhs.effective_type) +
-                           " and " + type_name(rhs.effective_type));
+                            " is not defined for " +
+                            type_name(lhs.effective_type) + " and " +
+                            type_name(rhs.effective_type));
       return {};
     }
     if ((binary.op == ast::BinaryOp::Eq || binary.op == ast::BinaryOp::Ne) &&
         !supports(lhs.effective_type, "PartialEq", "", {}))
       report(node.span, "equality requires PartialEq");
-    const bool boolean = std::holds_alternative<ScalarComparison>(*operation) ||
-                         std::holds_alternative<StructuralEquality>(*operation) || logical;
+    const bool boolean =
+        std::holds_alternative<ScalarComparison>(*operation) ||
+        std::holds_alternative<StructuralEquality>(*operation) || logical;
     ExprInfo result{boolean ? ty(Ty::Kind::Bool) : lhs.effective_type};
-    result.binary = ResolvedBinary{*operation, std::move(lhs), std::move(rhs), result.type};
+    result.binary =
+        ResolvedBinary{*operation, std::move(lhs), std::move(rhs), result.type};
     return result;
   }
 
@@ -1441,13 +1473,15 @@ private:
     auto operation = resolve_operation(binary_operation(assignment.op),
                                        lhs.effective_type, rhs.effective_type);
     if (!operation) {
-      report(node.span, "compound operator " + std::string(ast::spelling(assignment.op)) +
-                           " is not defined for " + type_name(lhs.effective_type) +
-                           " and " + type_name(rhs.effective_type));
+      report(node.span,
+             "compound operator " + std::string(ast::spelling(assignment.op)) +
+                 " is not defined for " + type_name(lhs.effective_type) +
+                 " and " + type_name(rhs.effective_type));
       return {ty(Ty::Kind::Unit)};
     }
     ExprInfo result{ty(Ty::Kind::Unit)};
-    result.compound = ResolvedBinary{*operation, std::move(lhs), std::move(rhs), destination.type};
+    result.compound = ResolvedBinary{*operation, std::move(lhs), std::move(rhs),
+                                     destination.type};
     return result;
   }
 
@@ -1471,8 +1505,10 @@ private:
       if (auto *function = rx::get_if<FunctionType>(*callee.type)) {
         result.symbol = function->symbol;
         result.target = function->name;
-      } else if (auto *builtin = rx::get_if<BuiltinFunctionType>(*callee.type)) {
-        result.target = "builtin::" + std::string(builtin_name(builtin->builtin));
+      } else if (auto *builtin =
+                     rx::get_if<BuiltinFunctionType>(*callee.type)) {
+        result.target =
+            "builtin::" + std::string(builtin_name(builtin->builtin));
       }
       return result;
     };
@@ -1486,7 +1522,8 @@ private:
                           ast::is_mutable(*info.ast->signature.receiver));
         parameters.insert(parameters.begin(), self);
       }
-      return finish(check_signature(node, call.arguments, parameters, info.result));
+      return finish(
+          check_signature(node, call.arguments, parameters, info.result));
     }
     if (auto *builtin = rx::get_if<BuiltinFunctionType>(*callee.type))
       return finish(check_builtin_call(node, call.arguments, *builtin));
@@ -1497,44 +1534,56 @@ private:
   }
 
   ExprInfo check_builtin_call(const ast::Expr &node,
-                             const std::vector<ast::ExprPtr> &arguments,
-                             const BuiltinFunctionType &builtin) {
+                              const std::vector<ast::ExprPtr> &arguments,
+                              const BuiltinFunctionType &builtin) {
     switch (builtin.builtin) {
     case BuiltinId::GetInt:
       return check_signature(node, arguments, {}, ty(Ty::Kind::I32));
     case BuiltinId::PrintInt:
     case BuiltinId::PrintlnInt:
-      return check_signature(node, arguments, {ty(Ty::Kind::I32)}, ty(Ty::Kind::Unit));
-    default: break;
+      return check_signature(node, arguments, {ty(Ty::Kind::I32)},
+                             ty(Ty::Kind::Unit));
+    default:
+      break;
     }
     auto container = builtin.owner;
     if (!container) {
       report(node.span, "container function requires a resolved owner type");
-      for (const auto &argument : arguments) check_expr(argument);
+      for (const auto &argument : arguments)
+        check_expr(argument);
       return {};
     }
     switch (builtin.builtin) {
     case BuiltinId::BoxNew:
-      return check_signature(node, arguments, {container->element()}, container);
+      return check_signature(node, arguments, {container->element()},
+                             container);
     case BuiltinId::VecNew:
       return check_signature(node, arguments, {}, container);
     case BuiltinId::Clone:
       if (!supports(container, "Clone", "", {}))
         report(node.span, "clone is not available for " + type_name(container));
-      return check_signature(node, arguments, {compound(Ty::Kind::Ref, container)}, container);
+      return check_signature(node, arguments,
+                             {compound(Ty::Kind::Ref, container)}, container);
     case BuiltinId::Push:
-      return check_signature(node, arguments,
-          {compound(Ty::Kind::Ref, container, true), container->element()}, ty(Ty::Kind::Unit));
+      return check_signature(
+          node, arguments,
+          {compound(Ty::Kind::Ref, container, true), container->element()},
+          ty(Ty::Kind::Unit));
     case BuiltinId::Remove:
-      return check_signature(node, arguments,
-          {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)}, container->element());
+      return check_signature(
+          node, arguments,
+          {compound(Ty::Kind::Ref, container, true), ty(Ty::Kind::Usize)},
+          container->element());
     case BuiltinId::Len:
     case BuiltinId::IsEmpty:
-      return check_signature(node, arguments, {compound(Ty::Kind::Ref, container)},
-          builtin.builtin == BuiltinId::Len ? ty(Ty::Kind::Usize) : ty(Ty::Kind::Bool));
+      return check_signature(
+          node, arguments, {compound(Ty::Kind::Ref, container)},
+          builtin.builtin == BuiltinId::Len ? ty(Ty::Kind::Usize)
+                                            : ty(Ty::Kind::Bool));
     case BuiltinId::GetInt:
     case BuiltinId::PrintInt:
-    case BuiltinId::PrintlnInt: break;
+    case BuiltinId::PrintlnInt:
+      break;
     }
     throw std::logic_error("unhandled builtin call");
   }
@@ -1550,8 +1599,8 @@ private:
       auto argument = check_expr(arguments[i], expected);
       if (expected && !coercible(argument.type, expected))
         mismatch(arguments[i]->span, argument.type, expected);
-      if (expected && expected->kind() == Ty::Kind::Ref && expected->is_mutable() &&
-          argument.access_locked)
+      if (expected && expected->kind() == Ty::Kind::Ref &&
+          expected->is_mutable() && argument.access_locked)
         report(arguments[i]->span,
                "mutable reference argument requires mutable container access");
     }
@@ -1571,19 +1620,27 @@ private:
     }
     std::optional<BuiltinId> builtin;
     const auto &method_name = method.method.text;
-    if (method_name == "clone") builtin = BuiltinId::Clone;
-    else if (method_name == "len") builtin = BuiltinId::Len;
-    else if (method_name == "is_empty") builtin = BuiltinId::IsEmpty;
-    else if (method_name == "push") builtin = BuiltinId::Push;
-    else if (method_name == "remove") builtin = BuiltinId::Remove;
+    if (method_name == "clone")
+      builtin = BuiltinId::Clone;
+    else if (method_name == "len")
+      builtin = BuiltinId::Len;
+    else if (method_name == "is_empty")
+      builtin = BuiltinId::IsEmpty;
+    else if (method_name == "push")
+      builtin = BuiltinId::Push;
+    else if (method_name == "remove")
+      builtin = BuiltinId::Remove;
     auto finish = [&](ExprInfo result, std::string target,
                       std::optional<SymbolId> symbol = {},
                       std::optional<Adjustment::Kind> borrow = {}) {
       result.target = std::move(target);
       result.symbol = symbol;
-      if (symbol) result.callable = FunctionTarget{*symbol};
-      else if (builtin) result.callable = BuiltinTarget{*builtin};
-      result.receiver = OperandSemantics{method.receiver->id, base, receiver_adjustments};
+      if (symbol)
+        result.callable = FunctionTarget{*symbol};
+      else if (builtin)
+        result.callable = BuiltinTarget{*builtin};
+      result.receiver =
+          OperandSemantics{method.receiver->id, base, receiver_adjustments};
       if (borrow) {
         const bool mutable_borrow = *borrow == Adjustment::Kind::BorrowMutable;
         auto borrowed = compound(Ty::Kind::Ref, base, mutable_borrow);
@@ -1710,19 +1767,26 @@ private:
       base = base->element();
       adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
-    if (base->kind() != Ty::Kind::Struct || !structures_.contains(base->name())) {
+    if (base->kind() != Ty::Kind::Struct ||
+        !structures_.contains(base->name())) {
       report(node.span, "field access requires a struct");
       return {};
     }
-    auto field = structures_.at(base->name()).fields.find(projection.field.text);
+    auto field =
+        structures_.at(base->name()).fields.find(projection.field.text);
     if (field == structures_.at(base->name()).fields.end()) {
       report(node.span, "unknown field '" + projection.field.text + "'");
       return {};
     }
-    ExprInfo result{field->second, true, mutable_access, locked,
-                    structures_.at(base->name()).field_symbols.at(projection.field.text),
-                    base->name() + "::" + projection.field.text};
-    result.receiver = OperandSemantics{projection.base->id, base, std::move(adjustments)};
+    ExprInfo result{
+        field->second,
+        true,
+        mutable_access,
+        locked,
+        structures_.at(base->name()).field_symbols.at(projection.field.text),
+        base->name() + "::" + projection.field.text};
+    result.receiver =
+        OperandSemantics{projection.base->id, base, std::move(adjustments)};
     return result;
   }
 
@@ -1756,8 +1820,10 @@ private:
     }
     if (container->kind() == Ty::Kind::Vec && !mutable_access)
       locked = true;
-    ExprInfo result{container->element(), true, mutable_access, locked, {}, "index"};
-    result.receiver = OperandSemantics{projection.base->id, container, std::move(adjustments)};
+    ExprInfo result{
+        container->element(), true, mutable_access, locked, {}, "index"};
+    result.receiver = OperandSemantics{projection.base->id, container,
+                                       std::move(adjustments)};
     return result;
   }
 

@@ -351,10 +351,10 @@ fn main() {
 }
 
 void language_boundaries() {
-  for (const auto source : {
-      "fn f() {} fn main() { f::<i32>(); }",
-      "fn f(self) {} fn main() {}",
-      "fn main() { let b = Box::<i32>::new(1); let n = Box::<i32>::len(&b); }"}) {
+  for (const auto source :
+       {"fn f() {} fn main() { f::<i32>(); }", "fn f(self) {} fn main() {}",
+        "fn main() { let b = Box::<i32>::new(1); let n = Box::<i32>::len(&b); "
+        "}"}) {
     Program program(source);
     assert(program.diagnostics.has_errors() && !program.checked.success());
   }

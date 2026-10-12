@@ -25,7 +25,8 @@ fn main() {
   let boxed = Box::<Payload>::new(Payload { value: 1 });
   let field = (*boxed).value;
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
@@ -41,7 +42,8 @@ fn main() {
       const auto lowered = bridge.unary(owner, payload);
       assert(lowered.operand.node == payload.operand->id);
       assert(rx::same_type(lowered.result, index.expression(owner).type));
-      if (const auto *scalar = std::get_if<ir::ScalarUnary>(&lowered.operation)) {
+      if (const auto *scalar =
+              std::get_if<ir::ScalarUnary>(&lowered.operation)) {
         computations.push_back(*scalar);
         converted_operands += !lowered.operand.adjustments.empty();
       } else {
@@ -202,7 +204,8 @@ fn main() {
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
   auto foreign = rx::parse_source(parsed.crate->source.text, diagnostics);
-  const auto &foreign_function = std::get<ast::Function>(foreign.crate->items[2]);
+  const auto &foreign_function =
+      std::get<ast::Function>(foreign.crate->items[2]);
   assert(foreign_function.id == take.id);
   bool foreign_rejected = false;
   try {

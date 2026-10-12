@@ -2,9 +2,9 @@
 
 #include "rx/ast.hpp"
 #include "rx/diagnostic.hpp"
-#include "rx/symbol.hpp"
-#include "rx/semantic_type.hpp"
 #include "rx/semantic_operation.hpp"
+#include "rx/semantic_type.hpp"
+#include "rx/symbol.hpp"
 
 #include <cstdint>
 #include <memory>

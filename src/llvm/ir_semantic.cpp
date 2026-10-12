@@ -28,7 +28,7 @@ SemanticBridge::SemanticBridge(const SemanticIndex &semantic,
   for (const auto &item : semantic.crate().items)
     ast::visit(item, ast::Overloaded{
                          [&](const ast::Struct &node, const ast::Struct &) {
-                          resolve_structure(semantic.declaration(node).id);
+                           resolve_structure(semantic.declaration(node).id);
                          },
                          [](const ast::Use &, const ast::Use &) {},
                          [](const ast::Function &, const ast::Function &) {},

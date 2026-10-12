@@ -36,8 +36,12 @@ struct FunctionAbi {
   std::optional<AbiParameter> receiver;
   std::vector<AbiParameter> parameters;
 };
-struct FunctionCall { FunctionAbi signature; };
-struct BuiltinCall { BuiltinId builtin; };
+struct FunctionCall {
+  FunctionAbi signature;
+};
+struct BuiltinCall {
+  BuiltinId builtin;
+};
 struct CallLowering {
   std::variant<FunctionCall, BuiltinCall> target;
   std::optional<OperandSemantics> receiver;

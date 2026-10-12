@@ -1,6 +1,6 @@
+#include "rx/ast/visitor.hpp"
 #include "rx/frontend.hpp"
 #include "rx/ir_semantic.hpp"
-#include "rx/ast/visitor.hpp"
 
 #undef NDEBUG
 #include <cassert>
@@ -23,7 +23,8 @@ fn main() {
   let output = printInt;
   output(result);
 }
-)", diagnostics);
+)",
+                                 diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   assert(checked.success() && !diagnostics.has_errors());
@@ -42,19 +43,23 @@ fn main() {
         assert(function.signature.name == "read");
         assert(function.signature.symbol == index.expression(node).symbol);
         assert(plan.arguments[0].adjustments.size() == 1);
-        assert(plan.arguments[0].adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
+        assert(plan.arguments[0].adjustments[0].kind ==
+               rx::Adjustment::Kind::MutToShared);
         assert(!plan.arguments[0].effective_type->is_mutable());
       } else if (spelling == "copy(p)") {
         const auto &function = std::get<rx::ir::FunctionCall>(plan.target);
         assert(function.signature.result.passing == rx::ir::Passing::Indirect);
-        assert(function.signature.parameters[0].value.passing == rx::ir::Passing::Indirect);
+        assert(function.signature.parameters[0].value.passing ==
+               rx::ir::Passing::Indirect);
       } else if (spelling == "q.get()") {
         const auto &function = std::get<rx::ir::FunctionCall>(plan.target);
         assert(function.signature.name == "P::get" && plan.receiver);
         assert(plan.receiver->adjustments.size() == 1);
-        assert(plan.receiver->adjustments[0].kind == rx::Adjustment::Kind::BorrowShared);
+        assert(plan.receiver->adjustments[0].kind ==
+               rx::Adjustment::Kind::BorrowShared);
       } else {
-        assert(std::get<rx::ir::BuiltinCall>(plan.target).builtin == rx::BuiltinId::PrintInt);
+        assert(std::get<rx::ir::BuiltinCall>(plan.target).builtin ==
+               rx::BuiltinId::PrintInt);
       }
       ++calls;
     }
