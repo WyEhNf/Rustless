@@ -24,4 +24,4 @@ struct WhereClause {
   Span span;
   std::vector<WherePredicate> predicates;
 };
-} 
+}

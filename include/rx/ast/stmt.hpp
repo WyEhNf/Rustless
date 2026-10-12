@@ -27,4 +27,4 @@ struct Block : Node {
 template <class Payload> const Payload *get_if(const Stmt &stmt) {
   return std::get_if<Payload>(&stmt.data);
 }
-} 
+}

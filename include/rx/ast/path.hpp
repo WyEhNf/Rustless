@@ -47,4 +47,4 @@ inline std::string path_name(const Path &path) {
   }
   return result;
 }
-} 
+}
