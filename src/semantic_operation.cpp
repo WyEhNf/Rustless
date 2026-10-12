@@ -123,4 +123,4 @@ ast::BinaryOp binary_operation(ast::CompoundAssignOp op) {
   }
   throw std::invalid_argument("invalid compound operator");
 }
-} // namespace rx
+}
