@@ -24,27 +24,29 @@ bool DiagnosticEngine::has_errors() const {
 
 std::size_t DiagnosticEngine::error_count() const {
   std::size_t count = 0;
-  for (const auto &diagnostic : diagnostics_)
-    count += diagnostic.severity == Severity::Error;
+  for (const auto &diagnostic : diagnostics_) {
+    if (diagnostic.severity == Severity::Error)
+      ++count;
+  }
   return count;
 }
 
-const std::vector<Diagnostic> &DiagnosticEngine::diagnostics() const {
-  return diagnostics_;
-}
+const std::vector<Diagnostic> &DiagnosticEngine::diagnostics() const { return diagnostics_; }
 
 void DiagnosticEngine::print(std::ostream &out) const {
-  // Keep diagnostics stable for both humans and the course harness.
   for (const auto &diagnostic : diagnostics_) {
     if (!file_.empty())
       out << file_ << ':';
-    out << diagnostic.span.line << ':' << (diagnostic.span.column + 1) << ": "
-        << (diagnostic.severity == Severity::Error ? "error: " : "warning: ")
-        << diagnostic.message << '\n';
+    out << diagnostic.span.line << ':' << (diagnostic.span.column + 1) << ": ";
+    if (diagnostic.severity == Severity::Error)
+      out << "error: ";
+    else
+      out << "warning: ";
+    out << diagnostic.message << '\n';
   }
 }
 
-} // namespace rx
+}
 
 namespace rx::ast {
 namespace {
@@ -54,92 +56,107 @@ public:
   std::string print(const Crate &crate) {
     heading("Crate", crate, 0);
     for (const auto &item : crate.items)
-      visit(item,
-            [&](const auto &, const auto &value) { declaration(value, 1); });
+      visit(item, [&](const auto &, const auto &value) { declaration(value, 1); });
     return out_.str();
   }
 
 private:
-  void indent(int level) {
-    out_ << std::string(static_cast<std::size_t>(level) * 2, ' ');
-  }
+  void indent(int level) { out_ << std::string(static_cast<std::size_t>(level) * 2, ' '); }
   void heading(std::string_view name, const Node &node, int level) {
     indent(level);
     out_ << name;
-    out_ << " #" << node.id << " @" << node.span.line << ':'
-         << node.span.column + 1 << " [" << node.span.begin << ','
-         << node.span.end << ")\n";
+    out_ << " #" << node.id << " @" << node.span.line << ':' << node.span.column + 1 << " ["
+         << node.span.begin << ',' << node.span.end << ")\n";
   }
-  void arguments(const GenericArguments &args) {
+  void arguments(const GenericArguments &generic_arguments) {
     out_ << '<';
-    for (std::size_t i = 0; i < args.values.size(); ++i) {
-      if (i)
+    auto print_argument = Overloaded{
+        [&](const TypePtr &value) { type(value); },
+        [&](const LifetimeName &value) { out_ << value.text; },
+    };
+    for (std::size_t index = 0; index < generic_arguments.values.size(); ++index) {
+      if (index)
         out_ << ", ";
-      std::visit(
-          Overloaded{[&](const TypePtr &value) { type(value); },
-                     [&](const LifetimeName &value) { out_ << value.text; }},
-          args.values[i]);
+      std::visit(print_argument, generic_arguments.values[index]);
     }
     out_ << '>';
   }
   void path(const Path &value) {
-    for (std::size_t i = 0; i < value.segments.size(); ++i) {
-      if (i)
+    for (std::size_t index = 0; index < value.segments.size(); ++index) {
+      if (index)
         out_ << "::";
-      const auto &segment = value.segments[i];
+      const auto &segment = value.segments[index];
       out_ << name_text(segment.name);
       if (segment.arguments)
         arguments(*segment.arguments);
     }
   }
   void type(const TypePtr &syntax) {
-    visit(
-        *syntax,
-        Overloaded{[&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
-                   [&](const TypeSyntax &, const PathType &value) {
-                     path(value.path);
-                   },
-                   [&](const TypeSyntax &, const ReferenceType &value) {
-                     out_ << '&';
-                     if (value.lifetime)
-                       out_ << value.lifetime->text << ' ';
-                     if (value.mutability == Mutability::Mutable)
-                       out_ << "mut ";
-                     type(value.referent);
-                   },
-                   [&](const TypeSyntax &, const ArrayType &value) {
-                     out_ << '[';
-                     type(value.element);
-                     out_ << "; " << source_.slice(value.length->span) << ']';
-                   },
-                   [&](const TypeSyntax &, const ParenType &value) {
-                     out_ << '(';
-                     type(value.inner);
-                     out_ << ')';
-                   }});
+    auto print_type = Overloaded{
+        [&](const TypeSyntax &, const UnitType &) { out_ << "()"; },
+        [&](const TypeSyntax &, const PathType &value) { path(value.path); },
+        [&](const TypeSyntax &, const ReferenceType &value) {
+          out_ << '&';
+          if (value.lifetime)
+            out_ << value.lifetime->text << ' ';
+          if (value.mutability == Mutability::Mutable)
+            out_ << "mut ";
+          type(value.referent);
+        },
+        [&](const TypeSyntax &, const ArrayType &value) {
+          out_ << '[';
+          type(value.element);
+          out_ << "; " << source_.slice(value.length->span) << ']';
+        },
+        [&](const TypeSyntax &, const ParenType &value) {
+          out_ << '(';
+          type(value.inner);
+          out_ << ')';
+        },
+    };
+    visit(*syntax, print_type);
   }
   void generics(const std::optional<GenericParameters> &value) {
     if (!value)
       return;
     out_ << '<';
-    for (std::size_t i = 0; i < value->lifetimes.size(); ++i) {
-      if (i)
+    for (std::size_t index = 0; index < value->lifetimes.size(); ++index) {
+      if (index)
         out_ << ", ";
-      const auto &parameter = value->lifetimes[i];
+      const auto &parameter = value->lifetimes[index];
       out_ << parameter.name.text;
       bounds(parameter.bounds);
     }
     out_ << '>';
   }
   void bounds(const std::vector<LifetimeName> &values) {
-    for (std::size_t i = 0; i < values.size(); ++i)
-      out_ << (i ? " + " : ": ") << values[i].text;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      if (index == 0)
+        out_ << ": ";
+      else
+        out_ << " + ";
+      out_ << values[index].text;
+    }
   }
   void where_clause(const std::optional<WhereClause> &value, int level) {
     if (!value)
       return;
     indent(level);
     out_ << "Where\n";
+    auto print_predicate = Overloaded{
+        [&](const Node &, const LifetimePredicate &payload) {
+          indent(level + 1);
+          out_ << payload.subject.text;
+          bounds(payload.bounds);
+          out_ << '\n';
+        },
+        [&](const Node &, const TypePredicate &payload) {
+          indent(level + 1);
+          type(payload.subject);
+          bounds(payload.bounds);
+          out_ << '\n';
+        },
+    };
     for (const auto &predicate : value->predicates)
       visit(predicate,
             Overloaded{[&](const Node &, const LifetimePredicate &p) {
