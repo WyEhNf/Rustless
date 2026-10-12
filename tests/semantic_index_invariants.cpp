@@ -20,6 +20,13 @@ fn main() {
     let p = Pair { enabled: true, value: 7 };
     let values: [i32; N] = [p.get(), choose(2, false)];
     printInt(values[0]);
+    let mut count = 1;
+    count += 2;
+    let sum = &count + &count;
+    printInt(sum);
+    let a = Box::<i32>::new(1);
+    let b = Box::<i32>::new(1);
+    let equal = a == b;
 }
 )", diagnostics);
   assert(parsed.syntax_ok && parsed.crate);
@@ -104,6 +111,51 @@ fn main() {
   });
   rejects([](auto &draft) {
     draft.expressions.front().node = draft.symbols.front().declaration;
+  });
+  auto binary_fact = [](auto &draft) -> auto & {
+    const auto found = std::find_if(draft.expressions.begin(), draft.expressions.end(),
+        [](const auto &fact) { return fact.binary.has_value(); });
+    assert(found != draft.expressions.end());
+    return *found;
+  };
+  rejects([&](auto &draft) { binary_fact(draft).binary.reset(); });
+  rejects([&](auto &draft) {
+    auto &operation = *binary_fact(draft).binary;
+    std::swap(operation.left.node, operation.right.node);
+  });
+  rejects([&](auto &draft) {
+    rx::TypeContext types;
+    binary_fact(draft).binary->left.effective_type =
+        types.primitive(rx::SemanticType::Kind::Bool);
+  });
+  rejects([&](auto &draft) {
+    binary_fact(draft).binary->operation =
+        rx::IntegerArithmetic{static_cast<rx::ArithmeticOp>(99)};
+  });
+  rejects([&](auto &draft) {
+    for (auto &fact : draft.expressions)
+      if (fact.binary &&
+          std::holds_alternative<rx::StructuralEquality>(fact.binary->operation)) {
+        fact.binary->operation = rx::ScalarComparison{rx::Relation::Eq};
+        return;
+      }
+    assert(false);
+  });
+  rejects([](auto &draft) {
+    for (auto &fact : draft.expressions)
+      if (fact.compound) {
+        fact.compound.reset();
+        return;
+      }
+    assert(false);
+  });
+  rejects([&](auto &draft) {
+    for (auto &fact : draft.expressions)
+      if (fact.callable) {
+        fact.callable = rx::FunctionTarget{value_field};
+        return;
+      }
+    assert(false);
   });
   static_assert(std::is_const_v<rx::SemanticTypePtr::element_type>);
   std::unique_ptr<rx::SemanticIndex> retained;
