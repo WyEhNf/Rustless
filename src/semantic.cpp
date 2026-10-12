@@ -1419,15 +1419,19 @@ private:
     auto destination = check_expr(assignment.target);
     auto source = check_expr(assignment.value, destination.type);
     check_assignment_target(assignment.target, destination);
-    auto scalar = scalar_operand(source.type);
-    bool shift = assignment.op == ast::CompoundAssignOp::Shl ||
-                 assignment.op == ast::CompoundAssignOp::Shr;
-    if (!(shift && integer(scalar) && integer(destination.type)) &&
-        !same(scalar, destination.type))
-      mismatch(assignment.value->span, scalar, destination.type);
-    if (!integer(destination.type) && destination.type->kind() != Ty::Kind::Bool)
-      report(node.span, "compound assignment requires a scalar destination");
-    return {ty(Ty::Kind::Unit)};
+    auto lhs = operand_use(*assignment.target, destination, false);
+    auto rhs = operand_use(*assignment.value, source);
+    auto operation = resolve_operation(binary_operation(assignment.op),
+                                       lhs.effective_type, rhs.effective_type);
+    if (!operation) {
+      report(node.span, "compound operator " + std::string(ast::spelling(assignment.op)) +
+                           " is not defined for " + type_name(lhs.effective_type) +
+                           " and " + type_name(rhs.effective_type));
+      return {ty(Ty::Kind::Unit)};
+    }
+    ExprInfo result{ty(Ty::Kind::Unit)};
+    result.compound = ResolvedBinary{*operation, std::move(lhs), std::move(rhs), destination.type};
+    return result;
   }
 
   ExprInfo check_cast(const ast::Expr &node, const ast::CastExpr &cast) {
@@ -1548,11 +1552,20 @@ private:
       base = base->element();
       receiver_adjustments.push_back({Adjustment::Kind::Dereference, base});
     }
+    std::optional<BuiltinId> builtin;
+    const auto &method_name = method.method.text;
+    if (method_name == "clone") builtin = BuiltinId::Clone;
+    else if (method_name == "len") builtin = BuiltinId::Len;
+    else if (method_name == "is_empty") builtin = BuiltinId::IsEmpty;
+    else if (method_name == "push") builtin = BuiltinId::Push;
+    else if (method_name == "remove") builtin = BuiltinId::Remove;
     auto finish = [&](ExprInfo result, std::string target,
                       std::optional<SymbolId> symbol = {},
                       std::optional<Adjustment::Kind> borrow = {}) {
       result.target = std::move(target);
       result.symbol = symbol;
+      if (symbol) result.callable = FunctionTarget{*symbol};
+      else if (builtin) result.callable = BuiltinTarget{*builtin};
       result.adjustments = receiver_adjustments;
       if (borrow) {
         const bool mutable_borrow = *borrow == Adjustment::Kind::BorrowMutable;
