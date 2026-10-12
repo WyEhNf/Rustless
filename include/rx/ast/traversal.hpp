@@ -109,36 +109,50 @@ WalkResult walk(const Owner &root, Visitor &&visitor) {
 }
 
 namespace detail {
-template <class V> struct PreorderAdapter : DefaultVisitor {
-  V &callback;
-  explicit PreorderAdapter(V &value) : callback(value) {}
-  // Hide DefaultVisitor::enter: missing callback handlers remain errors.
-  template <class O, class P>
-    requires std::invocable<V &, const O &, const P &> &&
-             (std::same_as<std::invoke_result_t<V &, const O &, const P &>,
-                           void> ||
-              std::same_as<std::invoke_result_t<V &, const O &, const P &>,
-                           WalkControl>)
-  WalkControl enter(const O &owner, const P &p) {
-    if constexpr (std::same_as<std::invoke_result_t<V &, const O &, const P &>,
-                               void>) {
-      std::invoke(callback, owner, p);
+template <class Callback, class Owner, class Payload, class Enable = void>
+struct PreorderCall : std::false_type {};
+
+template <class Callback, class Owner, class Payload>
+struct PreorderCall<Callback, Owner, Payload,
+                    std::void_t<std::invoke_result_t<Callback &, const Owner &,
+                                                    const Payload &>>> {
+  using Result =
+      std::invoke_result_t<Callback &, const Owner &, const Payload &>;
+  static constexpr bool value = std::is_same_v<Result, void> ||
+                                std::is_same_v<Result, WalkControl>;
+};
+
+template <class Callback> struct PreorderAdapter : DefaultVisitor {
+  Callback &callback;
+  explicit PreorderAdapter(Callback &value) : callback(value) {}
+
+  template <class Owner, class Payload,
+            std::enable_if_t<PreorderCall<Callback, Owner, Payload>::value,
+                             int> = 0>
+  WalkControl enter(const Owner &owner, const Payload &payload) {
+    using Result = typename PreorderCall<Callback, Owner, Payload>::Result;
+    if constexpr (std::is_same_v<Result, void>) {
+      std::invoke(callback, owner, payload);
       return WalkControl::Continue;
     } else {
-      return std::invoke(callback, owner, p);
+      return std::invoke(callback, owner, payload);
     }
   }
 };
-} // namespace detail
+}
 
-template <class V>
-concept TraversalCallback = TraversalVisitor<detail::PreorderAdapter<V>>;
+template <class Callback>
+inline constexpr bool TraversalCallback =
+    TraversalVisitor<detail::PreorderAdapter<Callback>>;
 
-template <SyntaxRoot T, class V>
-  requires(!TraversalVisitor<std::remove_reference_t<V>>) &&
-          TraversalCallback<std::remove_reference_t<V>>
-WalkResult walk(const T &root, V &&callback) {
-  detail::PreorderAdapter<std::remove_reference_t<V>> visitor(callback);
+template <class Owner, class Callback,
+          std::enable_if_t<
+              SyntaxRoot<Owner> &&
+                  !TraversalVisitor<std::remove_reference_t<Callback>> &&
+                  TraversalCallback<std::remove_reference_t<Callback>>,
+              int> = 0>
+WalkResult walk(const Owner &root, Callback &&callback) {
+  detail::PreorderAdapter<std::remove_reference_t<Callback>> visitor(callback);
   return walk(root, visitor);
 }
-} // namespace rx::ast
+}
