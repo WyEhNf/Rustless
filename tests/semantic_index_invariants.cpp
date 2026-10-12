@@ -51,6 +51,13 @@ fn main() {
     }
     assert(rejected);
   };
+  rejects([](auto &draft) {
+    rx::TypeContext types;
+    for (auto &fact : draft.expressions)
+      if (fact.callable && fact.target == "choose" &&
+          fact.type->kind() == rx::SemanticType::Kind::I32)
+        fact.type = types.primitive(rx::SemanticType::Kind::Bool);
+  });
   auto named = [&](std::string_view name) {
     const auto found =
         std::find_if(original.symbols.begin(), original.symbols.end(),
