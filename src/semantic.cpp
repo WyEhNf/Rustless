@@ -581,37 +581,36 @@ private:
                 const ast::BooleanExpr &payload) -> EvaluatedConstant {
               auto type = primitive_type(SemanticType::Kind::Bool);
               record_node(node, ExprInfo{type});
-              return {type, p.value};
+              return {type, payload.value};
             },
             [&](const ast::Expr &node,
-                const ast::IntegerExpr &p) -> EvaluatedConstant {
-              auto type = literal_type(p.literal, expected, node.span);
-              auto magnitude = integer_magnitude(p.literal).value_or(0);
-              // Invalid magnitudes must not overflow signed arithmetic during
-              // recovery.
+                const ast::IntegerExpr &payload) -> EvaluatedConstant {
+              auto type = literal_type(payload.literal, expected, node.span);
+              auto magnitude = integer_magnitude(payload.literal).value_or(0);
+
               if (magnitude > std::numeric_limits<std::uint32_t>::max())
                 magnitude = 0;
               record_node(node, ExprInfo{type});
               return {type, static_cast<std::int64_t>(magnitude)};
             },
             [&](const ast::Expr &node,
-                const ast::UnaryExpr &p) -> EvaluatedConstant {
-              if (p.op != ast::UnaryOp::Negate)
+                const ast::UnaryExpr &payload) -> EvaluatedConstant {
+              if (payload.op != ast::UnaryOp::Negate)
                 return invalid_constant(node);
               auto [type, value] =
-                  constant_value(p.operand, expected, self_name);
+                  constant_value(payload.operand, expected, self_name);
               if (!signed_integer(type))
                 report(node.span, "only signed constants may be negated");
               ExprInfo result{type};
               result.unary = ResolvedUnary{
                   UnaryOperation::Negate,
-                  OperandSemantics{p.operand->id, type, {}}, type};
+                  OperandSemantics{payload.operand->id, type, {}}, type};
               record_node(node, result);
               return {type, -value};
             },
             [&](const ast::Expr &node,
-                const ast::PathExpr &p) -> EvaluatedConstant {
-              return constant_path(node, p, self_name);
+                const ast::PathExpr &payload) -> EvaluatedConstant {
+              return constant_path(node, payload, self_name);
             },
             [&](const ast::Expr &node, const auto &) -> EvaluatedConstant {
               return invalid_constant(node);
@@ -619,7 +618,7 @@ private:
   }
   EvaluatedConstant invalid_constant(const ast::Expr &node) {
     report(node.span, "invalid constant expression");
-    auto error = ty(Ty::Kind::Error);
+    auto error = primitive_type(SemanticType::Kind::Error);
     record_node(node, ExprInfo{error});
     return {error, 0};
   }
@@ -642,7 +641,7 @@ private:
   }
 
   bool validate_layout(const std::string &name) {
-    // Layout DFS rejects inline recursion while references remain finite.
+
     auto &structure = structures_.at(name);
     if (structure.layout == StructInfo::LayoutState::Valid)
       return true;
@@ -655,27 +654,29 @@ private:
     }
     structure.layout = StructInfo::LayoutState::Visiting;
     bool valid = true;
-    std::function<void(const TyPtr &)> visit = [&](const TyPtr &field) {
-      if (field->kind() == Ty::Kind::Struct)
-        valid &= validate_layout(field->name());
-      else if (field->kind() == Ty::Kind::Array)
-        visit(field->element());
-    };
+    std::function<void(const SemanticTypePtr &)> visit =
+        [&](const SemanticTypePtr &field) {
+          if (field->kind() == SemanticType::Kind::Struct)
+            valid &= validate_layout(field->name());
+          else if (field->kind() == SemanticType::Kind::Array)
+            visit(field->element());
+        };
     for (const auto &[_, field] : structure.fields)
       visit(field);
-    structure.layout = valid ? StructInfo::LayoutState::Valid
-                             : StructInfo::LayoutState::Invalid;
+    structure.layout = StructInfo::LayoutState::Invalid;
+    if (valid)
+      structure.layout = StructInfo::LayoutState::Valid;
     return valid;
   }
 
-  bool supports(const TyPtr &value, const std::string &trait,
+  bool supports(const SemanticTypePtr &value, const std::string &trait,
                 const std::string &root, std::unordered_set<std::string> seen) {
     if (!value)
       return false;
-    if (value->kind() == Ty::Kind::Bool || integer(value) ||
-        value->kind() == Ty::Kind::Unit)
+    if (value->kind() == SemanticType::Kind::Bool || integer(value) ||
+        value->kind() == SemanticType::Kind::Unit)
       return true;
-    if (value->kind() == Ty::Kind::Ref) {
+    if (value->kind() == SemanticType::Kind::Ref) {
       if (trait == "Copy")
         return !value->is_mutable();
       if (trait == "Clone")
@@ -683,20 +684,22 @@ private:
       if (trait == "PartialEq" || trait == "Eq")
         return supports(value->element(), trait, root, seen);
     }
-    if (value->kind() == Ty::Kind::Box || value->kind() == Ty::Kind::Vec ||
-        value->kind() == Ty::Kind::Array) {
-      if (trait == "Copy" && value->kind() != Ty::Kind::Array)
+    if (value->kind() == SemanticType::Kind::Box ||
+        value->kind() == SemanticType::Kind::Vec ||
+        value->kind() == SemanticType::Kind::Array) {
+      if (trait == "Copy" && value->kind() != SemanticType::Kind::Array)
         return false;
       return supports(value->element(), trait, root, std::move(seen));
     }
-    if (value->kind() == Ty::Kind::Struct) {
-      if (seen.contains(value->name()))
+    if (value->kind() == SemanticType::Kind::Struct) {
+      if (seen.find(value->name()) != seen.end())
         return trait != "Copy";
       seen.insert(value->name());
-      auto it = structures_.find(value->name());
-      if (it == structures_.end() || !it->second.derives.contains(trait))
+      auto found = structures_.find(value->name());
+      if (found == structures_.end() ||
+          found->second.derives.find(trait) == found->second.derives.end())
         return false;
-      for (const auto &[_, field] : it->second.fields)
+      for (const auto &[_, field] : found->second.fields)
         if (!supports(field, trait, root, seen))
           return false;
       return true;
@@ -705,17 +708,17 @@ private:
   }
 
   void validate_entry() {
-    auto it = functions_.find("main");
-    if (it == functions_.end()) {
+    auto found = functions_.find("main");
+    if (found == functions_.end()) {
       report(crate_.span, "an executable requires a top-level main function");
       return;
     }
-    const auto &main = it->second;
+    const auto &main = found->second;
     if (!main.parameters.empty())
       report(main.ast->span, "main cannot have value parameters");
     if (main.ast->generics && !main.ast->generics->lifetimes.empty())
       report(main.ast->span, "main cannot have generic parameters");
-    if (main.result->kind() != Ty::Kind::Unit)
+    if (main.result->kind() != SemanticType::Kind::Unit)
       report(main.ast->span, "main must return unit");
   }
 
@@ -729,7 +732,7 @@ private:
   void check_function(const FunctionInfo &function) {
     FunctionSemantics signature{
         symbol_for(function.ast->id), {}, {}, function.result};
-    // Every function starts with isolated scopes and loop context.
+
     scopes_.clear();
     scopes_.emplace_back();
     current_function_ = &function;
@@ -738,7 +741,7 @@ private:
         report(function.ast->span, "self is only available in a method");
       auto self = structure_type(function.owner);
       if (ast::by_reference(*function.ast->signature.receiver))
-        self = compound(Ty::Kind::Ref, self,
+        self = compound(SemanticType::Kind::Ref, self,
                         ast::is_mutable(*function.ast->signature.receiver));
       record_symbol(function.ast->signature.receiver->id, SymbolKind::Receiver,
                     "self", function.ast->id);
@@ -749,18 +752,18 @@ private:
           self, ast::is_mutable(*function.ast->signature.receiver),
           symbol_for(function.ast->signature.receiver->id)};
     }
-    for (std::size_t i = 0; i < function.ast->signature.parameters.size();
-         ++i) {
-      const auto &parameter = function.ast->signature.parameters[i];
+    for (std::size_t index = 0;
+         index < function.ast->signature.parameters.size(); ++index) {
+      const auto &parameter = function.ast->signature.parameters[index];
       if (protected_builtin_value(parameter.binding.name.text))
         report(parameter.span, "cannot shadow a protected builtin");
       record_symbol(parameter.id, SymbolKind::Parameter,
                     parameter.binding.name.text, function.ast->id);
-      record_symbol_type(parameter.id, function.parameters[i]);
+      record_symbol_type(parameter.id, function.parameters[index]);
       signature.parameters.push_back(
-          {symbol_for(parameter.id), function.parameters[i]});
+          {symbol_for(parameter.id), function.parameters[index]});
       scopes_.back()[parameter.binding.name.text] = {
-          function.parameters[i],
+          function.parameters[index],
           parameter.binding.mutability == ast::Mutability::Mutable,
           symbol_for(parameter.id)};
     }
@@ -772,62 +775,66 @@ private:
   }
 
   Binding *lookup(const std::string &name) {
-    for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
-      if (auto found = it->find(name); found != it->end())
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope)
+      if (auto found = scope->find(name); found != scope->end())
         return &found->second;
     return nullptr;
   }
 
-  bool coercible(const TyPtr &from, const TyPtr &to) {
-    if (!from || !to || from->kind() == Ty::Kind::Error ||
-        to->kind() == Ty::Kind::Error || from->kind() == Ty::Kind::Never)
+  bool coercible(const SemanticTypePtr &from, const SemanticTypePtr &to) {
+    if (!from || !to || from->kind() == SemanticType::Kind::Error ||
+        to->kind() == SemanticType::Kind::Error ||
+        from->kind() == SemanticType::Kind::Never)
       return true;
-    if (same(from, to))
+    if (compatible_types(from, to))
       return true;
-    if (from->kind() == Ty::Kind::Ref && to->kind() == Ty::Kind::Ref) {
+    if (from->kind() == SemanticType::Kind::Ref &&
+        to->kind() == SemanticType::Kind::Ref) {
       if (from->is_mutable() && !to->is_mutable() &&
-          same(from->element(), to->element()))
+          compatible_types(from->element(), to->element()))
         return true;
       auto current = from;
-      while (current->kind() == Ty::Kind::Ref ||
-             current->kind() == Ty::Kind::Box) {
+      while (current->kind() == SemanticType::Kind::Ref ||
+             current->kind() == SemanticType::Kind::Box) {
         current = current->element();
-        if (to->kind() == Ty::Kind::Ref &&
+        if (to->kind() == SemanticType::Kind::Ref &&
             (!to->is_mutable() || from->is_mutable()) &&
-            same(current, to->element()))
+            compatible_types(current, to->element()))
           return true;
       }
     }
     return false;
   }
 
-  TyPtr common_type(const TyPtr &first, const TyPtr &second) {
+  SemanticTypePtr common_type(const SemanticTypePtr &first,
+                              const SemanticTypePtr &second) {
     if (coercible(second, first))
       return first;
     if (coercible(first, second))
       return second;
-    return ty(Ty::Kind::Error);
+    return primitive_type(SemanticType::Kind::Error);
   }
 
   bool writable(const ExprInfo &value) const {
     if (value.access_locked)
       return false;
     auto current = value.type;
-    while (current && current->kind() == Ty::Kind::Box)
+    while (current && current->kind() == SemanticType::Kind::Box)
       current = current->element();
-    if (current && current->kind() == Ty::Kind::Ref)
+    if (current && current->kind() == SemanticType::Kind::Ref)
       return current->is_mutable();
     return !value.is_place || value.is_mutable;
   }
 
-  void mismatch(Span span, const TyPtr &actual, const TyPtr &expected) {
+  void mismatch(Span span, const SemanticTypePtr &actual,
+                const SemanticTypePtr &expected) {
     report(span, "type mismatch: found " + type_name(actual) + ", expected " +
                      type_name(expected));
   }
 
-  TyPtr literal_type(const ast::IntegerLiteral &literal, const TyPtr &expected,
-                     Span span) {
-    TyPtr result;
+  SemanticTypePtr literal_type(const ast::IntegerLiteral &literal,
+                               const SemanticTypePtr &expected, Span span) {
+    SemanticTypePtr result;
     if (literal.suffix) {
       switch (*literal.suffix) {
       case ast::IntegerSuffix::I32:
