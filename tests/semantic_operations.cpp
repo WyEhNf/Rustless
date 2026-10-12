@@ -193,9 +193,48 @@ fn main() {
          rx::BuiltinId::VecNew);
 }
 
+void shift_policy() {
+  Program program(R"(
+fn main() {
+  let mut signed: i32 = -8;
+  let unsigned: u32 = 8;
+  let a = signed >> 32;
+  let b = unsigned >> 32;
+  let c = unsigned << 32;
+  signed >>= 32;
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  ir::SemanticBridge bridge(index);
+  const auto expected =
+      std::array{std::pair{"signed >> 32", ir::BinaryOp::AShr},
+                 std::pair{"unsigned >> 32", ir::BinaryOp::LShr},
+                 std::pair{"unsigned << 32", ir::BinaryOp::Shl}};
+  for (const auto &[text, op] : expected) {
+    const auto &node = expression(program, text);
+    const auto &fact = index.expression(node);
+    const auto &resolved = std::get<rx::ShiftOperation>(fact.binary->operation);
+    assert(resolved.count_policy == rx::ShiftCountPolicy::MaskToWidth);
+    const auto lowered =
+        bridge.binary(node, *ast::get_if<ast::BinaryExpr>(node));
+    const auto &operation = std::get<ir::ScalarArithmetic>(lowered.operation);
+    assert(operation.op == op && operation.operand_type == ir::Type::I32);
+    assert(operation.shift_count_mask == 31);
+  }
+  const auto &assignment = expression(program, "signed >>= 32");
+  const auto &fact = index.expression(assignment);
+  assert(std::holds_alternative<rx::ShiftOperation>(fact.compound->operation));
+  const auto lowered = bridge.compound(
+      assignment, *ast::get_if<ast::CompoundAssignExpr>(assignment));
+  assert(lowered.operation.op == ir::BinaryOp::AShr);
+  assert(lowered.operation.shift_count_mask == 31);
+}
+
 int main() {
   boolean_assignments();
   reference_operand_adjustments();
   box_equality();
   callable_aliases();
+  shift_policy();
 }
