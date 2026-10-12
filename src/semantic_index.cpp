@@ -214,11 +214,80 @@ void SemanticIndex::validate_declarations() const {
       require_equivalent(symbol_type(field_id), type(*field.type));
     }
   };
+  auto check_function = [&](const ast::Function &node,
+                            std::optional<SymbolId> owner = {}) {
+    const auto id = require_symbol(
+        node, owner ? SymbolKind::AssociatedFunction : SymbolKind::Function,
+        owner);
+    const auto &fact = function(id);
+    if (fact.parameters.size() != node.signature.parameters.size() ||
+        fact.receiver.has_value() != node.signature.receiver.has_value())
+      throw std::invalid_argument("semantic function signature count mismatch");
+    for (std::size_t i = 0; i < node.signature.parameters.size(); ++i) {
+      const auto &parameter = node.signature.parameters[i];
+      const auto parameter_id =
+          require_symbol(parameter, SymbolKind::Parameter, id);
+      if (fact.parameters[i].symbol != parameter_id)
+        throw std::invalid_argument("semantic parameter order mismatch");
+      require_equivalent(fact.parameters[i].type, type(*parameter.type));
+      require_equivalent(fact.parameters[i].type, symbol_type(parameter_id));
+    }
+    if (fact.receiver) {
+      const auto &receiver = *node.signature.receiver;
+      const auto receiver_id =
+          require_symbol(receiver, SymbolKind::Receiver, id);
+      if (!owner || fact.receiver->symbol != receiver_id)
+        throw std::invalid_argument("semantic receiver identity mismatch");
+      require_equivalent(fact.receiver->type, symbol_type(receiver_id));
+      auto receiver_type = fact.receiver->type;
+      if (ast::by_reference(receiver)) {
+        if (receiver_type->kind != SemanticType::Kind::Ref ||
+            receiver_type->is_mutable != ast::is_mutable(receiver))
+          throw std::invalid_argument("semantic receiver reference mismatch");
+        receiver_type = receiver_type->element;
+      }
+      if (receiver_type->kind != SemanticType::Kind::Struct ||
+          receiver_type->name != symbol(*owner).name)
+        throw std::invalid_argument("semantic receiver owner type mismatch");
+    }
+    if (node.signature.return_annotation)
+      require_equivalent(fact.result, type(**node.signature.return_annotation));
+    else if (fact.result->kind != SemanticType::Kind::Unit)
+      throw std::invalid_argument("unannotated function result is not unit");
+    ast::walk(*node.body, [&](const auto &statement, const auto &payload) {
+      if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
+                                 ast::LetStmt>) {
+        const auto local = require_symbol(statement, SymbolKind::Local, id);
+        if (payload.annotation)
+          require_equivalent(symbol_type(local), type(**payload.annotation));
+        else
+          require_equivalent(symbol_type(local),
+                             expression(*payload.initializer).type);
+      }
+    });
+  };
   for (const auto &item : crate_->items)
     ast::visit(item, [&](const ast::Node &, const auto &payload) {
-      if constexpr (std::same_as<std::remove_cvref_t<decltype(payload)>,
-                                 ast::Struct>)
+      using T = std::remove_cvref_t<decltype(payload)>;
+      if constexpr (std::same_as<T, ast::Struct>)
         check_struct(payload);
+      if constexpr (std::same_as<T, ast::Function>)
+        check_function(payload);
+      if constexpr (std::same_as<T, ast::Impl>) {
+        const auto target = type(*payload.target);
+        if (target->kind != SemanticType::Kind::Struct)
+          throw std::invalid_argument("checked impl target is not a struct");
+        SymbolId owner{};
+        for (const auto &[id, record] : symbols_)
+          if (record->kind == SymbolKind::Struct && record->name == target->name)
+            owner = id;
+        for (const auto &member : payload.members)
+          ast::visit(member, [&](const ast::Node &, const auto &value) {
+            if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>,
+                                       ast::Function>)
+              check_function(value, owner);
+          });
+      }
     });
 }
 } // namespace rx
