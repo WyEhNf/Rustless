@@ -629,9 +629,27 @@ void SemanticIndex::validate_shapes() const {
                            expression(*payload.target).type);
       }
       if constexpr (std::same_as<P, ast::CallExpr> ||
-                    std::same_as<P, ast::MethodCallExpr>)
+                    std::same_as<P, ast::MethodCallExpr>) {
         if (!fact.callable)
           throw std::invalid_argument("checked call has no resolved target");
+        if (const auto *target = std::get_if<FunctionTarget>(&*fact.callable)) {
+          const auto &signature = function(target->symbol);
+          require_equivalent(fact.type, signature.result);
+          std::vector<SemanticTypePtr> parameters;
+          if constexpr (std::same_as<P, ast::CallExpr>)
+            if (signature.receiver) parameters.push_back(signature.receiver->type);
+          for (const auto &parameter : signature.parameters)
+            parameters.push_back(parameter.type);
+          if (parameters.size() != payload.arguments.size())
+            throw std::invalid_argument("call argument count differs from signature");
+          for (std::size_t i = 0; i < parameters.size(); ++i) {
+            const auto &argument = expression(*payload.arguments[i]);
+            const auto &effective = argument.adjustments.empty()
+                ? argument.type : argument.adjustments.back().target;
+            require_equivalent(effective, parameters[i]);
+          }
+        }
+      }
       if constexpr (std::same_as<P, ast::CallExpr>) {
         const auto &callee = expression(*payload.callee);
         if (!callee.callable || !same_target(*fact.callable, *callee.callable))
