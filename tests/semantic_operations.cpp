@@ -317,6 +317,35 @@ fn main() {
   assert(explicit_fact.type->kind() == K::I32 && explicit_fact.is_place);
 }
 
+void parenthesized_operand_coercion() {
+  Program program(R"(
+fn main() {
+  let mut x: i32 = 1;
+  let shared = &x;
+  let mutable = &mut x;
+  let plain = shared + mutable;
+  let parenthesized = shared + (mutable);
+}
+)");
+  program.accepted();
+  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  ir::SemanticBridge bridge(index);
+  for (const auto text : {"shared + mutable", "shared + (mutable)"}) {
+    const auto &node = expression(program, text);
+    const auto &payload = *ast::get_if<ast::BinaryExpr>(node);
+    const auto &right = index.expression(node).binary->right;
+    assert(right.adjustments.size() == 2);
+    assert(right.adjustments[0].kind == rx::Adjustment::Kind::MutToShared);
+    assert(right.adjustments[0].target->kind() == K::Ref &&
+           !right.adjustments[0].target->is_mutable());
+    assert(right.adjustments[1].kind == rx::Adjustment::Kind::Dereference);
+    assert(right.effective_type->kind() == K::I32);
+    const auto lowered = bridge.binary(node, payload);
+    assert(std::get<ir::ScalarArithmetic>(lowered.operation).op ==
+           ir::BinaryOp::Add);
+  }
+}
+
 int main() {
   boolean_assignments();
   reference_operand_adjustments();
@@ -325,4 +354,5 @@ int main() {
   shift_policy();
   projection_result_operations();
   unary_operand_adjustments();
+  parenthesized_operand_coercion();
 }
