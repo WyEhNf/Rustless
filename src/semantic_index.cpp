@@ -314,6 +314,28 @@ void validate_operand(const SemanticIndex &index, const OperandSemantics &operan
   }
   require_equivalent(current, operand.effective_type);
 }
+void validate_operation(const SemanticIndex &index, const ResolvedBinary &fact,
+                        const ast::Expr &left, const ast::Expr &right,
+                        ast::BinaryOp op) {
+  if (fact.left.node != left.id || fact.right.node != right.id ||
+      source_operator(fact.operation) != op)
+    throw std::invalid_argument("resolved operation does not match source operands");
+  validate_operand(index, fact.left);
+  validate_operand(index, fact.right);
+  const auto expected = resolve_operation(op, fact.left.effective_type,
+                                         fact.right.effective_type);
+  if (!expected || expected->index() != fact.operation.index())
+    throw std::invalid_argument("resolved operation category is invalid for types");
+  const bool boolean = std::holds_alternative<ScalarComparison>(fact.operation) ||
+                       std::holds_alternative<StructuralEquality>(fact.operation) ||
+                       std::holds_alternative<LogicalOperation>(fact.operation);
+  if (boolean) {
+    if (fact.result->kind() != SemanticType::Kind::Bool)
+      throw std::invalid_argument("comparison or logical result is not bool");
+  } else {
+    require_equivalent(fact.result, fact.left.effective_type);
+  }
+}
 } // namespace
 void SemanticIndex::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
@@ -496,6 +518,36 @@ void SemanticIndex::validate_shapes() const {
     }
     if constexpr (std::same_as<Owner, ast::Expr>) {
       const auto &fact = expression(node);
+      if (fact.binary.has_value() != std::same_as<P, ast::BinaryExpr> ||
+          fact.compound.has_value() != std::same_as<P, ast::CompoundAssignExpr>)
+        throw std::invalid_argument("resolved operation attached to wrong AST kind");
+      if constexpr (std::same_as<P, ast::BinaryExpr>) {
+        validate_operation(*this, *fact.binary, *payload.left, *payload.right,
+                           payload.op);
+        require_equivalent(fact.type, fact.binary->result);
+      }
+      if constexpr (std::same_as<P, ast::CompoundAssignExpr>) {
+        validate_operation(*this, *fact.compound, *payload.target, *payload.value,
+                           binary_operation(payload.op));
+        require_equivalent(fact.compound->result, expression(*payload.target).type);
+      }
+      if constexpr (std::same_as<P, ast::CallExpr> ||
+                    std::same_as<P, ast::MethodCallExpr>)
+        if (!fact.callable)
+          throw std::invalid_argument("checked call has no resolved target");
+      if (fact.type->kind() == K::Function) {
+        const auto *target = fact.callable
+            ? std::get_if<FunctionTarget>(&*fact.callable) : nullptr;
+        if (!target || target->symbol != fact.type->symbol())
+          throw std::invalid_argument("function expression target identity mismatch");
+      }
+      if (fact.type->kind() == K::BuiltinFunction) {
+        const auto *target = fact.callable
+            ? std::get_if<BuiltinTarget>(&*fact.callable) : nullptr;
+        const auto &builtin = *get_if<BuiltinFunctionType>(*fact.type);
+        if (!target || target->builtin != builtin.builtin)
+          throw std::invalid_argument("builtin expression target identity mismatch");
+      }
       if constexpr (std::same_as<P, ast::IntegerExpr>) {
         const auto kind = fact.type->kind();
         if (kind != K::I32 && kind != K::U32 && kind != K::Isize &&
