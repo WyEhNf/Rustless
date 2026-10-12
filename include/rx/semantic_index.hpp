@@ -4,8 +4,7 @@
 #include <unordered_map>
 
 namespace rx {
-// The index owns a frozen semantic snapshot and borrows its original AST.
-// The AST must remain alive and unchanged; the result wrapper may be destroyed.
+
 class SemanticIndex {
 public:
   SemanticIndex(const ast::Crate &crate, const SemanticResult &result);
@@ -63,4 +62,4 @@ private:
   std::unordered_map<SymbolId, const StructSemantics *> structures_;
   std::unordered_map<SymbolId, const ConstantValue *> constants_;
 };
-} // namespace rx
+}
