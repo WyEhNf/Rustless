@@ -3,109 +3,47 @@
 
 namespace rx::ir {
 namespace {
-using K = SemanticType::Kind;
-bool signed_type(const SemanticTypePtr &type) {
-  return type->kind == K::I32 || type->kind == K::Isize;
-}
-SemanticTypePtr scalar_operand(SemanticTypePtr type) {
-  while (type && type->kind == K::Ref)
-    type = type->element;
+bool signed_integer(const SemanticTypePtr &type) {
   if (!type)
-    throw std::invalid_argument("missing scalar operand type");
-  return type;
+    throw std::invalid_argument("missing resolved operand type");
+  return type->kind() == SemanticType::Kind::I32 ||
+         type->kind() == SemanticType::Kind::Isize;
+}
+BinaryOp arithmetic(ArithmeticOp op, bool sign) {
+  switch (op) {
+  case ArithmeticOp::Add: return BinaryOp::Add;
+  case ArithmeticOp::Sub: return BinaryOp::Sub;
+  case ArithmeticOp::Mul: return BinaryOp::Mul;
+  case ArithmeticOp::Div: return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
+  case ArithmeticOp::Rem: return sign ? BinaryOp::SRem : BinaryOp::URem;
+  }
+  throw std::invalid_argument("invalid resolved arithmetic operation");
+}
+BinaryOp bitwise(BitwiseOp op) {
+  switch (op) {
+  case BitwiseOp::And: return BinaryOp::And;
+  case BitwiseOp::Or: return BinaryOp::Or;
+  case BitwiseOp::Xor: return BinaryOp::Xor;
+  }
+  throw std::invalid_argument("invalid resolved bitwise operation");
+}
+Predicate comparison(Relation relation, bool sign) {
+  switch (relation) {
+  case Relation::Eq: return Predicate::Eq;
+  case Relation::Ne: return Predicate::Ne;
+  case Relation::Lt: return sign ? Predicate::SLt : Predicate::ULt;
+  case Relation::Le: return sign ? Predicate::SLe : Predicate::ULe;
+  case Relation::Gt: return sign ? Predicate::SGt : Predicate::UGt;
+  case Relation::Ge: return sign ? Predicate::SGe : Predicate::UGe;
+  }
+  throw std::invalid_argument("invalid resolved comparison");
+}
+ShortCircuit short_circuit(LogicalOp op) {
+  switch (op) {
+  case LogicalOp::And: return ShortCircuit::And;
+  case LogicalOp::Or: return ShortCircuit::Or;
+  }
+  throw std::invalid_argument("invalid resolved logical operation");
 }
 } // namespace
-BinaryLowering SemanticBridge::binary(const ast::Expr &node,
-                                      const ast::BinaryExpr &payload) const {
-  if (std::get_if<ast::BinaryExpr>(&node.data) != &payload)
-    throw std::invalid_argument(
-        "binary payload does not belong to this AST node");
-  auto left = scalar_operand(semantic_.expression(*payload.left).type);
-  auto operand = scalar_type(left);
-  auto result = scalar_type(semantic_.expression(node).type);
-  if (!operand || !result || *operand == Type::Void || *result == Type::Void)
-    throw std::invalid_argument("aggregate operators need aggregate lowering");
-  const bool sign = signed_type(left);
-  using A = ast::BinaryOp;
-  auto operation = [&]() -> decltype(BinaryLowering::operation) {
-    switch (payload.op) {
-    case A::Add:
-      return BinaryOp::Add;
-    case A::Sub:
-      return BinaryOp::Sub;
-    case A::Mul:
-      return BinaryOp::Mul;
-    case A::Div:
-      return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
-    case A::Rem:
-      return sign ? BinaryOp::SRem : BinaryOp::URem;
-    case A::BitAnd:
-      return BinaryOp::And;
-    case A::BitOr:
-      return BinaryOp::Or;
-    case A::BitXor:
-      return BinaryOp::Xor;
-    case A::Shl:
-      return BinaryOp::Shl;
-    case A::Shr:
-      return sign ? BinaryOp::AShr : BinaryOp::LShr;
-    case A::Eq:
-      return Predicate::Eq;
-    case A::Ne:
-      return Predicate::Ne;
-    case A::Lt:
-      return sign ? Predicate::SLt : Predicate::ULt;
-    case A::Le:
-      return sign ? Predicate::SLe : Predicate::ULe;
-    case A::Gt:
-      return sign ? Predicate::SGt : Predicate::UGt;
-    case A::Ge:
-      return sign ? Predicate::SGe : Predicate::UGe;
-    case A::LogicalAnd:
-      return ShortCircuit::And;
-    case A::LogicalOr:
-      return ShortCircuit::Or;
-    }
-    throw std::invalid_argument("invalid AST binary operator");
-  }();
-  return {operation, *operand, *result};
-}
-BinaryOp
-SemanticBridge::compound(const ast::Expr &node,
-                         const ast::CompoundAssignExpr &payload) const {
-  if (std::get_if<ast::CompoundAssignExpr>(&node.data) != &payload)
-    throw std::invalid_argument(
-        "assignment payload does not belong to this AST node");
-  (void)semantic_.expression(node);
-  auto target = semantic_.expression(*payload.target).type;
-  auto type = scalar_type(target);
-  if (!type || (*type != Type::I32 && *type != Type::I1))
-    throw std::invalid_argument(
-        "compound assignment requires a scalar integer or bool");
-  const bool sign = signed_type(target);
-  using A = ast::CompoundAssignOp;
-  switch (payload.op) {
-  case A::Add:
-    return BinaryOp::Add;
-  case A::Sub:
-    return BinaryOp::Sub;
-  case A::Mul:
-    return BinaryOp::Mul;
-  case A::Div:
-    return sign ? BinaryOp::SDiv : BinaryOp::UDiv;
-  case A::Rem:
-    return sign ? BinaryOp::SRem : BinaryOp::URem;
-  case A::BitAnd:
-    return BinaryOp::And;
-  case A::BitOr:
-    return BinaryOp::Or;
-  case A::BitXor:
-    return BinaryOp::Xor;
-  case A::Shl:
-    return BinaryOp::Shl;
-  case A::Shr:
-    return sign ? BinaryOp::AShr : BinaryOp::LShr;
-  }
-  throw std::invalid_argument("invalid AST compound assignment operator");
-}
 } // namespace rx::ir
