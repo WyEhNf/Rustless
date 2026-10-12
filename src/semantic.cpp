@@ -575,7 +575,10 @@ private:
                   constant_value(p.operand, expected, self_name);
               if (!signed_integer(type))
                 report(node.span, "only signed constants may be negated");
-              record_node(node, ExprInfo{type});
+              ExprInfo result{type};
+              result.unary = ResolvedUnary{UnaryOperation::Negate,
+                  OperandSemantics{p.operand->id, type, {}}, type};
+              record_node(node, result);
               return {type, -value};
             },
             [&](const ast::Expr &node,
@@ -1623,6 +1626,13 @@ private:
         cloned = cloned->element();
       if (!supports(cloned, "Clone", "", {}))
         report(node.span, "clone is not available for " + type_name(cloned));
+      // Clone borrows the object being cloned, including a Box itself.
+      base = receiver.type;
+      receiver_adjustments.clear();
+      while (!same_type(base, cloned)) {
+        base = base->element();
+        receiver_adjustments.push_back({Adjustment::Kind::Dereference, base});
+      }
       return finish(check_method_signature(node, method.arguments, {}, cloned),
                     "builtin::clone", {}, Adjustment::Kind::BorrowShared);
     }
