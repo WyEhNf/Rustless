@@ -140,6 +140,23 @@ fn main() {
   assert(rejected);
   rx::TypeContext types;
   auto integer = types.primitive(rx::SemanticType::Kind::I32);
+  const auto packet_type =
+      types.structure(index.declaration(packet.id).id, "Packet");
+  assert(bridge.layout(types.array(packet_type, 2)).bytes == 24);
+  assert(bridge.layout(types.box(packet_type)).bytes == target.pointer().bytes);
+  assert(bridge.layout(types.vector(integer)).bytes == vector.storage.bytes);
+  const auto unit = types.primitive(rx::SemanticType::Kind::Unit);
+  assert(bridge.layout(types.array(unit, std::uint64_t{1} << 40)).bytes == 0);
+  const auto largest_count = target.max_object_size() / target.integer().bytes;
+  assert(bridge.layout(types.array(integer, largest_count)).bytes ==
+         largest_count * target.integer().bytes);
+  rejected = false;
+  try {
+    (void)bridge.layout(types.structure(rx::SymbolId{999999}, "Packet"));
+  } catch (const std::out_of_range &) {
+    rejected = true;
+  }
+  assert(rejected); // A matching display name cannot replace nominal identity.
   auto array = types.array(integer, std::uint64_t{1} << 32);
   rejected = false;
   try {
