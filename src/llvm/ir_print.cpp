@@ -1,5 +1,6 @@
 #include "rx/ir_verify.hpp"
 #include "rx/ir_visit.hpp"
+#include "rx/target_layout.hpp"
 
 #include <array>
 #include <sstream>
