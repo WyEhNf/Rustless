@@ -1539,12 +1539,12 @@ Box 分配需要大小和对齐；Vec 扩容需要字节数溢出检查以及元
 
 下图在共同的已检查信息与 lowering 之后分出两条路线，呈现它们分别承担的工作，以及仍然共用的语言转换要求。
 \begin{figure}[htbp]\centering
-\begin{tikzpicture}[node distance=9mm and 16mm]
-\node[irbox,text width=55mm] (checked) {AST + 语义事实 + 目标布局};
-\node[irbox,text width=55mm,below=of checked] (lower) {完整 lowering\\语言行为转为 IR};
-\node[irbox,text width=45mm,below left=of lower] (llvm) {LLVM 路线\\验证 / 优化 / 目标生成};
-\node[irbox,text width=45mm,below right=of lower] (direct) {直接 RV32 路线\\选择 / 分配 / 栈帧 / 汇编};
-\node[irbox,text width=55mm,below=37mm of lower] (link) {运行时 + 启动代码 + 链接环境};
+\begin{tikzpicture}
+\node[irbox,text width=55mm] (checked) at (0,0) {AST + 语义事实 + 目标布局};
+\node[irbox,text width=55mm] (lower) at (0,-1.5) {完整 lowering\\语言行为转为 IR};
+\node[irbox,text width=45mm] (llvm) at (-4,-3.5) {LLVM 路线\\验证 / 优化 / 目标生成};
+\node[irbox,text width=45mm] (direct) at (4,-3.5) {直接 RV32 路线\\选择 / 分配 / 栈帧 / 汇编};
+\node[irbox,text width=55mm] (link) at (0,-5.5) {运行时 + 启动代码 + 链接环境};
 \draw[irarrow] (checked)--(lower); \draw[irarrow] (lower)--(llvm);
 \draw[irarrow] (lower)--(direct); \draw[irarrow] (llvm)--(link);
 \draw[irarrow] (direct)--(link);
@@ -1686,7 +1686,7 @@ struct BooleanMatchExpr {
   std::array<BooleanMatchArm, 2> arms; // Source order.
 };
 \end{lstlisting}
-这个建议把“恰好两项”放入结构，真假是否重复则仍由语义判断。直接保存 on\\_true 和 on\\_false 虽便于查找，却会丢掉两分支的源码顺序；若选择这种表示，就需要额外保存来源顺序，不能让后续遍历按猜测排列。
+这个建议把“恰好两项”放入结构，真假是否重复则仍由语义判断。直接保存 \texttt{on\_true} 和 \texttt{on\_false} 虽便于查找，却会丢掉两分支的源码顺序；若选择这种表示，就需要额外保存来源顺序，不能让后续遍历按猜测排列。
 
 children 枚举先访问 scrutinee，再按源码顺序访问分支及各自 body；Visitor 为新载荷补充规则；语义检查要求 scrutinee 为 bool、模式不重复且完整覆盖、两个正常完成分支获得共同结果类型。Never 分支按既有结果规则处理。事实可以记录分支对应真假及共同结果，lowering 只读取一次 scrutinee，形成条件分支并在正常到达边上汇集结果。
 
