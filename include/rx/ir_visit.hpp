@@ -1,39 +1,48 @@
 #pragma once
 
 #include "rx/ir.hpp"
-#include <concepts>
+#include <functional>
+#include <type_traits>
 
 namespace rx::ir {
 namespace detail {
-template <class V, class Owner, class Data> struct Coverage;
-template <class V, class Owner, class... Ps>
-struct Coverage<V, Owner, std::variant<Ps...>> {
-  static consteval bool complete() {
-    if constexpr ((std::invocable<V &, const Owner &, const Ps &> && ...)) {
-      using First = std::variant_alternative_t<0, std::variant<Ps...>>;
-      using R = std::invoke_result_t<V &, const Owner &, const First &>;
-      return (
-          std::same_as<R,
-                       std::invoke_result_t<V &, const Owner &, const Ps &>> &&
-          ...);
+template <class Visitor, class Owner, class Data> struct Coverage;
+
+template <class Visitor, class Owner, class... Payloads>
+struct Coverage<Visitor, Owner, std::variant<Payloads...>> {
+  template <class Payload>
+  using PayloadResult = std::invoke_result_t<Visitor &, const Owner &, const Payload &>;
+
+  static constexpr bool complete() {
+    constexpr bool accepts_all_payloads =
+        (std::is_invocable_v<Visitor &, const Owner &, const Payloads &> && ...);
+    if constexpr (accepts_all_payloads) {
+      using FirstPayload = std::variant_alternative_t<0, std::variant<Payloads...>>;
+      using ReturnType = PayloadResult<FirstPayload>;
+      return (std::is_same_v<ReturnType, PayloadResult<Payloads>> && ...);
     }
     return false;
   }
   static constexpr bool value = complete();
 };
-} // namespace detail
-template <class V, class T>
-concept ExhaustiveVisitor =
-    (std::same_as<T, Instruction> || std::same_as<T, Operand>) &&
-    detail::Coverage<V, T, typename T::Data>::value;
 
-template <class T, class V>
-  requires ExhaustiveVisitor<V, T>
-decltype(auto) visit(const T &node, V &&visitor) {
+template <class Visitor, class Owner> struct OwnerCoverage : std::false_type {};
+
+template <class Visitor>
+struct OwnerCoverage<Visitor, Instruction> : Coverage<Visitor, Instruction, Instruction::Data> {};
+
+template <class Visitor>
+struct OwnerCoverage<Visitor, Operand> : Coverage<Visitor, Operand, Operand::Data> {};
+}
+
+template <class Visitor, class Owner>
+inline constexpr bool ExhaustiveVisitor = detail::OwnerCoverage<Visitor, Owner>::value;
+
+template <class Owner, class Visitor> decltype(auto) visit(const Owner &node, Visitor &&visitor) {
+  static_assert(ExhaustiveVisitor<Visitor, Owner>,
+                "IR visitor must handle every payload with one return type");
   return std::visit(
-      [&](const auto &p) -> decltype(auto) {
-        return std::invoke(visitor, node, p);
-      },
+      [&](const auto &payload) -> decltype(auto) { return std::invoke(visitor, node, payload); },
       node.data);
 }
 
