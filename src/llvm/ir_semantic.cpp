@@ -128,45 +128,49 @@ StructLayout &SemanticBridge::resolve_structure(SymbolId symbol) {
   return layouts_.emplace(symbol, std::move(result)).first->second;
 }
 AbiValue SemanticBridge::abi(const SemanticTypePtr &type) const {
-  auto scalar = scalar_type(type);
-  return {scalar.value_or(Type::Ptr),
-          scalar ? Passing::Direct : Passing::Indirect, layout(type)};
+  const auto scalar = scalar_type(type);
+  const auto storage = layout(type);
+  if (scalar) {
+    return {*scalar, Passing::Direct, storage};
+  }
+  return {Type::Ptr, Passing::Indirect, storage};
 }
 FunctionAbi SemanticBridge::function(const ast::Function &node) const {
   return function(semantic_.declaration(node).id);
 }
 FunctionAbi SemanticBridge::function(SymbolId symbol) const {
   const auto &signature = semantic_.function(symbol);
-  FunctionAbi result{
-      symbol, semantic_.symbol(symbol).name, abi(signature.result), {}, {}};
-  if (signature.receiver)
-    result.receiver =
-        AbiParameter{signature.receiver->symbol, abi(signature.receiver->type)};
-  for (const auto &parameter : signature.parameters)
+  FunctionAbi result{symbol, semantic_.symbol(symbol).name, abi(signature.result), {}, {}};
+  if (signature.receiver) {
+    result.receiver = AbiParameter{signature.receiver->symbol, abi(signature.receiver->type)};
+  }
+  for (const auto &parameter : signature.parameters) {
     result.parameters.push_back({parameter.symbol, abi(parameter.type)});
+  }
   return result;
 }
 Declaration SemanticBridge::declaration(const ast::Function &node) const {
   auto signature = function(node);
-  Declaration result{signature.name,
-                     signature.result.passing == Passing::Indirect
-                         ? Type::Void
-                         : signature.result.type,
-                     {},
-                     signature.symbol,
-                     ir::origin(node)};
-  // Aggregates return through a caller-provided address, followed by self and
-  // arguments.
-  if (signature.result.passing == Passing::Indirect)
+  Type return_type = signature.result.type;
+  if (signature.result.passing == Passing::Indirect) {
+    return_type = Type::Void;
+  }
+  Declaration result{signature.name, return_type, {}, signature.symbol, ir::origin(node)};
+
+  if (signature.result.passing == Passing::Indirect) {
     result.parameters.push_back(Type::Ptr);
+  }
   auto append = [&](const AbiParameter &parameter) {
-    if (parameter.value.type != Type::Void)
+    if (parameter.value.type != Type::Void) {
       result.parameters.push_back(parameter.value.type);
+    }
   };
-  if (signature.receiver)
+  if (signature.receiver) {
     append(*signature.receiver);
-  for (const auto &parameter : signature.parameters)
+  }
+  for (const auto &parameter : signature.parameters) {
     append(parameter);
+  }
   return result;
 }
 std::vector<Declaration> SemanticBridge::declarations() const {
@@ -174,20 +178,24 @@ std::vector<Declaration> SemanticBridge::declarations() const {
   auto append = [&](const ast::Function &node, const ast::Function &) {
     result.push_back(declaration(node));
   };
-  for (const auto &item : semantic_.crate().items)
-    ast::visit(item, ast::Overloaded{
-                         append,
-                         [&](const ast::Impl &node, const ast::Impl &) {
-                           for (const auto &member : node.members)
-                             ast::visit(
-                                 member,
-                                 ast::Overloaded{append,
-                                                 [](const ast::Constant &,
-                                                    const ast::Constant &) {}});
-                         },
-                         [](const ast::Use &, const ast::Use &) {},
-                         [](const ast::Struct &, const ast::Struct &) {},
-                         [](const ast::Constant &, const ast::Constant &) {}});
+  auto collect_member = ast::Overloaded{
+      append,
+      [](const ast::Constant &, const ast::Constant &) {},
+  };
+  auto collect_item = ast::Overloaded{
+      append,
+      [&](const ast::Impl &node, const ast::Impl &) {
+        for (const auto &member : node.members) {
+          ast::visit(member, collect_member);
+        }
+      },
+      [](const ast::Use &, const ast::Use &) {},
+      [](const ast::Struct &, const ast::Struct &) {},
+      [](const ast::Constant &, const ast::Constant &) {},
+  };
+  for (const auto &item : semantic_.crate().items) {
+    ast::visit(item, collect_item);
+  }
   return result;
 }
-} // namespace rx::ir
+}
