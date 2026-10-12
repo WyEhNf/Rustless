@@ -12,17 +12,27 @@ struct IntegerLiteral {
 
   static IntegerLiteral parse(std::string text) {
     IntegerBase base = IntegerBase::Decimal;
-    if (text.starts_with("0b"))
+    const std::string prefix = text.substr(0, 2);
+    if (prefix == "0b") {
       base = IntegerBase::Binary;
-    else if (text.starts_with("0o"))
+    } else if (prefix == "0o") {
       base = IntegerBase::Octal;
-    else if (text.starts_with("0x"))
+    } else if (prefix == "0x") {
       base = IntegerBase::Hex;
+    }
     std::optional<IntegerSuffix> suffix;
-    constexpr std::array names{"i32", "u32", "isize", "usize"};
-    for (std::size_t i = 0; i < names.size(); ++i)
-      if (text.ends_with(names[i]))
-        suffix = static_cast<IntegerSuffix>(i);
+    constexpr std::array<std::string_view, 4> names{
+        "i32", "u32", "isize", "usize"};
+    for (std::size_t index = 0; index < names.size(); ++index) {
+      const std::string_view candidate = names[index];
+      if (text.size() < candidate.size()) {
+        continue;
+      }
+      const std::size_t suffix_start = text.size() - candidate.size();
+      if (text.compare(suffix_start, candidate.size(), candidate) == 0) {
+        suffix = static_cast<IntegerSuffix>(index);
+      }
+    }
     return {std::move(text), base, suffix};
   }
 };
@@ -33,4 +43,4 @@ struct BooleanExpr {
   bool value;
 };
 struct UnitExpr {};
-} // namespace rx::ast
+}
