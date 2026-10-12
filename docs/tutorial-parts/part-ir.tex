@@ -1558,3 +1558,208 @@ Box 分配需要大小和对齐；Vec 扩容需要字节数溢出检查以及元
 比较两条路线时，应该固定同一份源程序、同一输入和预期行为。不同输出的指令数量可以不同，但内容相等、短路调用、移位计数和聚合按值参数不能不同。若双方行为不一致，先回到语言契约和阶段边界寻找原因，再判断优化和机器实现。
 
 至此，教程已经从源码、类型与访问走到计算图和机器约束。最后一章把这些设计转化为可检验的承诺，并讨论新增能力需要怎样的信息。
+
+\chapter{检验设计承诺，并有依据地扩展}
+\label{chap:design-evidence}
+\section*{本章导读}
+清楚的设计应当能够解释正常程序，也能够指出不合法的结构，并为新增能力提供准确位置。本章将全书的关系转成可以观察的承诺，再用一个小扩展追踪修改范围。读者将学会区分“输入被接受”“表示正确”和“执行行为符合语言”这几种证据，同时依据实际需要讨论维护与性能。
+
+测试在这里是理解设计的方法。我们不以测试数量说明优雅，也不把实现自己的计算结果重新抄入预期。每个例子都应当来自要检验的语言规则或表示不变量。
+
+\section{每个阶段承诺什么}
+词法分析承诺正确识别词法单元及非法输入；语法分析承诺按入口规则判断接受；AST 构造承诺节点形状、子节点关系、身份及范围；语义分析承诺名字、类型、转换及上下文规则；IR 构造承诺具体指令和图的不变量；完整执行还要承诺源程序规定的行为。后一个承诺不能仅由前一个阶段成功推出。
+
+下图将各层承诺连接到能够检验它的观察，呈现一种测试为什么不能替代全部其他证据。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=7mm and 18mm]
+\node[irbox,text width=43mm] (parse) {语法接受};
+\node[irbox,text width=55mm,right=of parse] (accept) {入口及成功 / 失败预期};
+\node[irbox,text width=43mm,below=of parse] (ast) {AST 形状与来源};
+\node[irbox,text width=55mm,right=of ast] (shape) {具体载荷 / 顺序 / 范围断言};
+\node[irbox,text width=43mm,below=of ast] (sem) {语义结论与链接};
+\node[irbox,text width=55mm,right=of sem] (facts) {规则反例 / 身份 / 转换预期};
+\node[irbox,text width=43mm,below=of sem] (ir) {IR 不变量与行为};
+\node[irbox,text width=55mm,right=of ir] (verify) {非法图拒绝 / 独立执行对照};
+\draw[irarrow] (parse)--(accept); \draw[irarrow] (ast)--(shape);
+\draw[irarrow] (sem)--(facts); \draw[irarrow] (ir)--(verify);
+\end{tikzpicture}
+\caption{每层承诺需要与其含义相匹配的证据}
+\end{figure}
+
+例如 1+2*3 被 parser 接受，尚未说明乘法是加法的右子节点；树的形状正确，尚未说明类型推导正确；IR 的类型和支配正确，也尚未说明输入输出顺序正确。分别观察这些关系，能使失败定位更直接，也能发现层次之间漏掉的契约。
+
+\section{parser 测试与 AST 结构测试}
+\begin{lstlisting}[language=Rustless,caption={同一次语法接受还需要核对正确的树结构}]
+fn calculate(a: i32, b: i32, c: i32) -> i32 { a + b * c }
+\end{lstlisting}
+对此输入，结构预期是函数体的 tail 为 BinaryExpr(Add)，left 指向 a，right 为 BinaryExpr(Mul)，其两个子节点分别指向 b 和 c。还应核对各次出现有不同身份，以及范围能切出对应源文本。只核对 dump 中出现了加法和乘法，会遗漏两者的父子关系。
+
+dump 便于人观察，但直接载荷断言更适合检验精确关系。当前 \texttt{tests/frontend\_ast\_structure.cpp} 对导入组、别名、类型和表达式形状作独立断言；其中如下片段直接根据示例检查组内数量及别名类别。
+\begin{lstlisting}[language=C++,caption={当前结构测试根据输入建立独立预期}]
+const auto &use = std::get<ast::Use>(crate.items[0]);
+assert(use.tree.prefix.root == ast::PathRoot::Absolute);
+const auto &group = std::get<ast::GroupImport>(use.tree.target);
+assert(group.children.size() == 4);
+const auto &rename = std::get<ast::NameImport>(group.children[0].target);
+assert(std::get<ast::Identifier>(*rename.alias).text == "r");
+\end{lstlisting}
+
+范围检查需要具体预期。把打印器返回的范围再与同一打印器结果比较，不能证明坐标转换正确。可以在小输入中手工确定字节区间，包含注释、括号和 UTF-8 注释等有区分力的情形；语言不支持的 Unicode 标识符不应被偷换成范围测试的正例。
+
+\section{Visitor 的编译期承诺与运行期关系}
+Visitor 的覆盖约束检查是否能处理每个载荷、owner 是否合适、返回类型是否一致，以及只读入口是否拒绝可变载荷参数。当前 \texttt{tests/ast\_visitor.cpp} 有如下真实断言。
+\begin{lstlisting}[language=C++,caption={当前访问接口对不合适处理者给出编译期否定}]
+static_assert(!ast::ExhaustiveVisitor<OnlyBinary, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<DifferentReturns, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<MutablePayload, ast::Expr>);
+static_assert(!ast::ExhaustiveVisitor<IdentityVisitor, int>);
+static_assert(!ast::ExhaustiveVisitor<WrongOwner, ast::Expr>);
+\end{lstlisting}
+这些断言检验接口，不检查每个处理者的算法内容。一个覆盖全部载荷却把左右操作数打印反的 Visitor，仍会满足覆盖约束。因此还要检查进入及离开次序、直接子节点顺序、Skip 的范围、Stop 后的退出行为，以及每个 owner 与载荷确实属于同一次访问。
+
+通用 catch-all 也会让新增节点继续通过覆盖检查。若处理过程需要为每个种类定义特殊语义，应使用具体重载，避免一个默认分支掩盖缺失规则；若过程只收集所有 owner 身份，通用分支则是合理选择。是否穷尽应与处理目的联系起来。
+
+寿命约束也可以用构造能力检查。当前 SemanticIndex 拒绝 const 和非 const 的临时 Crate，SemanticBridge 同样拒绝两种临时 SemanticIndex。这能排除直接借用临时对象的常见错误；一般 C++ 引用仍不能自动证明借用期间对象永远存在，所以文档和拥有关系仍需明确。
+
+\section{语义规则与事实完整性}
+语义测试应给规则建立正例和有区分力的反例。例如相同整数类型相加是正例，整数与 bool 相加是反例；可写位置可赋值是正例，共享借用后的不可写位置是反例。变换一个条件，观察是否正好改变应当改变的判断，比重复多个形式相同的程序更有解释力。
+
+\begin{lstlisting}[language=Rustless,caption={调用使用处的调整需要与表达式结果转换区分}]
+fn read(value: &i32) -> i32 { *value }
+fn main() {
+    let mut x = 3;
+    let mutable = &mut x;
+    let alias = read;
+    printInt(alias((mutable)));
+}
+\end{lstlisting}
+此例的调用目标应指向 read 声明，参数使用需要从可变引用转为共享引用；加上的括号不应让目标身份或调整丢失。独立预期应核对 FunctionTarget、实际声明 SymbolId、参数的有效类型和调整顺序，而不只核对程序成功。
+
+事实完整性也是设计承诺。所有可查询表达式、类型语法、字段和参数是否有对应记录，引用的声明是否存在，字段集合是否覆盖声明，这些可以通过 SemanticIndex 的验证检查。对象重载还核对原 AST 地址，拒绝另一棵树中碰巧具有相同 NodeId 的对象；按编号查询则要求调用者清楚编号所属的上下文。
+
+这些验证让 lowering 能放心消费已确定关系，但不能替代语言规则测试。一个完整且内部相容的错误类型结果，仍可能通过结构验证。事实的覆盖、链接和含义需要分别检验。
+
+\section{IR 与后端需要独立预期}
+IR 测试可以手工构造不合法表示：重复值定义、错误类型的操作数、不存在的分支目标、终结指令之后的普通指令、不受定义支配的使用，以及 Phi 输入与边不一致。确认 verifier 拒绝它们，能够直接检验前章的不变量。
+
+当前 \texttt{tests/ir\_alignment.cpp} 对多重边使用独立修改。下面片段把两条到达边的 Phi 少留一个输入，检查它不能覆盖两条边。
+\begin{lstlisting}[language=C++,caption={当前 Phi 回归直接检验边重数规则}]
+auto second = phi.incoming.back();
+phi.incoming.pop_back();
+assert(!ir::verify(module).empty()); // One incoming cannot cover two edges.
+phi.incoming.push_back(second);
+phi.incoming.back().value = ir::Operand::constant(ir::Type::I32, 8);
+assert(
+    !ir::verify(module).empty()); // Duplicate edges cannot select two values.
+\end{lstlisting}
+
+布局测试应使用手算结果，例如 Packet 的 count 偏移为四、总大小为十二；相同名字的不同结构体身份应得到各自布局。运算桥接应检查有符号与无符号谓词、移位描述中的 mask、Box 的 StructuralEquality，以及调用别名指向原函数 ABI。这些都是当前接口能够提供的证据。
+
+完整 lowering 以后还要进行执行实验：计数三十二的移位、短路 RHS 输出、两个不同 Box 的相同内容、聚合参数副本、超过八个参数的调用和复制循环。独立解释器或参考实现可以作为行为对照，外部 LLVM verifier 则检查输出的结构。LLVM 接受一份文本不能证明内容相等或求值顺序符合源语言；描述中存在 mask 也不能证明可执行指令实际执行了掩码。
+
+\section{怎样使用 rx-compiler-testcases}
+外部测试集的 manifest 指定源文件、测试阶段和编译成功预期；执行类测试还记录输入输出文件。lex 检验词法，parser 检验指定入口的语法接受，semantic 检验语言规则，codegen 和 optimization 则需要实际执行及输出对照。读取每项的 stage，比根据目录名字猜测试意图更准确。
+
+当前命令行支持 lex、parse、semantic 及相应观察选项。parser 测试可先用于检查语法接受，再对 crate 入口使用 AST dump 观察建树；非 crate 入口的解析不一定产生完整 Crate，因此不能要求同样的 dump。AST 结构正确性还应由上一节的载荷、顺序及范围检查补充。
+
+codegen 的移位 manifest 包含不同输入条件与对应输出，适合在完整 lowering 后检验真实掩码行为。现在可以根据它建立转换计划的预期，却不能把仅通过 semantic 的结果计为 codegen 执行成功。optimization 测试也需要语言行为与目标指标的明确约定，不能仅比较优化前后字符串不同。
+
+附录列出本地命令与路径，正文关注观察方法：先确定这项输入要检验什么，再选择相应阶段和独立预期，最后区分失败是语言拒绝、表示不合法还是行为不一致。
+
+\section{贯穿扩展练习：布尔匹配表达式}
+本节假设新增一种只允许匹配 bool、恰好包含 true 和 false 两个分支的表达式。它是教学练习，当前 Rustless 不支持以下 match 写法；本节不修改项目语法或代码，也不将这些输入当作当前正例。
+
+\begin{lstlisting}[language=Rustless,caption={教学扩展的正确示例：当前尚不支持此语法}]
+fn choose(flag: bool) -> i32 {
+    match flag { true => 10, false => 20, }
+}
+\end{lstlisting}
+首先，grammar 需要确定分支界定、逗号、表达式优先级和允许出现的上下文。其次，AST 需要一个具体载荷，保存 scrutinee 以及按源码顺序排列的两项分支。模式真假可以用精确 bool 字段表示；匹配整体、各分支范围和身份如何保存，应与已有 owner 原则一致。
+
+\begin{lstlisting}[language=C++,caption={教学扩展的结构建议，当前没有这些定义}]
+struct BooleanMatchArm : Node {
+  bool pattern;
+  ExprPtr body;
+};
+struct BooleanMatchExpr {
+  ExprPtr scrutinee;
+  std::array<BooleanMatchArm, 2> arms; // Source order.
+};
+\end{lstlisting}
+这个建议把“恰好两项”放入结构，真假是否重复则仍由语义判断。直接保存 on\\_true 和 on\\_false 虽便于查找，却会丢掉两分支的源码顺序；若选择这种表示，就需要额外保存来源顺序，不能让后续遍历按猜测排列。
+
+children 枚举先访问 scrutinee，再按源码顺序访问分支及各自 body；Visitor 为新载荷补充规则；语义检查要求 scrutinee 为 bool、模式不重复且完整覆盖、两个正常完成分支获得共同结果类型。Never 分支按既有结果规则处理。事实可以记录分支对应真假及共同结果，lowering 只读取一次 scrutinee，形成条件分支并在正常到达边上汇集结果。
+
+下图追踪新增表达式从表示到规则与计算图的影响，呈现显式边界怎样指导修改范围。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=8mm]
+\node[irbox,text width=72mm] (grammar) {grammar：匹配、分支界定及表达式位置};
+\node[irbox,text width=72mm,below=of grammar] (ast) {AST / children：具体形状、来源和结构边};
+\node[irbox,text width=72mm,below=of ast] (visitor) {Visitor / semantic：覆盖、穷尽和共同类型};
+\node[irbox,text width=72mm,below=of visitor] (facts) {facts：已确认分支含义与结果使用};
+\node[irbox,text width=72mm,below=of facts] (lower) {lowering：一次条件求值、分支、Phi 或结果存储};
+\draw[irarrow] (grammar)--(ast); \draw[irarrow] (ast)--(visitor);
+\draw[irarrow] (visitor)--(facts); \draw[irarrow] (facts)--(lower);
+\end{tikzpicture}
+\caption{新增节点沿信息关系影响相关处理}
+\end{figure}
+
+以下三个反例分别检验该练习的语法、类型和退出上下文条件。它们仅针对假设的新语言规则。
+\begin{lstlisting}[language=Rustless,caption={教学扩展的语法错误：缺少分支界定符}]
+fn bad(flag: bool) -> i32 {
+    match flag { true 10, false => 20, }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Rustless,caption={教学扩展的类型错误：分支结果不相容}]
+fn bad(flag: bool) -> i32 {
+    match flag { true => 10, false => false, }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Rustless,caption={教学扩展的控制流上下文错误：break 没有循环目标}]
+fn bad(flag: bool) -> i32 {
+    match flag { true => { break 10; }, false => 20, }
+}
+\end{lstlisting}
+另一个转换反例是在 join 中保留两个正常前驱，却只给结果 Phi 一项 incoming。这份图即使来源于正确匹配输入，也必须被 IR verifier 拒绝。它说明新增语法和转换图各自需要证据。
+
+如果只新增一种分析，例如统计所有表达式深度，则节点形状、grammar 和原语义通常无需改变；新处理者可以使用现有 visit 与 children。新增节点影响多个过程，新增过程解释既有节点，这正是前文讨论的两种扩展方向。优雅表示让变化沿真实依赖发生，不许诺任何扩展都只改一个文件。
+
+\section{较大扩展需要哪些新信息}
+多文件模块需要拥有多个源文件的 SourceManager，以及在文件、模块和导入之间稳定的声明身份。当前 Crate 拥有一个 SourceFile，适合单个输入；若多个 Crate 产生相同 NodeId，跨文件查询还需上下文区分。单纯拼接源码会破坏来源与作用域关系。
+
+通用类型泛型需要明确类型参数、替换规则及实例身份。已有生命周期参数与 Box、Vec 的具体类型参数支持，不等于任意用户类型泛型已经实现。单态化可为具体实参生成具体函数或布局，参数化执行则需另一套运行时表示；选择取决于语言目标。
+
+流敏感借用需要在控制流中追踪位置、访问权限及借用存续范围。AST 上的局部可写条件能检查部分规则，却不能自动描述不同路径中的借用变化。一个保留 Place 及类型的 CFG 可以成为这类分析的输入，但首先要确定究竟实现哪些借用规则。
+
+下图把三类需求连接到它们需要的信息，呈现新增表示应当由具体问题驱动。
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[node distance=9mm and 15mm]
+\node[irbox,text width=38mm] (files) {多文件与导入};
+\node[irbox,text width=62mm,right=of files] (source) {SourceManager\\模块和声明身份};
+\node[irbox,text width=38mm,below=of files] (generic) {用户类型泛型};
+\node[irbox,text width=62mm,right=of generic] (replace) {参数 / 替换 / 实例化\\具体布局或参数化表示};
+\node[irbox,text width=38mm,below=of generic] (borrow) {流敏感借用};
+\node[irbox,text width=62mm,right=of borrow] (cfg) {typed CFG + Place\\路径上的权限与借用状态};
+\draw[irarrow] (files)--(source); \draw[irarrow] (generic)--(replace);
+\draw[irarrow] (borrow)--(cfg);
+\end{tikzpicture}
+\caption{新层次的理由来自必须保留的关系}
+\end{figure}
+
+\section{性能改进需要可区分的测量}
+节点对象大小与分配次数影响前端内存和缓存访问，类型重复影响存储与比较，查询热点影响分析时间，Visitor 模板实例化影响编译器自身的编译耗时。生成程序的指令数量、访存、调用和运行时间则属于另一组代价。测量时应先区分编译时间与被编译程序的运行时间。
+
+arena 可以减少逐节点分配并集中寿命管理，但可能使删除和独立拥有变复杂；类型 interning 减少相同类型的重复构造，却需要稳定键、身份和缓存寿命；索引提高热点查询速度，同时维护覆盖及链接规则。当前不可变类型和名义身份已经为统一类型工厂提供基础，仍应根据实际重复和查询数据评价收益。
+
+variant 的最大载荷决定 owner 内部联合空间，虚函数层次则有虚表指针、独立分配和间接调用等代价；实际布局与优化结果受编译器影响。仅因为访问函数模板可以内联，并不能断言总体性能必然更高。可以分别测量对象尺寸、分配数、访问耗时及实例化代价，再解释结果来自哪项表示选择。
+
+优化器也需区分自身耗时与生成程序收益。一个昂贵分析若只省掉极少执行步骤，未必适合快速教学编译；一个循环内的 spill 改进则可能有明显运行价值。清楚的阶段表示让这些代价容易定位，证据再决定是否值得增加复杂度。
+
+\section{重新评价全书的设计}
+第一章从结构、决定归属、扩展与代价提出评价方向。现在可以把它们归纳成五个具体问题：表示明确保存了什么关系；对象由谁拥有且身份属于哪个上下文；语义决定在哪一阶段完成；新增节点或过程会沿哪些依赖变化；维护与运行代价如何得到证据。
+
+当前 AST 的 owner 与具体载荷让形状和身份分开，非空拥有使必需子节点可依赖，显式 children 把结构关系集中；Visitor 将每次访问的 owner、载荷和返回约束表达出来。语义类型与语法类型分离，不可变结果和索引保留稳定查询，运算与调用事实让后续阶段消费决定。IR 的具体指令、值身份、边关系和 verifier 再把计算图的规则落为结构。
+
+这些设计仍有明确边界：完整 lowering 要实现描述承诺，聚合与容器要连接运行时，优化要证明行为保持，机器后端要满足有限位置及 ABI。未来增加层次时，应能指出现有表示丢失了哪项必要信息；未来改善性能时，应能指出测量揭示了哪项具体成本。
+
+全书所说的优雅，是让语法结构、语义决定、计算关系和机器约束分别得到准确表达，并通过明确接口连接。这样的设计既可以解释每一个合法例子，也可以说明反例为何失败；既让变化有可追踪范围，也让代价有可验证依据。读者据此能够评价当前实现，并提出理由清楚、边界明确的下一步设计。
