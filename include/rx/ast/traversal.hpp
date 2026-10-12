@@ -6,41 +6,66 @@ namespace rx::ast {
 enum class WalkControl { Continue, SkipChildren, Stop };
 enum class WalkResult { Completed, Stopped };
 
-// Inherit explicitly for a selective visitor; strict visitors have no fallback.
 struct DefaultVisitor {
-  template <class P> WalkControl enter(const Node &, const P &) {
+  template <class Payload> WalkControl enter(const Node &, const Payload &) {
     return WalkControl::Continue;
   }
-  template <class P> void leave(const Node &, const P &) {}
+  template <class Payload> void leave(const Node &, const Payload &) {}
 };
 
 namespace detail {
-template <class V> struct EnterAdapter {
-  V &visitor;
-  template <class O, class P>
-    requires requires(V &v, const O &owner, const P &p) {
-      { v.enter(owner, p) } -> std::same_as<WalkControl>;
-    }
-  WalkControl operator()(const O &owner, const P &p) {
-    return visitor.enter(owner, p);
-  }
-};
-template <class V> struct LeaveAdapter {
-  V &visitor;
-  template <class O, class P>
-    requires requires(V &v, const O &owner, const P &p) {
-      { v.leave(owner, p) } -> std::same_as<void>;
-    }
-  void operator()(const O &owner, const P &p) {
-    visitor.leave(owner, p);
-  }
-};
-template <class V> constexpr bool covers_tree = SyntaxOwners::covered<V>;
-} // namespace detail
+template <class Visitor, class Owner, class Payload, class Enable = void>
+struct EnterCall : std::false_type {};
 
-template <class V>
-concept TraversalVisitor = detail::covers_tree<detail::EnterAdapter<V>> &&
-                           detail::covers_tree<detail::LeaveAdapter<V>>;
+template <class Visitor, class Owner, class Payload>
+struct EnterCall<Visitor, Owner, Payload,
+                 std::void_t<decltype(std::declval<Visitor &>().enter(
+                     std::declval<const Owner &>(),
+                     std::declval<const Payload &>()))>> {
+  using Result = decltype(std::declval<Visitor &>().enter(
+      std::declval<const Owner &>(), std::declval<const Payload &>()));
+  static constexpr bool value = std::is_same_v<Result, WalkControl>;
+};
+
+template <class Visitor, class Owner, class Payload, class Enable = void>
+struct LeaveCall : std::false_type {};
+
+template <class Visitor, class Owner, class Payload>
+struct LeaveCall<Visitor, Owner, Payload,
+                 std::void_t<decltype(std::declval<Visitor &>().leave(
+                     std::declval<const Owner &>(),
+                     std::declval<const Payload &>()))>> {
+  using Result = decltype(std::declval<Visitor &>().leave(
+      std::declval<const Owner &>(), std::declval<const Payload &>()));
+  static constexpr bool value = std::is_same_v<Result, void>;
+};
+
+template <class Visitor> struct EnterAdapter {
+  Visitor &visitor;
+
+  template <class Owner, class Payload,
+            std::enable_if_t<EnterCall<Visitor, Owner, Payload>::value, int> = 0>
+  WalkControl operator()(const Owner &owner, const Payload &payload) {
+    return visitor.enter(owner, payload);
+  }
+};
+template <class Visitor> struct LeaveAdapter {
+  Visitor &visitor;
+
+  template <class Owner, class Payload,
+            std::enable_if_t<LeaveCall<Visitor, Owner, Payload>::value, int> = 0>
+  void operator()(const Owner &owner, const Payload &payload) {
+    visitor.leave(owner, payload);
+  }
+};
+template <class Visitor>
+inline constexpr bool covers_tree = SyntaxOwners::covered<Visitor>;
+}
+
+template <class Visitor>
+inline constexpr bool TraversalVisitor =
+    detail::covers_tree<detail::EnterAdapter<Visitor>> &&
+    detail::covers_tree<detail::LeaveAdapter<Visitor>>;
 
 template <TraversalVisitor V> class Walker {
 public:
