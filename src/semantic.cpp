@@ -88,7 +88,12 @@ struct ExprInfo {
            std::vector<Adjustment> adjustments = {})
       : type(std::move(type)), is_place(is_place), is_mutable(is_mutable),
         access_locked(access_locked), symbol(symbol), target(std::move(target)),
-        adjustments(std::move(adjustments)) {}
+        adjustments(std::move(adjustments)) {
+    if (auto *function = rx::get_if<FunctionType>(*this->type))
+      callable = FunctionTarget{function->symbol};
+    else if (auto *builtin = rx::get_if<BuiltinFunctionType>(*this->type))
+      callable = BuiltinTarget{builtin->builtin};
+  }
 
   TyPtr type;
   bool is_place{};
@@ -118,6 +123,10 @@ public:
     // Each pass consumes complete tables produced by the earlier passes.
     collect_items();
     resolve_declarations();
+    for (const auto &[_, function] : functions_)
+      callable_functions_.emplace(symbol_for(function.ast->id), &function);
+    for (const auto &[_, function] : associated_functions_)
+      callable_functions_.emplace(symbol_for(function.ast->id), &function);
     validate_constants();
     validate_layouts_and_derives();
     validate_entry();
@@ -1785,6 +1794,7 @@ private:
   std::vector<const ast::Impl *> impls_;
   std::unordered_map<std::string, FunctionInfo> associated_functions_;
   std::unordered_map<std::string, ConstantInfo> associated_constants_;
+  std::map<SymbolId, const FunctionInfo *> callable_functions_;
   std::vector<std::unordered_map<std::string, Binding>> scopes_;
   std::vector<LoopInfo> loops_;
   const FunctionInfo *current_function_{};
