@@ -231,42 +231,41 @@ bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right) {
   if (left->kind() != right->kind())
     return false;
   return std::visit(
-      ast::Overloaded{[](const ErrorType &) { return true; },
-                      [](const NeverType &) { return true; },
-                      [](const UnitType &) { return true; },
-                      [](const BoolType &) { return true; },
-                      [](const I32Type &) { return true; },
-                      [](const U32Type &) { return true; },
-                      [](const IsizeType &) { return true; },
-                      [](const UsizeType &) { return true; },
-                      [&](const StructType &p) {
-                        return p.symbol == get_if<StructType>(*right)->symbol;
-                      },
-                      [&](const BoxType &p) {
-                        return same_type(p.element, right->element());
-                      },
-                      [&](const VecType &p) {
-                        return same_type(p.element, right->element());
-                      },
-                      [&](const ArrayType &p) {
-                        return p.length == right->length() &&
-                               same_type(p.element, right->element());
-                      },
-                      [&](const RefType &p) {
-                        return p.mutability ==
-                                   get_if<RefType>(*right)->mutability &&
-                               same_type(p.element, right->element());
-                      },
-                      [&](const FunctionType &p) {
-                        return p.symbol == get_if<FunctionType>(*right)->symbol;
-                      },
-                      [&](const BuiltinFunctionType &p) {
-                        const auto &other =
-                            *get_if<BuiltinFunctionType>(*right);
-                        return p.builtin == other.builtin &&
-                               ((!p.owner && !other.owner) ||
-                                same_type(p.owner, other.owner));
-                      }},
+      ast::Overloaded{
+          [](const ErrorType &) { return true; },
+          [](const NeverType &) { return true; },
+          [](const UnitType &) { return true; },
+          [](const BoolType &) { return true; },
+          [](const I32Type &) { return true; },
+          [](const U32Type &) { return true; },
+          [](const IsizeType &) { return true; },
+          [](const UsizeType &) { return true; },
+          [&](const StructType &payload) {
+            return payload.symbol == get_if<StructType>(*right)->symbol;
+          },
+          [&](const BoxType &payload) {
+            return same_type(payload.element, right->element());
+          },
+          [&](const VecType &payload) {
+            return same_type(payload.element, right->element());
+          },
+          [&](const ArrayType &payload) {
+            return payload.length == right->length() &&
+                   same_type(payload.element, right->element());
+          },
+          [&](const RefType &payload) {
+            return payload.mutability == get_if<RefType>(*right)->mutability &&
+                   same_type(payload.element, right->element());
+          },
+          [&](const FunctionType &payload) {
+            return payload.symbol == get_if<FunctionType>(*right)->symbol;
+          },
+          [&](const BuiltinFunctionType &payload) {
+            const auto &other = *get_if<BuiltinFunctionType>(*right);
+            return payload.builtin == other.builtin &&
+                   ((!payload.owner && !other.owner) ||
+                    same_type(payload.owner, other.owner));
+          }},
       left->data());
 }
 
@@ -283,25 +282,30 @@ std::string type_name(const SemanticTypePtr &type) {
           [](const U32Type &) -> std::string { return "u32"; },
           [](const IsizeType &) -> std::string { return "isize"; },
           [](const UsizeType &) -> std::string { return "usize"; },
-          [](const StructType &p) { return p.name; },
-          [](const BoxType &p) { return "Box<" + type_name(p.element) + ">"; },
-          [](const VecType &p) { return "Vec<" + type_name(p.element) + ">"; },
-          [](const ArrayType &p) {
-            return "[" + type_name(p.element) + "; " +
-                   std::to_string(p.length) + "]";
+          [](const StructType &payload) { return payload.name; },
+          [](const BoxType &payload) {
+            return "Box<" + type_name(payload.element) + ">";
           },
-          [](const RefType &p) {
-            return std::string("&") +
-                   (p.mutability == ast::Mutability::Mutable ? "mut " : "") +
-                   type_name(p.element);
+          [](const VecType &payload) {
+            return "Vec<" + type_name(payload.element) + ">";
           },
-          [](const FunctionType &p) { return "fn " + p.name; },
-          [](const BuiltinFunctionType &p) {
-            auto name = "fn " + std::string(builtin_name(p.builtin));
-            if (p.owner)
-              name += " (owner " + type_name(p.owner) + ")";
+          [](const ArrayType &payload) {
+            return "[" + type_name(payload.element) + "; " +
+                   std::to_string(payload.length) + "]";
+          },
+          [](const RefType &payload) {
+            std::string name = "&";
+            if (payload.mutability == ast::Mutability::Mutable)
+              name += "mut ";
+            return name + type_name(payload.element);
+          },
+          [](const FunctionType &payload) { return "fn " + payload.name; },
+          [](const BuiltinFunctionType &payload) {
+            auto name = "fn " + std::string(builtin_name(payload.builtin));
+            if (payload.owner)
+              name += " (owner " + type_name(payload.owner) + ")";
             return name;
           }},
       type->data());
 }
-} // namespace rx
+}
