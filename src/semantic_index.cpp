@@ -249,6 +249,71 @@ void require_equivalent(const SemanticTypePtr &left,
   if (!same_type(left, right))
     throw std::invalid_argument("semantic declaration type mismatch");
 }
+ast::BinaryOp source_operator(const ResolvedOperation &operation) {
+  using B = ast::BinaryOp;
+  return std::visit(ast::Overloaded{
+      [](const IntegerArithmetic &p) {
+        constexpr std::array values{B::Add, B::Sub, B::Mul, B::Div, B::Rem};
+        return values.at(static_cast<std::size_t>(p.op));
+      },
+      [](const BitwiseOperation &p) {
+        constexpr std::array values{B::BitAnd, B::BitOr, B::BitXor};
+        return values.at(static_cast<std::size_t>(p.op));
+      },
+      [](const ShiftOperation &p) {
+        if (p.count_policy != ShiftCountPolicy::MaskToWidth)
+          throw std::invalid_argument("invalid shift count policy");
+        constexpr std::array values{B::Shl, B::Shr};
+        return values.at(static_cast<std::size_t>(p.direction));
+      },
+      [](const ScalarComparison &p) {
+        constexpr std::array values{B::Eq, B::Ne, B::Lt, B::Le, B::Gt, B::Ge};
+        return values.at(static_cast<std::size_t>(p.relation));
+      },
+      [](const StructuralEquality &p) {
+        constexpr std::array values{B::Eq, B::Ne};
+        return values.at(static_cast<std::size_t>(p.op));
+      },
+      [](const LogicalOperation &p) {
+        constexpr std::array values{B::LogicalAnd, B::LogicalOr};
+        return values.at(static_cast<std::size_t>(p.op));
+      }}, operation);
+}
+void validate_operand(const SemanticIndex &index, const OperandSemantics &operand) {
+  using K = SemanticType::Kind;
+  auto current = index.expression(operand.node).type;
+  for (const auto &adjustment : operand.adjustments) {
+    const auto &target = adjustment.target;
+    switch (adjustment.kind) {
+    case Adjustment::Kind::Dereference:
+      if (current->kind() != K::Ref && current->kind() != K::Box)
+        throw std::invalid_argument("dereference adjustment has no referent");
+      require_equivalent(current->element(), target);
+      break;
+    case Adjustment::Kind::BorrowShared:
+    case Adjustment::Kind::BorrowMutable:
+      if (target->kind() != K::Ref || target->is_mutable() !=
+          (adjustment.kind == Adjustment::Kind::BorrowMutable))
+        throw std::invalid_argument("borrow adjustment has wrong reference type");
+      require_equivalent(current, target->element());
+      break;
+    case Adjustment::Kind::MutToShared:
+      if (current->kind() != K::Ref || !current->is_mutable() ||
+          target->kind() != K::Ref || target->is_mutable())
+        throw std::invalid_argument("mutable-to-shared adjustment mismatch");
+      require_equivalent(current->element(), target->element());
+      break;
+    case Adjustment::Kind::NeverToAny:
+      if (current->kind() != K::Never)
+        throw std::invalid_argument("never coercion has non-never source");
+      break;
+    default:
+      throw std::invalid_argument("unknown operand adjustment");
+    }
+    current = target;
+  }
+  require_equivalent(current, operand.effective_type);
+}
 } // namespace
 void SemanticIndex::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
