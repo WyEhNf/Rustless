@@ -230,4 +230,33 @@ bool same_type(const SemanticTypePtr &left, const SemanticTypePtr &right) {
                       }},
       left->data());
 }
+
+std::string type_name(const SemanticTypePtr &type) {
+  if (!type)
+    return "<missing>";
+  return std::visit(
+      ast::Overloaded{
+          [](const ErrorType &) -> std::string { return "<error>"; },
+          [](const NeverType &) -> std::string { return "!"; },
+          [](const UnitType &) -> std::string { return "()"; },
+          [](const BoolType &) -> std::string { return "bool"; },
+          [](const I32Type &) -> std::string { return "i32"; },
+          [](const U32Type &) -> std::string { return "u32"; },
+          [](const IsizeType &) -> std::string { return "isize"; },
+          [](const UsizeType &) -> std::string { return "usize"; },
+          [](const StructType &p) { return p.name; },
+          [](const BoxType &p) { return "Box<" + type_name(p.element) + ">"; },
+          [](const VecType &p) { return "Vec<" + type_name(p.element) + ">"; },
+          [](const ArrayType &p) {
+            return "[" + type_name(p.element) + "; " +
+                   std::to_string(p.length) + "]";
+          },
+          [](const RefType &p) {
+            return std::string("&") +
+                   (p.mutability == ast::Mutability::Mutable ? "mut " : "") +
+                   type_name(p.element);
+          },
+          [](const FunctionType &p) { return "fn " + p.name; }},
+      type->data());
+}
 } // namespace rx
