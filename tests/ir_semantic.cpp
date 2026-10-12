@@ -9,6 +9,18 @@
 namespace ast = rx::ast;
 namespace ir = rx::ir;
 int main() {
+  const auto target = ir::TargetLayout::rv32();
+  assert(target.integer_bits() == 32 && target.shift_count_mask() == 31);
+  assert(target.integer().bytes == 4 && target.integer().alignment == 4);
+  assert(target.pointer().bytes == 4 && target.pointer().alignment == 4);
+  assert(target.boolean().bytes == 1 && target.boolean().alignment == 1);
+  assert(target.unit().bytes == 0 && target.unit().alignment == 1);
+  const auto vector = target.vector();
+  assert(vector.data_offset == 0 && vector.length_offset == 4 &&
+         vector.capacity_offset == 8);
+  assert(vector.storage.bytes == 12 && vector.storage.alignment == 4);
+  assert(vector.capacity_offset + target.integer().bytes ==
+         vector.storage.bytes);
   rx::DiagnosticEngine diagnostics;
   auto parsed = rx::parse_source(R"(
 struct Packet { flag: bool, count: i32, bits: [bool; 3] }
@@ -40,6 +52,8 @@ fn main() {
   assert(!diagnostics.has_errors());
   rx::SemanticIndex index(*parsed.crate, checked);
   ir::SemanticBridge bridge(index);
+  assert(bridge.target().llvm_data_layout() == target.llvm_data_layout());
+  assert(bridge.target().triple() == target.triple());
   const auto &packet = std::get<ast::Struct>(parsed.crate->items[0]);
   const auto &layout = bridge.structure(index.declaration(packet.id).id);
   assert(layout.layout.bytes == 12 && layout.layout.alignment == 4);
