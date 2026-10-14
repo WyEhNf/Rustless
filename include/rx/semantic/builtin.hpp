@@ -22,4 +22,4 @@ inline std::string_view builtin_name(BuiltinId id) {
       "clone",   "len",       "is_empty",    "push",     "remove"};
   return names.at(static_cast<std::size_t>(id));
 }
-}
+} // namespace rx

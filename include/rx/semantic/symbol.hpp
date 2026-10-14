@@ -5,4 +5,4 @@
 namespace rx {
 struct SymbolTag;
 using SymbolId = ast::Id<SymbolTag>;
-}
+} // namespace rx

@@ -4,7 +4,7 @@
 
 namespace rx::semantic_detail {
 
-Binding *Analyzer::lookup(const std::string &name){
+Binding *Analyzer::lookup(const std::string &name) {
   for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope)
     if (auto found = scope->find(name); found != scope->end())
       return &found->second;
@@ -12,7 +12,8 @@ Binding *Analyzer::lookup(const std::string &name){
 }
 
 SemanticTypePtr Analyzer::literal_type(const ast::IntegerLiteral &literal,
-                             const SemanticTypePtr &expected, Span span){
+                                       const SemanticTypePtr &expected,
+                                       Span span) {
   SemanticTypePtr result;
   if (literal.suffix) {
     switch (*literal.suffix) {
@@ -40,7 +41,7 @@ SemanticTypePtr Analyzer::literal_type(const ast::IntegerLiteral &literal,
 }
 
 void Analyzer::append_adjustments(ast::NodeId node,
-                        std::vector<Adjustment> adjustments){
+                                  std::vector<Adjustment> adjustments) {
   auto &fact = expression_facts_[node];
   fact.node = node;
   fact.adjustments.insert(fact.adjustments.end(),
@@ -48,7 +49,7 @@ void Analyzer::append_adjustments(ast::NodeId node,
                           std::make_move_iterator(adjustments.end()));
 }
 
-void Analyzer::record_node(const ast::Node &node, const ExprInfo &result){
+void Analyzer::record_node(const ast::Node &node, const ExprInfo &result) {
   ExpressionSemantics fact;
   fact.node = node.id;
   fact.type = result.type;
@@ -67,13 +68,12 @@ void Analyzer::record_node(const ast::Node &node, const ExprInfo &result){
 }
 
 ExprInfo Analyzer::check_expr(const ast::ExprPtr &expression,
-                    SemanticTypePtr expected){
+                              SemanticTypePtr expected) {
   return check_expr(*expression, std::move(expected));
 }
 
 ExprInfo Analyzer::check_expr(const ast::Expr &expression,
-                    SemanticTypePtr expected,
-                    bool record_coercion){
+                              SemanticTypePtr expected, bool record_coercion) {
   auto result = ast::visit(
       expression,
       ast::Overloaded{
@@ -169,7 +169,8 @@ ExprInfo Analyzer::check_expr(const ast::Expr &expression,
   return result;
 }
 
-ExprInfo Analyzer::check_path(const ast::Expr &node, const ast::PathExpr &value){
+ExprInfo Analyzer::check_path(const ast::Expr &node,
+                              const ast::PathExpr &value) {
   const auto &path = value.path;
   auto name = ast::path_name(path);
   if (!type_arguments(path).empty() && !constructor_path(path))

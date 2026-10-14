@@ -2,7 +2,7 @@
 
 namespace rx::semantic_detail {
 
-void Analyzer::validate_layouts_and_derives(){
+void Analyzer::validate_layouts_and_derives() {
   for (auto &[name, _] : structures_)
     validate_layout(name);
   for (auto &[name, structure] : structures_) {
@@ -19,7 +19,7 @@ void Analyzer::validate_layouts_and_derives(){
   }
 }
 
-bool Analyzer::validate_layout(const std::string &name){
+bool Analyzer::validate_layout(const std::string &name) {
 
   auto &structure = structures_.at(name);
   if (structure.layout == StructInfo::LayoutState::Valid)
@@ -49,7 +49,8 @@ bool Analyzer::validate_layout(const std::string &name){
 }
 
 bool Analyzer::supports(const SemanticTypePtr &value, const std::string &trait,
-              const std::string &root, std::unordered_set<std::string> seen){
+                        const std::string &root,
+                        std::unordered_set<std::string> seen) {
   if (!value)
     return false;
   if (value->kind() == SemanticType::Kind::Bool || integer(value) ||

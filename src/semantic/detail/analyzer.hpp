@@ -1,7 +1,7 @@
 #pragma once
 
-#include "state.hpp"
 #include "rx/semantic/literal.hpp"
+#include "state.hpp"
 
 #include <array>
 #include <functional>
@@ -22,8 +22,7 @@ private:
   SymbolId symbol_for(ast::NodeId node);
   void record_symbol(ast::NodeId node, SymbolKind kind, std::string name,
                      std::optional<ast::NodeId> owner = {});
-  void record_symbol_type(ast::NodeId declaration,
-                          const SemanticTypePtr &type);
+  void record_symbol_type(ast::NodeId declaration, const SemanticTypePtr &type);
   void collect_items();
   static bool builtin_type(std::string_view name);
   static bool protected_builtin_value(std::string_view name);
@@ -50,9 +49,8 @@ private:
                                     std::string_view self_name);
 
   // Constant evaluation.
-  std::optional<std::uint64_t>
-  evaluate_length(const ast::ExprPtr &expression,
-                  std::string_view self_name = {});
+  std::optional<std::uint64_t> evaluate_length(const ast::ExprPtr &expression,
+                                               std::string_view self_name = {});
   void resolve_constant_type(ConstantInfo &constant);
   void validate_constants();
   void evaluate_constant(ConstantInfo &constant);
@@ -87,9 +85,8 @@ private:
   bool writable(const ExprInfo &value) const;
   void mismatch(Span span, const SemanticTypePtr &actual,
                 const SemanticTypePtr &expected);
-  std::vector<Adjustment>
-  coercion_adjustments(const SemanticTypePtr &from,
-                       const SemanticTypePtr &to) const;
+  std::vector<Adjustment> coercion_adjustments(const SemanticTypePtr &from,
+                                               const SemanticTypePtr &to) const;
 
   // Expression facts and dispatch.
   SemanticTypePtr literal_type(const ast::IntegerLiteral &literal,
@@ -112,10 +109,8 @@ private:
                               const SemanticTypePtr &expected);
   ExprInfo check_struct(const ast::Expr &node,
                         const ast::StructExpr &structure);
-  ExprInfo check_field(const ast::Expr &node,
-                       const ast::FieldExpr &projection);
-  ExprInfo check_index(const ast::Expr &node,
-                       const ast::IndexExpr &projection);
+  ExprInfo check_field(const ast::Expr &node, const ast::FieldExpr &projection);
+  ExprInfo check_index(const ast::Expr &node, const ast::IndexExpr &projection);
 
   // Blocks and control flow.
   ExprInfo check_block(const ast::Block &block,
@@ -124,8 +119,7 @@ private:
                     const SemanticTypePtr &expected);
   ExprInfo check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr,
                       const SemanticTypePtr &expected);
-  ExprInfo check_while(const ast::Expr &node,
-                       const ast::WhileExpr &while_expr);
+  ExprInfo check_while(const ast::Expr &node, const ast::WhileExpr &while_expr);
   ExprInfo check_break(const ast::Expr &node, const ast::BreakExpr &payload);
   ExprInfo check_continue(const ast::Expr &node, const ast::ContinueExpr &);
   ExprInfo check_return(const ast::Expr &node, const ast::ReturnExpr &payload);
@@ -142,9 +136,8 @@ private:
                             const ast::AssignExpr &assignment);
   void check_assignment_target(const ast::ExprPtr &target,
                                const ExprInfo &destination);
-  ExprInfo
-  check_compound_assignment(const ast::Expr &node,
-                            const ast::CompoundAssignExpr &assignment);
+  ExprInfo check_compound_assignment(const ast::Expr &node,
+                                     const ast::CompoundAssignExpr &assignment);
   ExprInfo check_cast(const ast::Expr &node, const ast::CastExpr &cast);
 
   // Calls and builtin paths.

@@ -4,7 +4,8 @@
 
 namespace rx::semantic_detail {
 
-ExprInfo Analyzer::check_borrow(const ast::Expr &node, const ast::BorrowExpr &borrow){
+ExprInfo Analyzer::check_borrow(const ast::Expr &node,
+                                const ast::BorrowExpr &borrow) {
   auto operand = check_expr(borrow.operand);
   bool mutable_ref = borrow.mutability == ast::Mutability::Mutable;
   if (mutable_ref &&
@@ -13,8 +14,9 @@ ExprInfo Analyzer::check_borrow(const ast::Expr &node, const ast::BorrowExpr &bo
   return {compound(SemanticType::Kind::Ref, operand.type, mutable_ref)};
 }
 
-ExprInfo Analyzer::check_unary(const ast::Expr &node, const ast::UnaryExpr &unary,
-                     const SemanticTypePtr &expected){
+ExprInfo Analyzer::check_unary(const ast::Expr &node,
+                               const ast::UnaryExpr &unary,
+                               const SemanticTypePtr &expected) {
   SemanticTypePtr expected_operand = expected;
   if (unary.op == ast::UnaryOp::Dereference)
     expected_operand.reset();
@@ -26,18 +28,17 @@ ExprInfo Analyzer::check_unary(const ast::Expr &node, const ast::UnaryExpr &unar
              "type " + type_name(operand.type) + " cannot be dereferenced");
       return {};
     }
-    const bool shared_layer =
-        operand.type->kind() == SemanticType::Kind::Ref &&
-        !operand.type->is_mutable();
+    const bool shared_layer = operand.type->kind() == SemanticType::Kind::Ref &&
+                              !operand.type->is_mutable();
     const bool locked = operand.access_locked || shared_layer;
     bool mutable_access = operand.is_mutable;
     if (operand.type->kind() == SemanticType::Kind::Ref)
       mutable_access = operand.type->is_mutable();
     mutable_access = mutable_access && !locked;
     ExprInfo result{operand.type->element(), true, mutable_access, locked};
-    result.unary = ResolvedUnary{UnaryOperation::Dereference,
-                                 operand_use(*unary.operand, operand, false),
-                                 result.type};
+    result.unary =
+        ResolvedUnary{UnaryOperation::Dereference,
+                      operand_use(*unary.operand, operand, false), result.type};
     return result;
   }
   auto use = operand_use(*unary.operand, operand);
@@ -56,9 +57,10 @@ ExprInfo Analyzer::check_unary(const ast::Expr &node, const ast::UnaryExpr &unar
   return result;
 }
 
-OperandSemantics Analyzer::operand_use(const ast::Expr &node, const ExprInfo &info,
-                             bool references, unsigned depth_limit,
-                             bool mutable_references){
+OperandSemantics Analyzer::operand_use(const ast::Expr &node,
+                                       const ExprInfo &info, bool references,
+                                       unsigned depth_limit,
+                                       bool mutable_references) {
   OperandSemantics use{node.id, info.type, {}};
 
   for (const auto &adjustment : info.adjustments) {
@@ -77,7 +79,8 @@ OperandSemantics Analyzer::operand_use(const ast::Expr &node, const ExprInfo &in
   return use;
 }
 
-ExprInfo Analyzer::check_binary(const ast::Expr &node, const ast::BinaryExpr &binary){
+ExprInfo Analyzer::check_binary(const ast::Expr &node,
+                                const ast::BinaryExpr &binary) {
   auto left = check_expr(binary.left);
   auto right = check_expr(binary.right, left.type);
   const bool logical = binary.op == ast::BinaryOp::LogicalAnd ||
@@ -117,9 +120,9 @@ ExprInfo Analyzer::check_binary(const ast::Expr &node, const ast::BinaryExpr &bi
   if ((binary.op == ast::BinaryOp::Eq || binary.op == ast::BinaryOp::Ne) &&
       !supports(lhs.effective_type, "PartialEq", "", {}))
     report(node.span, "equality requires PartialEq");
-  const bool boolean =
-      std::holds_alternative<ScalarComparison>(*operation) ||
-      std::holds_alternative<StructuralEquality>(*operation) || logical;
+  const bool boolean = std::holds_alternative<ScalarComparison>(*operation) ||
+                       std::holds_alternative<StructuralEquality>(*operation) ||
+                       logical;
   auto result_type = lhs.effective_type;
   if (boolean)
     result_type = primitive_type(SemanticType::Kind::Bool);
@@ -130,7 +133,7 @@ ExprInfo Analyzer::check_binary(const ast::Expr &node, const ast::BinaryExpr &bi
 }
 
 ExprInfo Analyzer::check_assignment(const ast::Expr &node,
-                          const ast::AssignExpr &assignment){
+                                    const ast::AssignExpr &assignment) {
   auto destination = check_expr(assignment.target);
   auto source = check_expr(assignment.value, destination.type);
   check_assignment_target(assignment.target, destination);
@@ -140,7 +143,7 @@ ExprInfo Analyzer::check_assignment(const ast::Expr &node,
 }
 
 void Analyzer::check_assignment_target(const ast::ExprPtr &target,
-                             const ExprInfo &destination){
+                                       const ExprInfo &destination) {
   if (!destination.is_place)
     report(target->span, "assignment destination is not a place");
   else if (!destination.is_mutable)
@@ -149,7 +152,7 @@ void Analyzer::check_assignment_target(const ast::ExprPtr &target,
 
 ExprInfo
 Analyzer::check_compound_assignment(const ast::Expr &node,
-                          const ast::CompoundAssignExpr &assignment){
+                                    const ast::CompoundAssignExpr &assignment) {
   auto destination = check_expr(assignment.target);
   auto source = check_expr(assignment.value, destination.type);
   check_assignment_target(assignment.target, destination);
@@ -170,12 +173,13 @@ Analyzer::check_compound_assignment(const ast::Expr &node,
   return result;
 }
 
-ExprInfo Analyzer::check_cast(const ast::Expr &node, const ast::CastExpr &cast){
+ExprInfo Analyzer::check_cast(const ast::Expr &node,
+                              const ast::CastExpr &cast) {
   auto source = check_expr(cast.value);
   auto destination = resolve_type(cast.target_type, current_owner());
-  const bool valid = (integer(source.type) && integer(destination)) ||
-                     (source.type->kind() == SemanticType::Kind::Bool &&
-                      integer(destination));
+  const bool valid =
+      (integer(source.type) && integer(destination)) ||
+      (source.type->kind() == SemanticType::Kind::Bool && integer(destination));
   if (!valid)
     report(node.span, "unsupported cast from " + type_name(source.type) +
                           " to " + type_name(destination));

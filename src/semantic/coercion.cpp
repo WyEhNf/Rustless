@@ -29,7 +29,8 @@ bool signed_integer(const SemanticTypePtr &value) {
                    value->kind() == SemanticType::Kind::Isize);
 }
 
-bool Analyzer::coercible(const SemanticTypePtr &from, const SemanticTypePtr &to){
+bool Analyzer::coercible(const SemanticTypePtr &from,
+                         const SemanticTypePtr &to) {
   if (!from || !to || from->kind() == SemanticType::Kind::Error ||
       to->kind() == SemanticType::Kind::Error ||
       from->kind() == SemanticType::Kind::Never)
@@ -55,7 +56,7 @@ bool Analyzer::coercible(const SemanticTypePtr &from, const SemanticTypePtr &to)
 }
 
 SemanticTypePtr Analyzer::common_type(const SemanticTypePtr &first,
-                            const SemanticTypePtr &second){
+                                      const SemanticTypePtr &second) {
   if (coercible(second, first))
     return first;
   if (coercible(first, second))
@@ -63,7 +64,7 @@ SemanticTypePtr Analyzer::common_type(const SemanticTypePtr &first,
   return primitive_type(SemanticType::Kind::Error);
 }
 
-bool Analyzer::writable(const ExprInfo &value) const{
+bool Analyzer::writable(const ExprInfo &value) const {
   if (value.access_locked)
     return false;
   auto current = value.type;
@@ -75,14 +76,14 @@ bool Analyzer::writable(const ExprInfo &value) const{
 }
 
 void Analyzer::mismatch(Span span, const SemanticTypePtr &actual,
-              const SemanticTypePtr &expected){
+                        const SemanticTypePtr &expected) {
   report(span, "type mismatch: found " + type_name(actual) + ", expected " +
                    type_name(expected));
 }
 
 std::vector<Adjustment>
 Analyzer::coercion_adjustments(const SemanticTypePtr &from,
-                     const SemanticTypePtr &to) const{
+                               const SemanticTypePtr &to) const {
   std::vector<Adjustment> result;
   if (!from || !to || compatible_types(from, to) ||
       from->kind() == SemanticType::Kind::Error ||

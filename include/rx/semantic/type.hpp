@@ -140,7 +140,7 @@ struct SemanticCoverage<Visitor, std::variant<Payloads...>> {
     return false;
   }
 };
-}
+} // namespace detail
 
 template <class Visitor>
 inline constexpr bool SemanticTypeVisitor =
@@ -155,4 +155,4 @@ decltype(auto) visit(const SemanticType &type, Visitor &&visitor) {
       },
       type.data());
 }
-}
+} // namespace rx

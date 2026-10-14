@@ -44,7 +44,7 @@ private:
   friend class SemanticResult;
   struct ValidationTag {};
   SafeGate(const ast::Crate &crate,
-                std::shared_ptr<const SemanticData> snapshot, ValidationTag);
+           std::shared_ptr<const SemanticData> snapshot, ValidationTag);
   void validate_links() const;
   void validate_tree();
   void validate_declarations() const;
@@ -62,4 +62,4 @@ private:
   std::unordered_map<SymbolId, const StructSemantics *> structures_;
   std::unordered_map<SymbolId, const ConstantValue *> constants_;
 };
-}
+} // namespace rx

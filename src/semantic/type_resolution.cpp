@@ -2,12 +2,12 @@
 
 namespace rx::semantic_detail {
 
-SemanticTypePtr Analyzer::primitive_type(SemanticType::Kind kind){
+SemanticTypePtr Analyzer::primitive_type(SemanticType::Kind kind) {
   return types_.primitive(kind);
 }
 
-SemanticTypePtr Analyzer::compound(SemanticType::Kind kind, SemanticTypePtr element,
-                         bool mutable_ref){
+SemanticTypePtr Analyzer::compound(SemanticType::Kind kind,
+                                   SemanticTypePtr element, bool mutable_ref) {
   switch (kind) {
   case SemanticType::Kind::Box:
     return types_.box(std::move(element));
@@ -26,21 +26,21 @@ SemanticTypePtr Analyzer::compound(SemanticType::Kind kind, SemanticTypePtr elem
   }
 }
 
-SemanticTypePtr Analyzer::structure_type(const std::string &name){
+SemanticTypePtr Analyzer::structure_type(const std::string &name) {
   if (auto found = structures_.find(name); found != structures_.end())
     return types_.structure(symbol_for(found->second.ast->id), name);
   return primitive_type(SemanticType::Kind::Error);
 }
 
 SemanticTypePtr Analyzer::resolve_type(const ast::TypePtr &syntax,
-                             std::string_view self_name){
+                                       std::string_view self_name) {
   auto result = resolve_type_impl(syntax, self_name);
   resolved_types_[syntax->id] = result;
   return result;
 }
 
-std::vector<const ast::TypePtr *>
-Analyzer::type_arguments(const std::optional<ast::GenericArguments> &arguments){
+std::vector<const ast::TypePtr *> Analyzer::type_arguments(
+    const std::optional<ast::GenericArguments> &arguments) {
   std::vector<const ast::TypePtr *> result;
   if (arguments)
     for (const auto &argument : arguments->values)
@@ -50,7 +50,7 @@ Analyzer::type_arguments(const std::optional<ast::GenericArguments> &arguments){
 }
 
 std::vector<const ast::TypePtr *>
-Analyzer::type_arguments(const ast::Path &path){
+Analyzer::type_arguments(const ast::Path &path) {
   std::vector<const ast::TypePtr *> result;
   for (const auto &segment : path.segments) {
     auto arguments = type_arguments(segment.arguments);
@@ -59,15 +59,16 @@ Analyzer::type_arguments(const ast::Path &path){
   return result;
 }
 
-SemanticTypePtr Analyzer::resolve_type(const std::optional<ast::TypePtr> &syntax,
-                             std::string_view self_name){
+SemanticTypePtr
+Analyzer::resolve_type(const std::optional<ast::TypePtr> &syntax,
+                       std::string_view self_name) {
   if (syntax)
     return resolve_type(*syntax, self_name);
   return primitive_type(SemanticType::Kind::Unit);
 }
 
 SemanticTypePtr Analyzer::resolve_type_impl(const ast::TypePtr &syntax,
-                                  std::string_view self_name){
+                                            std::string_view self_name) {
   return ast::visit(
       *syntax,
       ast::Overloaded{
@@ -93,7 +94,7 @@ SemanticTypePtr Analyzer::resolve_type_impl(const ast::TypePtr &syntax,
 }
 
 SemanticTypePtr Analyzer::resolve_path_type(const ast::Path &path, Span span,
-                                  std::string_view self_name){
+                                            std::string_view self_name) {
   const std::string name{ast::name_text(path.segments.back().name)};
   auto arguments = type_arguments(path);
   if (name == "Self") {
@@ -103,12 +104,12 @@ SemanticTypePtr Analyzer::resolve_path_type(const ast::Path &path, Span span,
     }
     return structure_type(std::string(self_name));
   }
-  static const std::unordered_map<std::string, SemanticType::Kind>
-      primitives = {{"bool", SemanticType::Kind::Bool},
-                    {"i32", SemanticType::Kind::I32},
-                    {"u32", SemanticType::Kind::U32},
-                    {"isize", SemanticType::Kind::Isize},
-                    {"usize", SemanticType::Kind::Usize}};
+  static const std::unordered_map<std::string, SemanticType::Kind> primitives =
+      {{"bool", SemanticType::Kind::Bool},
+       {"i32", SemanticType::Kind::I32},
+       {"u32", SemanticType::Kind::U32},
+       {"isize", SemanticType::Kind::Isize},
+       {"usize", SemanticType::Kind::Usize}};
   if (auto found = primitives.find(name); found != primitives.end()) {
     if (!arguments.empty())
       report(span, "primitive type '" + name + "' takes no type arguments");

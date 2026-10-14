@@ -308,4 +308,4 @@ std::string type_name(const SemanticTypePtr &type) {
           }},
       type->data());
 }
-}
+} // namespace rx

@@ -2,8 +2,9 @@
 
 namespace rx::semantic_detail {
 
-ExprInfo Analyzer::check_array(const ast::Expr &node, const ast::ArrayExpr &array,
-                     const SemanticTypePtr &expected){
+ExprInfo Analyzer::check_array(const ast::Expr &node,
+                               const ast::ArrayExpr &array,
+                               const SemanticTypePtr &expected) {
   SemanticTypePtr expected_element;
   if (expected && expected->kind() == SemanticType::Kind::Array)
     expected_element = expected->element();
@@ -29,15 +30,15 @@ ExprInfo Analyzer::check_array(const ast::Expr &node, const ast::ArrayExpr &arra
     }
   }
   auto result = types_.array(first.type, array.elements.size());
-  if (expected_element && (result->length() != expected->length() ||
-                           !coercible(result, expected)))
+  if (expected_element &&
+      (result->length() != expected->length() || !coercible(result, expected)))
     mismatch(node.span, result, expected);
   return {result};
 }
 
 ExprInfo Analyzer::check_repeat_array(const ast::Expr &node,
-                            const ast::RepeatArrayExpr &array,
-                            const SemanticTypePtr &expected){
+                                      const ast::RepeatArrayExpr &array,
+                                      const SemanticTypePtr &expected) {
   SemanticTypePtr expected_element;
   if (expected && expected->kind() == SemanticType::Kind::Array)
     expected_element = expected->element();
@@ -47,22 +48,20 @@ ExprInfo Analyzer::check_repeat_array(const ast::Expr &node,
   auto result = types_.array(first.type, length.value_or(0));
   if (result->length() > 1 && !supports(first.type, "Copy", "", {}))
     report(node.span, "array repetition requires Copy");
-  if (expected_element && (result->length() != expected->length() ||
-                           !coercible(result, expected)))
+  if (expected_element &&
+      (result->length() != expected->length() || !coercible(result, expected)))
     mismatch(node.span, result, expected);
   return {result};
 }
 
 ExprInfo Analyzer::check_struct(const ast::Expr &node,
-                      const ast::StructExpr &structure){
+                                const ast::StructExpr &structure) {
   auto name = ast::path_name(structure.path);
-  if (name == "Self" && current_function_ &&
-      !current_function_->owner.empty())
+  if (name == "Self" && current_function_ && !current_function_->owner.empty())
     name = current_function_->owner;
   auto found = structures_.find(name);
   if (found == structures_.end()) {
-    report(node.span,
-           "struct literal names an unknown struct '" + name + "'");
+    report(node.span, "struct literal names an unknown struct '" + name + "'");
     return {};
   }
   std::unordered_set<std::string> initialized;
@@ -84,12 +83,11 @@ ExprInfo Analyzer::check_struct(const ast::Expr &node,
     if (initialized.find(field) == initialized.end())
       report(node.span, "missing field initializer '" + field + "'");
   auto result = structure_type(name);
-  return {result, false, false, false, symbol_for(found->second.ast->id),
-          name};
+  return {result, false, false, false, symbol_for(found->second.ast->id), name};
 }
 
 ExprInfo Analyzer::check_field(const ast::Expr &node,
-                     const ast::FieldExpr &projection){
+                               const ast::FieldExpr &projection) {
   auto receiver = check_expr(projection.base);
   auto base = receiver.type;
   bool mutable_access = true;
@@ -116,8 +114,7 @@ ExprInfo Analyzer::check_field(const ast::Expr &node,
     report(node.span, "field access requires a struct");
     return {};
   }
-  auto field =
-      structures_.at(base->name()).fields.find(projection.field.text);
+  auto field = structures_.at(base->name()).fields.find(projection.field.text);
   if (field == structures_.at(base->name()).fields.end()) {
     report(node.span, "unknown field '" + projection.field.text + "'");
     return {};
@@ -135,12 +132,11 @@ ExprInfo Analyzer::check_field(const ast::Expr &node,
 }
 
 ExprInfo Analyzer::check_index(const ast::Expr &node,
-                     const ast::IndexExpr &projection){
+                               const ast::IndexExpr &projection) {
   auto base = check_expr(projection.base);
   auto index =
       check_expr(projection.index, primitive_type(SemanticType::Kind::Usize));
-  if (!compatible_types(index.type,
-                        primitive_type(SemanticType::Kind::Usize)))
+  if (!compatible_types(index.type, primitive_type(SemanticType::Kind::Usize)))
     mismatch(projection.index->span, index.type,
              primitive_type(SemanticType::Kind::Usize));
   auto container = base.type;
@@ -171,8 +167,8 @@ ExprInfo Analyzer::check_index(const ast::Expr &node,
     locked = true;
   ExprInfo result{
       container->element(), true, mutable_access, locked, {}, "index"};
-  result.receiver = OperandSemantics{projection.base->id, container,
-                                     std::move(adjustments)};
+  result.receiver =
+      OperandSemantics{projection.base->id, container, std::move(adjustments)};
   return result;
 }
 

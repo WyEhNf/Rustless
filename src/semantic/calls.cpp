@@ -2,7 +2,7 @@
 
 namespace rx::semantic_detail {
 
-BuiltinId Analyzer::io_builtin(std::string_view name){
+BuiltinId Analyzer::io_builtin(std::string_view name) {
   if (name == "getInt" || name == "get_i32")
     return BuiltinId::GetInt;
   if (name == "printInt" || name == "print_i32")
@@ -11,7 +11,7 @@ BuiltinId Analyzer::io_builtin(std::string_view name){
 }
 
 SemanticTypePtr Analyzer::builtin_path_type(const ast::Path &path,
-                                  const std::string &name){
+                                            const std::string &name) {
   const std::string owner{ast::name_text(path.segments[0].name)};
   const auto member = ast::name_text(path.segments[1].name);
   BuiltinId id = BuiltinId::Clone;
@@ -47,38 +47,36 @@ SemanticTypePtr Analyzer::builtin_path_type(const ast::Path &path,
   return types_.builtin(id, std::move(container));
 }
 
-bool Analyzer::builtin_function(std::string_view name){
+bool Analyzer::builtin_function(std::string_view name) {
   return protected_builtin_value(name) || name == "get_i32" ||
          name == "print_i32" || name == "println_i32";
 }
 
-bool Analyzer::constructor_path(const ast::Path &path){
+bool Analyzer::constructor_path(const ast::Path &path) {
   if (path.segments.size() != 2)
     return false;
   const std::string first{ast::name_text(path.segments[0].name)};
   auto second = ast::name_text(path.segments[1].name);
-  const bool member = second == "new" || second == "clone" ||
-                      second == "len" || second == "is_empty" ||
-                      second == "push" || second == "remove";
+  const bool member = second == "new" || second == "clone" || second == "len" ||
+                      second == "is_empty" || second == "push" ||
+                      second == "remove";
   const bool container_member =
       (first == "Vec" && member) ||
       (first == "Box" && (second == "new" || second == "clone"));
   return container_member ||
-         ((structures_.find(first) != structures_.end()) &&
-          second == "clone");
+         ((structures_.find(first) != structures_.end()) && second == "clone");
 }
 
-ExprInfo Analyzer::check_call(const ast::Expr &node, const ast::CallExpr &call){
+ExprInfo Analyzer::check_call(const ast::Expr &node,
+                              const ast::CallExpr &call) {
   auto callee = check_expr(call.callee);
   auto finish = [&](ExprInfo result) {
     result.callable = callee.callable;
     if (auto *function = rx::get_if<FunctionType>(*callee.type)) {
       result.symbol = function->symbol;
       result.target = function->name;
-    } else if (auto *builtin =
-                   rx::get_if<BuiltinFunctionType>(*callee.type)) {
-      result.target =
-          "builtin::" + std::string(builtin_name(builtin->builtin));
+    } else if (auto *builtin = rx::get_if<BuiltinFunctionType>(*callee.type)) {
+      result.target = "builtin::" + std::string(builtin_name(builtin->builtin));
     }
     return result;
   };
@@ -103,9 +101,10 @@ ExprInfo Analyzer::check_call(const ast::Expr &node, const ast::CallExpr &call){
   return {};
 }
 
-ExprInfo Analyzer::check_builtin_call(const ast::Expr &node,
-                            const std::vector<ast::ExprPtr> &arguments,
-                            const BuiltinFunctionType &builtin){
+ExprInfo
+Analyzer::check_builtin_call(const ast::Expr &node,
+                             const std::vector<ast::ExprPtr> &arguments,
+                             const BuiltinFunctionType &builtin) {
   switch (builtin.builtin) {
   case BuiltinId::GetInt:
     return check_signature(node, arguments, {},
@@ -127,8 +126,7 @@ ExprInfo Analyzer::check_builtin_call(const ast::Expr &node,
   }
   switch (builtin.builtin) {
   case BuiltinId::BoxNew:
-    return check_signature(node, arguments, {container->element()},
-                           container);
+    return check_signature(node, arguments, {container->element()}, container);
   case BuiltinId::VecNew:
     return check_signature(node, arguments, {}, container);
   case BuiltinId::Clone:
@@ -138,17 +136,15 @@ ExprInfo Analyzer::check_builtin_call(const ast::Expr &node,
                            {compound(SemanticType::Kind::Ref, container)},
                            container);
   case BuiltinId::Push:
-    return check_signature(
-        node, arguments,
-        {compound(SemanticType::Kind::Ref, container, true),
-         container->element()},
-        primitive_type(SemanticType::Kind::Unit));
+    return check_signature(node, arguments,
+                           {compound(SemanticType::Kind::Ref, container, true),
+                            container->element()},
+                           primitive_type(SemanticType::Kind::Unit));
   case BuiltinId::Remove:
-    return check_signature(
-        node, arguments,
-        {compound(SemanticType::Kind::Ref, container, true),
-         primitive_type(SemanticType::Kind::Usize)},
-        container->element());
+    return check_signature(node, arguments,
+                           {compound(SemanticType::Kind::Ref, container, true),
+                            primitive_type(SemanticType::Kind::Usize)},
+                           container->element());
   case BuiltinId::Len:
     return check_signature(node, arguments,
                            {compound(SemanticType::Kind::Ref, container)},
@@ -165,10 +161,9 @@ ExprInfo Analyzer::check_builtin_call(const ast::Expr &node,
   throw std::logic_error("unhandled builtin call");
 }
 
-ExprInfo Analyzer::check_signature(const ast::Node &node,
-                         const std::vector<ast::ExprPtr> &arguments,
-                         const std::vector<SemanticTypePtr> &parameters,
-                         SemanticTypePtr result){
+ExprInfo Analyzer::check_signature(
+    const ast::Node &node, const std::vector<ast::ExprPtr> &arguments,
+    const std::vector<SemanticTypePtr> &parameters, SemanticTypePtr result) {
   const auto count = arguments.size();
   if (count != parameters.size())
     report(node.span, "wrong number of function arguments");

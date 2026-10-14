@@ -64,6 +64,11 @@ build/frontend_ast_corpus tests/official/semantic --semantic
 
 语义分析接口是 `rx::analyze`，声明位于 `include/rx/semantic/semantic.hpp`。
 
+AST 实现与头文件集中于 `src/ast`、`include/rx/ast`；语义模块集中于
+`src/semantic`、`include/rx/semantic`。原 `SemanticIndex` 已更名为
+`SafeGate`，四类检查门位于 `semantic/safety`。各模块职责与阅读顺序见
+[语义模块导读](src/semantic/README.md)。
+
 `rxc` 支持 `--stage lex|parse|semantic`，默认运行语义检查。接受源码时退出码为 0，正常拒绝时为 1，命令行、文件访问或内部异常时为 2。诊断写入 stderr；AST 与语义文本可输出到 stdout 或通过 `-o` 保存。示例：
 
 ```sh

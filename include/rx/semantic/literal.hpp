@@ -10,10 +10,12 @@
 #include <string_view>
 
 namespace rx {
-inline std::optional<std::uint64_t> integer_magnitude(const ast::IntegerLiteral &literal) {
+inline std::optional<std::uint64_t>
+integer_magnitude(const ast::IntegerLiteral &literal) {
   std::string digits = literal.spelling;
   if (literal.suffix) {
-    constexpr std::array<std::string_view, 4> suffixes{"i32", "u32", "isize", "usize"};
+    constexpr std::array<std::string_view, 4> suffixes{"i32", "u32", "isize",
+                                                       "usize"};
     const auto suffix_index = static_cast<std::size_t>(*literal.suffix);
     if (suffix_index >= suffixes.size())
       return {};
@@ -42,15 +44,16 @@ inline std::optional<std::uint64_t> integer_magnitude(const ast::IntegerLiteral 
   default:
     return {};
   }
-  if (digits.compare(0, prefix.size(), prefix) != 0 || digits.size() == prefix.size())
+  if (digits.compare(0, prefix.size(), prefix) != 0 ||
+      digits.size() == prefix.size())
     return {};
   std::uint64_t value{};
   const char *number_begin = digits.data() + prefix.size();
   const char *number_end = digits.data() + digits.size();
-  const auto parsed =
-      std::from_chars(number_begin, number_end, value, static_cast<int>(literal.base));
+  const auto parsed = std::from_chars(number_begin, number_end, value,
+                                      static_cast<int>(literal.base));
   if (parsed.ec != std::errc{} || parsed.ptr != number_end)
     return {};
   return value;
 }
-}
+} // namespace rx

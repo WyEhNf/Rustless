@@ -6,7 +6,7 @@ namespace rx::semantic_detail {
 
 std::optional<std::uint64_t>
 Analyzer::evaluate_length(const ast::ExprPtr &expression,
-                std::string_view self_name){
+                          std::string_view self_name) {
   auto errors = diagnostics_.error_count();
   auto [type, value] = constant_value(
       expression, primitive_type(SemanticType::Kind::Usize), self_name);
@@ -19,7 +19,7 @@ Analyzer::evaluate_length(const ast::ExprPtr &expression,
   return static_cast<std::uint64_t>(value);
 }
 
-void Analyzer::resolve_constant_type(ConstantInfo &constant){
+void Analyzer::resolve_constant_type(ConstantInfo &constant) {
   if (constant.type_state == ConstantInfo::TypeState::Done ||
       constant.type_state == ConstantInfo::TypeState::Failed)
     return;
@@ -36,14 +36,14 @@ void Analyzer::resolve_constant_type(ConstantInfo &constant){
     constant.type_state = ConstantInfo::TypeState::Done;
 }
 
-void Analyzer::validate_constants(){
+void Analyzer::validate_constants() {
   for (auto &[_, constant] : constants_)
     evaluate_constant(constant);
   for (auto &[_, constant] : associated_constants_)
     evaluate_constant(constant);
 }
 
-void Analyzer::evaluate_constant(ConstantInfo &constant){
+void Analyzer::evaluate_constant(ConstantInfo &constant) {
 
   resolve_constant_type(constant);
   if (constant.state == ConstantInfo::State::Done ||
@@ -68,9 +68,9 @@ void Analyzer::evaluate_constant(ConstantInfo &constant){
   constant.state = ConstantInfo::State::Done;
 }
 
-Analyzer::EvaluatedConstant Analyzer::constant_path(const ast::Expr &node,
-                                const ast::PathExpr &path,
-                                std::string_view self_name){
+Analyzer::EvaluatedConstant
+Analyzer::constant_path(const ast::Expr &node, const ast::PathExpr &path,
+                        std::string_view self_name) {
   auto name = ast::path_name(path.path);
   if (!self_name.empty() && name.compare(0, 6, "Self::") == 0)
     name = std::string(self_name) + name.substr(4);
@@ -93,9 +93,9 @@ Analyzer::EvaluatedConstant Analyzer::constant_path(const ast::Expr &node,
   return {error, 0};
 }
 
-Analyzer::EvaluatedConstant Analyzer::constant_value(const ast::ExprPtr &expression,
-                                 SemanticTypePtr expected,
-                                 std::string_view self_name){
+Analyzer::EvaluatedConstant
+Analyzer::constant_value(const ast::ExprPtr &expression,
+                         SemanticTypePtr expected, std::string_view self_name) {
   return ast::visit(
       *expression,
       ast::Overloaded{
@@ -145,7 +145,7 @@ Analyzer::EvaluatedConstant Analyzer::constant_value(const ast::ExprPtr &express
           }});
 }
 
-Analyzer::EvaluatedConstant Analyzer::invalid_constant(const ast::Expr &node){
+Analyzer::EvaluatedConstant Analyzer::invalid_constant(const ast::Expr &node) {
   report(node.span, "invalid constant expression");
   auto error = primitive_type(SemanticType::Kind::Error);
   record_node(node, ExprInfo{error});

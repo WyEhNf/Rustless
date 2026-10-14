@@ -9,7 +9,7 @@ bool integer(const SemanticTypePtr &type) {
          (type->kind() == TypeKind::I32 || type->kind() == TypeKind::U32 ||
           type->kind() == TypeKind::Isize || type->kind() == TypeKind::Usize);
 }
-}
+} // namespace
 std::optional<ResolvedOperation>
 resolve_operation(ast::BinaryOp op, const SemanticTypePtr &left,
                   const SemanticTypePtr &right) {
@@ -123,4 +123,4 @@ ast::BinaryOp binary_operation(ast::CompoundAssignOp op) {
   }
   throw std::invalid_argument("invalid compound operator");
 }
-}
+} // namespace rx

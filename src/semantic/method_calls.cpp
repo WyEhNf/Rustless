@@ -3,7 +3,7 @@
 namespace rx::semantic_detail {
 
 ExprInfo Analyzer::check_method(const ast::Expr &node,
-                      const ast::MethodCallExpr &method){
+                                const ast::MethodCallExpr &method) {
   if (!type_arguments(method.generic_args).empty())
     report(node.span, "method segments have no type parameters");
   auto receiver = check_expr(method.receiver);
@@ -134,7 +134,7 @@ ExprInfo Analyzer::check_method(const ast::Expr &node,
 
 ExprInfo Analyzer::check_method_signature(
     const ast::Node &node, const std::vector<ast::ExprPtr> &arguments,
-    const std::vector<SemanticTypePtr> &parameters, SemanticTypePtr result){
+    const std::vector<SemanticTypePtr> &parameters, SemanticTypePtr result) {
   const auto count = arguments.size();
   if (count != parameters.size())
     report(node.span, "wrong number of method arguments");

@@ -79,4 +79,4 @@ std::optional<ResolvedOperation>
 resolve_operation(ast::BinaryOp op, const SemanticTypePtr &left,
                   const SemanticTypePtr &right);
 ast::BinaryOp binary_operation(ast::CompoundAssignOp op);
-}
+} // namespace rx

@@ -3,8 +3,8 @@
 #include "rx/ast/ast.hpp"
 #include "rx/diagnostic.hpp"
 #include "rx/semantic/operation.hpp"
-#include "rx/semantic/type.hpp"
 #include "rx/semantic/symbol.hpp"
+#include "rx/semantic/type.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -127,4 +127,4 @@ private:
 SemanticResult analyze(const ast::Crate &crate, DiagnosticEngine &diagnostics);
 std::string dump_semantic(const SemanticResult &result);
 
-}
+} // namespace rx

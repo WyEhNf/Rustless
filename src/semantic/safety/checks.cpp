@@ -45,8 +45,7 @@ ast::BinaryOp source_operator(const ResolvedOperation &operation) {
           }},
       operation);
 }
-void validate_operand(const SafeGate &index,
-                      const OperandSemantics &operand) {
+void validate_operand(const SafeGate &index, const OperandSemantics &operand) {
   using TypeKind = SemanticType::Kind;
   auto current = index.expression(operand.node).type;
   for (const auto &adjustment : operand.adjustments) {

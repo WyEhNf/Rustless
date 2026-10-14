@@ -11,13 +11,11 @@ void insert(Map &map, Id id, const Fact &fact) {
   if (!id.value || !map.emplace(id, &fact).second)
     throw std::invalid_argument("duplicate or zero semantic identity");
 }
-}
-SafeGate::SafeGate(const ast::Crate &crate,
-                             const SemanticResult &result)
+} // namespace
+SafeGate::SafeGate(const ast::Crate &crate, const SemanticResult &result)
     : SafeGate(crate, result.snapshot(), ValidationTag{}) {}
 SafeGate::SafeGate(const ast::Crate &crate,
-                             std::shared_ptr<const SemanticData> snapshot,
-                             ValidationTag)
+                   std::shared_ptr<const SemanticData> snapshot, ValidationTag)
     : crate_(&crate), snapshot_(std::move(snapshot)) {
   if (!snapshot_ || !snapshot_->success || snapshot_->source_crate != &crate)
     throw std::invalid_argument(

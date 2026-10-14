@@ -2,7 +2,7 @@
 
 namespace rx::semantic_detail {
 
-void Analyzer::resolve_declarations(){
+void Analyzer::resolve_declarations() {
 
   resolve_impls();
 
@@ -39,11 +39,9 @@ void Analyzer::resolve_impls() {
           kind = SymbolKind::AssociatedFunction;
         record_symbol(declaration.id, kind, key, owner_symbol);
         if (!associated_names.insert(name).second ||
-            (associated_functions_.find(key) !=
-             associated_functions_.end()) ||
+            (associated_functions_.find(key) != associated_functions_.end()) ||
             (associated_constants_.find(key) != associated_constants_.end()))
-          report(declaration.span,
-                 "duplicate associated item '" + name + "'");
+          report(declaration.span, "duplicate associated item '" + name + "'");
         if constexpr (std::is_same_v<Payload, ast::Function>) {
           associated_functions_[key].ast = &declaration;
           associated_functions_[key].owner = owner;

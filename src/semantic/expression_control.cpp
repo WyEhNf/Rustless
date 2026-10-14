@@ -3,7 +3,7 @@
 namespace rx::semantic_detail {
 
 ExprInfo Analyzer::check_block(const ast::Block &block,
-                     const SemanticTypePtr &expected){
+                               const SemanticTypePtr &expected) {
   scopes_.emplace_back();
   SemanticTypePtr result = primitive_type(SemanticType::Kind::Unit);
   for (std::size_t index = 0; index < block.statements.size(); ++index) {
@@ -15,8 +15,7 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
             [&](const ast::Stmt &node, const ast::LetStmt &payload) {
               SemanticTypePtr annotation;
               if (payload.annotation)
-                annotation =
-                    resolve_type(*payload.annotation, current_owner());
+                annotation = resolve_type(*payload.annotation, current_owner());
               auto initializer = check_expr(payload.initializer, annotation);
               auto binding_type = initializer.type;
               if (annotation)
@@ -24,8 +23,7 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
               if (annotation && !coercible(initializer.type, annotation))
                 mismatch(payload.initializer->span, initializer.type,
                          annotation);
-              if (annotation &&
-                  annotation->kind() == SemanticType::Kind::Ref &&
+              if (annotation && annotation->kind() == SemanticType::Kind::Ref &&
                   annotation->is_mutable() && initializer.access_locked)
                 report(payload.initializer->span,
                        "mutable reference initializer requires mutable "
@@ -65,7 +63,7 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
 }
 
 ExprInfo Analyzer::check_if(const ast::Node &node, const ast::IfExpr &branch,
-                  const SemanticTypePtr &expected){
+                            const SemanticTypePtr &expected) {
   auto condition =
       check_expr(branch.condition, primitive_type(SemanticType::Kind::Bool));
   if (!compatible_types(condition.type,
@@ -101,22 +99,22 @@ ExprInfo Analyzer::check_if(const ast::Node &node, const ast::IfExpr &branch,
   if (else_value.type->kind() == SemanticType::Kind::Never)
     return then_value;
   if (coercible(else_value.type, then_value.type)) {
-    append_adjustments(
-        else_id, coercion_adjustments(else_value.type, then_value.type));
+    append_adjustments(else_id,
+                       coercion_adjustments(else_value.type, then_value.type));
     return then_value;
   }
   if (coercible(then_value.type, else_value.type)) {
-    append_adjustments(
-        branch.then_block->id,
-        coercion_adjustments(then_value.type, else_value.type));
+    append_adjustments(branch.then_block->id,
+                       coercion_adjustments(then_value.type, else_value.type));
     return else_value;
   }
   mismatch(node.span, else_value.type, then_value.type);
   return {};
 }
 
-ExprInfo Analyzer::check_loop(const ast::Expr &node, const ast::LoopExpr &loop_expr,
-                    const SemanticTypePtr &expected){
+ExprInfo Analyzer::check_loop(const ast::Expr &node,
+                              const ast::LoopExpr &loop_expr,
+                              const SemanticTypePtr &expected) {
   loops_.push_back({expected, {}});
   auto body = check_block(*loop_expr.body);
   if (body.type->kind() != SemanticType::Kind::Unit &&
@@ -136,7 +134,7 @@ ExprInfo Analyzer::check_loop(const ast::Expr &node, const ast::LoopExpr &loop_e
 }
 
 ExprInfo Analyzer::check_while(const ast::Expr &node,
-                     const ast::WhileExpr &while_expr){
+                               const ast::WhileExpr &while_expr) {
 
   auto surrounding_loops = std::move(loops_);
   loops_.clear();
@@ -160,7 +158,8 @@ ExprInfo Analyzer::check_while(const ast::Expr &node,
   return {primitive_type(SemanticType::Kind::Unit)};
 }
 
-ExprInfo Analyzer::check_break(const ast::Expr &node, const ast::BreakExpr &payload){
+ExprInfo Analyzer::check_break(const ast::Expr &node,
+                               const ast::BreakExpr &payload) {
   if (loops_.empty()) {
     report(node.span, "break is only available inside a loop");
     return {primitive_type(SemanticType::Kind::Never)};
@@ -172,13 +171,15 @@ ExprInfo Analyzer::check_break(const ast::Expr &node, const ast::BreakExpr &payl
   return {primitive_type(SemanticType::Kind::Never)};
 }
 
-ExprInfo Analyzer::check_continue(const ast::Expr &node, const ast::ContinueExpr &){
+ExprInfo Analyzer::check_continue(const ast::Expr &node,
+                                  const ast::ContinueExpr &) {
   if (loops_.empty())
     report(node.span, "continue is only available inside a loop");
   return {primitive_type(SemanticType::Kind::Never)};
 }
 
-ExprInfo Analyzer::check_return(const ast::Expr &node, const ast::ReturnExpr &payload){
+ExprInfo Analyzer::check_return(const ast::Expr &node,
+                                const ast::ReturnExpr &payload) {
   auto expected = primitive_type(SemanticType::Kind::Error);
   if (current_function_)
     expected = current_function_->result;
