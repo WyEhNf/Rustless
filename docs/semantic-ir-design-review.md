@@ -67,3 +67,26 @@ generation, runtime containers, ownership destruction, optimization passes and
 machine code generation are still future work. The tutorial distinguishes
 current project excerpts from the algorithms and interfaces proposed for that
 work. Its assembled TeX is produced by `python scripts/build_tutorial.py`.
+
+## Tutorial verification
+
+The independently compilable tutorial contains 22 main chapters, three
+appendices, chapter guides, 80 TikZ figures and 213 code listings. The final
+source passed the desktop LaTeX compiler. XeLaTeX also produced a 170-page PDF
+with stable references and no overflow, missing-glyph or rerun warnings.
+
+All 96 Rustless listings were classified before running them: 86 semantic
+positive cases passed, four semantic negative cases were correctly rejected,
+two syntax-only examples parsed, and four explicitly future `match` exercises
+were excluded from the current language checks. The lexical-scope example was
+corrected to parenthesize its block before addition and checked again.
+
+Current front-end and semantic C++ excerpts were compared with their definitions;
+IR excerpts and the referenced helper-generation loop were also checked. Elided
+code and proposed interfaces are identified in the prose.
+
+Page contact sheets were reviewed, with enlarged checks of the header dependency
+diagram and Phi elimination. Diagram widths, edge labels and source-path wrapping
+were repaired. Short teaching code excerpts are kept together across page breaks.
+Reports, rendered pages and the optional PDF are under `build/design-review/`
+and `build/tutorial-semantic-examples/`; the committed deliverable is the TeX.

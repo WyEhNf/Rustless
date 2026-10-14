@@ -29,6 +29,7 @@ bool signed_integer(const SemanticTypePtr &value) {
                    value->kind() == SemanticType::Kind::Isize);
 }
 
+// check if from type A can be coerced to to type B.
 bool Analyzer::coercible(const SemanticTypePtr &from,
                          const SemanticTypePtr &to) {
   if (!from || !to || from->kind() == SemanticType::Kind::Error ||
@@ -55,6 +56,7 @@ bool Analyzer::coercible(const SemanticTypePtr &from,
   return false;
 }
 
+//find a more basic type.
 SemanticTypePtr Analyzer::common_type(const SemanticTypePtr &first,
                                       const SemanticTypePtr &second) {
   if (coercible(second, first))
@@ -81,6 +83,10 @@ void Analyzer::mismatch(Span span, const SemanticTypePtr &actual,
                    type_name(expected));
 }
 
+/*
+transport one type to another may cost multiple steps.
+the vec<adj> describes the process.
+*/
 std::vector<Adjustment>
 Analyzer::coercion_adjustments(const SemanticTypePtr &from,
                                const SemanticTypePtr &to) const {

@@ -1,3 +1,9 @@
+/*
+ This is a safe gate for the real semantic checker.That is, if the semantic checker works well.,then this 
+ gate will make no difference. If the checker has some bugs, then the gate will make sure it will not produce 
+ wrong semantic results. 
+*/
+
 #include "rx/semantic/safety/safe_gate.hpp"
 #include "rx/ast/visitor.hpp"
 #include <functional>

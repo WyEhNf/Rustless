@@ -13,10 +13,12 @@ SemanticResult Analyzer::run() {
 
   collect_items();
   resolve_declarations();
+
   for (const auto &[_, function] : functions_)
     callable_functions_.emplace(symbol_for(function.ast->id), &function);
   for (const auto &[_, function] : associated_functions_)
     callable_functions_.emplace(symbol_for(function.ast->id), &function);
+
   validate_constants();
   validate_layouts_and_derives();
   validate_entry();
@@ -26,8 +28,10 @@ SemanticResult Analyzer::run() {
             [](const SymbolRecord &left, const SymbolRecord &right) {
               return left.id < right.id;
             });
+
   for (auto &[_, fact] : expression_facts_)
     result_.expressions.push_back(std::move(fact));
+
   std::sort(result_.functions.begin(), result_.functions.end(),
             [](const auto &left, const auto &right) {
               return left.symbol < right.symbol;
@@ -36,6 +40,7 @@ SemanticResult Analyzer::run() {
             [](const auto &left, const auto &right) {
               return left.symbol < right.symbol;
             });
+
   for (auto &[node, type] : resolved_types_)
     result_.resolved_types.push_back({node, std::move(type)});
   for (auto &[symbol, type] : symbol_types_)
@@ -53,6 +58,7 @@ SemanticResult Analyzer::run() {
               return left.symbol < right.symbol;
             });
   result_.success = !diagnostics_.has_errors();
+
   if (result_.success)
     return SemanticResult::publish(crate_, std::move(result_));
   return SemanticResult::rejected(crate_, std::move(result_));

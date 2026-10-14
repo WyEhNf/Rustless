@@ -22,6 +22,7 @@ void Analyzer::resolve_function(FunctionInfo &function, const std::string &,
       resolve_type(function.ast->signature.return_annotation, function.owner);
 }
 
+// main is important!
 void Analyzer::validate_entry() {
   auto found = functions_.find("main");
   if (found == functions_.end()) {
@@ -37,6 +38,7 @@ void Analyzer::validate_entry() {
     report(main.ast->span, "main must return unit");
 }
 
+// view objs in functions_.
 void Analyzer::check_functions() {
   for (const auto &[_, function] : functions_)
     check_function(function);
@@ -67,6 +69,7 @@ void Analyzer::check_function(const FunctionInfo &function) {
         self, ast::is_mutable(*function.ast->signature.receiver),
         symbol_for(function.ast->signature.receiver->id)};
   }
+
   for (std::size_t index = 0; index < function.ast->signature.parameters.size();
        ++index) {
     const auto &parameter = function.ast->signature.parameters[index];

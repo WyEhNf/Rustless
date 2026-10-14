@@ -2,6 +2,7 @@
 
 namespace rx::semantic_detail {
 
+// view objs in impls_
 void Analyzer::resolve_declarations() {
 
   resolve_impls();
@@ -12,6 +13,7 @@ void Analyzer::resolve_declarations() {
     resolve_constant_type(constant);
   for (auto &[name, function] : associated_functions_)
     resolve_function(function, name, function.owner);
+
   resolve_structures();
   for (auto &[name, function] : functions_)
     resolve_function(function, name, {});
@@ -26,6 +28,7 @@ void Analyzer::resolve_impls() {
              "an inherent impl target must be a user-defined struct");
       continue;
     }
+
     const std::string owner = target->name();
     const auto owner_symbol = structures_.at(owner).ast->id;
     std::unordered_set<std::string> associated_names;

@@ -72,6 +72,7 @@ ExprInfo Analyzer::check_expr(const ast::ExprPtr &expression,
   return check_expr(*expression, std::move(expected));
 }
 
+// discuss of exprs.
 ExprInfo Analyzer::check_expr(const ast::Expr &expression,
                               SemanticTypePtr expected, bool record_coercion) {
   auto result = ast::visit(
@@ -181,7 +182,8 @@ ExprInfo Analyzer::check_path(const ast::Expr &node,
     name = current_function_->owner;
     for (std::size_t index = 1; index < path.segments.size(); ++index)
       name += "::" + std::string(ast::name_text(path.segments[index].name));
-  }
+  } // deconstruct the self
+
   if (path.segments.size() == 1) {
     if (auto *binding = lookup(name))
       return {binding->type,   true, binding->is_mutable, false,

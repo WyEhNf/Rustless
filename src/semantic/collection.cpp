@@ -28,10 +28,12 @@ void Analyzer::record_symbol_type(ast::NodeId declaration,
 void Analyzer::collect_items() {
   std::unordered_set<std::string> type_names;
   std::unordered_set<std::string> value_names;
+
   for (const auto &item : crate_.items) {
     ast::visit(item, [&](const ast::Node &, const auto &value) {
       using Payload = std::decay_t<decltype(value)>;
       if constexpr (std::is_same_v<Payload, ast::Struct>) {
+
         record_symbol(value.id, SymbolKind::Struct, value.name.text);
         if (builtin_type(value.name.text))
           report(value.span, "the builtin type name '" + value.name.text +
@@ -39,7 +41,9 @@ void Analyzer::collect_items() {
         if (!type_names.insert(value.name.text).second)
           report(value.span, "duplicate type name '" + value.name.text + "'");
         structures_[value.name.text].ast = &value;
+
       } else if constexpr (std::is_same_v<Payload, ast::Function>) {
+
         record_symbol(value.id, SymbolKind::Function, value.name.text);
         if (protected_builtin_value(value.name.text))
           report(value.span, "the builtin value name '" + value.name.text +
@@ -47,7 +51,9 @@ void Analyzer::collect_items() {
         if (!value_names.insert(value.name.text).second)
           report(value.span, "duplicate value name '" + value.name.text + "'");
         functions_[value.name.text].ast = &value;
+
       } else if constexpr (std::is_same_v<Payload, ast::Constant>) {
+
         record_symbol(value.id, SymbolKind::Constant, value.name.text);
         if (protected_builtin_value(value.name.text))
           report(value.span, "the builtin value name '" + value.name.text +
@@ -55,6 +61,7 @@ void Analyzer::collect_items() {
         if (!value_names.insert(value.name.text).second)
           report(value.span, "duplicate value name '" + value.name.text + "'");
         constants_[value.name.text].ast = &value;
+
       } else if constexpr (std::is_same_v<Payload, ast::Impl>) {
         impls_.push_back(&value);
       } else {

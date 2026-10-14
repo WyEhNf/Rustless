@@ -5,6 +5,7 @@
 
 # REIMU build configuration
 /.xmake/
+/docs
 
 # ANTLR
 .antlr

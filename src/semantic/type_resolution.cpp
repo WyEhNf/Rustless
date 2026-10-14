@@ -110,6 +110,8 @@ SemanticTypePtr Analyzer::resolve_path_type(const ast::Path &path, Span span,
        {"u32", SemanticType::Kind::U32},
        {"isize", SemanticType::Kind::Isize},
        {"usize", SemanticType::Kind::Usize}};
+  // although the primitive types are not user-defined, we still resolve it here
+  // instead of the at the frontend.
   if (auto found = primitives.find(name); found != primitives.end()) {
     if (!arguments.empty())
       report(span, "primitive type '" + name + "' takes no type arguments");

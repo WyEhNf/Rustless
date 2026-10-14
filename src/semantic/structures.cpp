@@ -2,6 +2,7 @@
 
 namespace rx::semantic_detail {
 
+// view objs in structures_ and check.
 void Analyzer::validate_layouts_and_derives() {
   for (auto &[name, _] : structures_)
     validate_layout(name);
@@ -19,6 +20,7 @@ void Analyzer::validate_layouts_and_derives() {
   }
 }
 
+//check if there's infinite loop in a struct.
 bool Analyzer::validate_layout(const std::string &name) {
 
   auto &structure = structures_.at(name);
@@ -48,6 +50,7 @@ bool Analyzer::validate_layout(const std::string &name) {
   return valid;
 }
 
+// traits supported.
 bool Analyzer::supports(const SemanticTypePtr &value, const std::string &trait,
                         const std::string &root,
                         std::unordered_set<std::string> seen) {
