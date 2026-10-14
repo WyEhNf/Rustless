@@ -66,15 +66,15 @@ add_library(rustless_frontend STATIC
   src/llvm/ir_semantic.cpp
   src/llvm/ir_operators.cpp
   src/llvm/ir_call.cpp
-  src/semantic/run.cpp
+  src/semantic/semantic_core.cpp
   src/semantic/collection.cpp
   src/semantic/declarations.cpp
   src/semantic/structures.cpp
   src/semantic/functions.cpp
-  src/semantic/expressions.cpp
-  src/semantic/expression_values.cpp
-  src/semantic/expression_control.cpp
-  src/semantic/expression_operators.cpp
+  src/semantic/exprs.cpp
+  src/semantic/expr_values.cpp
+  src/semantic/expr_control.cpp
+  src/semantic/expr_operators.cpp
   src/semantic/calls.cpp
   src/semantic/method_calls.cpp
   src/semantic/type_resolution.cpp

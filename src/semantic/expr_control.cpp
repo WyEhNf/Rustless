@@ -1,4 +1,4 @@
-#include "detail/analyzer.hpp"
+#include "rx/semantic/analyzer.hpp"
 
 namespace rx::semantic_detail {
 
