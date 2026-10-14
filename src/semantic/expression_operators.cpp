@@ -1,5 +1,7 @@
 #include "detail/analyzer.hpp"
 
+#include <limits>
+
 namespace rx::semantic_detail {
 
 ExprInfo Analyzer::check_borrow(const ast::Expr &node, const ast::BorrowExpr &borrow){
