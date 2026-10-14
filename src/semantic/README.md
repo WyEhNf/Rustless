@@ -58,3 +58,13 @@ AST 的生命周期与地址稳定性由调用方保证。
 lexer、parser、semantic 清单；`scripts/compare_frontend.py` 接受
 `--baseline` 和 `--candidate`，逐项比较退出码、诊断以及 AST 和语义
 文本输出，可用于后续行为保持型重构。
+
+本次拆分完成后的验证结果：
+
+- CMake 构建成功，C++17 配置保持不变。
+- CTest：14/14 通过，包括安全门不变量与 IR 对接测试。
+- 外部清单：lexer 53/53、parser 442/442、semantic 236/236 通过。
+- 与拆分前编译器比较 731 个清单用例，退出码、标准输出和诊断全部
+  一致；crate 解析包含 AST 文本，semantic 阶段包含 AST 与语义文本。
+
+重构前已经存在的学习注释随对应实现迁移，并保留为未提交改动。
