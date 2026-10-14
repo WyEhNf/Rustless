@@ -1,5 +1,7 @@
 #include "detail/analyzer.hpp"
 
+#include <limits>
+
 namespace rx::semantic_detail {
 
 std::optional<std::uint64_t>
