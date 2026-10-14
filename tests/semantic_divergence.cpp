@@ -89,5 +89,38 @@ fn main() {
   check("fn main() { loop {}; missing; }", false);
   check("fn main() { loop {}; let bad: bool = 1; }", false);
   check("fn main() { loop {}; { 42 } printInt(1); }", false);
+  // Right-first assignment evaluation determines which transfer is reachable.
+  check(R"(
+fn f() -> i32 {
+  let mut n = 0;
+  loop { *{ break; &mut n } = { return 7; 1 }; };
+}
+fn main() {}
+)",
+        true);
+  check(R"(
+fn f() -> i32 {
+  let mut n = 0;
+  loop { *{ return 7; &mut n } = { break; 1 }; };
+}
+fn main() {}
+)",
+        false);
+  check(R"(
+fn f() -> i32 {
+  let mut n = 0;
+  loop { *{ break; &mut n } += { return 7; 1 }; };
+}
+fn main() {}
+)",
+        true);
+  check(R"(
+fn f() -> i32 {
+  let mut n = 0;
+  loop { *{ return 7; &mut n } += { break; 1 }; };
+}
+fn main() {}
+)",
+        false);
   check_tail_types();
 }

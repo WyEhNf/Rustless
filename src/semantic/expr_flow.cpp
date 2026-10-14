@@ -77,6 +77,15 @@ ControlFlow Analyzer::expression_flow(const ast::Expr &expression) const {
               flow = flow.then(flow_of(field.value->id));
             return flow;
           },
+          [&](const ast::Expr &, const ast::AssignExpr &assignment) {
+            // Assignment evaluates the value before the destination address.
+            return flow_of(assignment.value->id)
+                .then(flow_of(assignment.target->id));
+          },
+          [&](const ast::Expr &, const ast::CompoundAssignExpr &assignment) {
+            return flow_of(assignment.value->id)
+                .then(flow_of(assignment.target->id));
+          },
           [&](const ast::Expr &node, const auto &) {
             ControlFlow flow;
             // Other forms eagerly evaluate their expression children. Type
