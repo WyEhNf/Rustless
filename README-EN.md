@@ -78,6 +78,28 @@ report records every command, exit code, stdout, and stderr. Use `--jobs` and
 `--timeout` to adjust concurrency and per-case limits. The existing Makefile
 reference-compiler workflow remains independent.
 
+## RxOJ semantic submission
+
+`config.mk` builds and runs the C++ compiler. Select **C / C++** and
+**Semantic analysis** on RxOJ, using this public repository and a pushed commit.
+The judge builds `build/oj/rxc` and invokes it with `--stage semantic {source}`.
+Builds require a C++17 toolchain, CMake 3.24+, and Make, with no network, Java,
+Rust, or REIMU dependency.
+
+The ANTLR 4.13.2 runtime archive is vendored in `vendor/antlr`; matching generated
+sources are tracked in `generated/antlr`. `.rx-oj.toml` disables dependency
+preparation. After editing the grammar, regenerate and commit the outputs using
+a local official generator JAR:
+
+```sh
+python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar
+python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar --check
+make test STAGE=semantic FILTER=official:semantic
+```
+
+CMake rejects stale grammar fingerprints. IR/codegen/optimization commands remain
+unset until their CLI entry points are implemented; submit the semantic suite only.
+
 ## Setting up the Makefile
 
 The Makefile is our unified entrypoint in accessing your compiler. You are expected to edit [`config.mk`](config.mk) and hook in your compiler commands. In practice, specify in these fields:

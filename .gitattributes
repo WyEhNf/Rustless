@@ -1,3 +1,7 @@
 # Grammar fingerprints and generated sources must match on Windows and Linux.
 /grammar/*.g4 text eol=lf
-/generated/antlr/* text eol=lf
+/generated/antlr/* text eol=lf -whitespace
+/config.mk text eol=lf
+/.rx-oj.toml text eol=lf
+/cmake/*.cmake text eol=lf
+/scripts/generate_parser.py text eol=lf

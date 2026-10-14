@@ -88,6 +88,27 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 
 该脚本按 manifest 的 `compilation_success` 核验退出码，读取 parser 的 `metadata.entry`，并将崩溃、异常退出和超时计为失败。JSON 报告保留逐用例命令、退出码和完整输出。可用 `--jobs` 与 `--timeout` 调整并发数和每用例时限。原有 Makefile 测试流程保持独立。
 
+## RxOJ Semantic 提交
+
+当前 `config.mk` 已接入 C++ 编译器。网站选择 **C / C++** 和
+**Semantic analysis**，提交此仓库的公开 Git 地址及已推送的 commit。
+`BUILD` 会在 `build/oj` 中构建 `rxc`，`SEMANTIC` 调用
+`./build/oj/rxc --stage semantic {source}`。仅需 C++17 工具链、CMake 3.24+
+和 Make；构建无需联网、Java、Rust 或 REIMU。
+
+ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
+`generated/antlr`，`.rx-oj.toml` 关闭额外的依赖预取。修改 `.g4` 后，先用
+本地官方生成器重新生成并提交生成文件：
+
+```sh
+python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar
+python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar --check
+make test STAGE=semantic FILTER=official:semantic
+```
+
+CMake 会校验文法指纹，防止使用过期的生成文件。IR、Codegen 与 Optimization
+尚未接入命令行，对应配置留空，当前请仅提交 Semantic 套件。
+
 ## 配置 Makefile
 
 Makefile 是调用你编译器的统一入口。你需要编辑 [`config.mk`](config.mk) 并接入你的编译器命令。具体来说，需要配置以下字段：
