@@ -57,8 +57,8 @@ add_custom_command(
 add_library(rustless_frontend STATIC
   "${GENERATED_DIR}/RxLexer.cpp"
   "${GENERATED_DIR}/RxParser.cpp"
-  src/ast.cpp
-  src/frontend.cpp
+  src/ast/ast.cpp
+  src/ast/frontend.cpp
   src/llvm/ir.cpp
   src/llvm/ir_print.cpp
   src/llvm/ir_verify.cpp
@@ -66,10 +66,10 @@ add_library(rustless_frontend STATIC
   src/llvm/ir_semantic.cpp
   src/llvm/ir_operators.cpp
   src/llvm/ir_call.cpp
-  src/semantic.cpp
-  src/semantic_type.cpp
-  src/semantic_operation.cpp
-  src/semantic_index.cpp)
+  src/semantic/semantic.cpp
+  src/semantic/type.cpp
+  src/semantic/operation.cpp
+  src/semantic/safety/safe_gate.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
 target_include_directories(rustless_frontend SYSTEM PRIVATE
   "${antlr4_runtime_SOURCE_DIR}/runtime/src")
@@ -84,9 +84,9 @@ if(BUILD_TESTING)
   add_executable(ir_calls tests/ir_calls.cpp)
   target_link_libraries(ir_calls PRIVATE rustless_frontend)
   add_test(NAME ir_calls COMMAND ir_calls)
-  add_executable(semantic_index_invariants tests/semantic_index_invariants.cpp)
-  target_link_libraries(semantic_index_invariants PRIVATE rustless_frontend)
-  add_test(NAME semantic_index_invariants COMMAND semantic_index_invariants)
+  add_executable(safe_gate_invariants tests/safe_gate_invariants.cpp)
+  target_link_libraries(safe_gate_invariants PRIVATE rustless_frontend)
+  add_test(NAME safe_gate_invariants COMMAND safe_gate_invariants)
   add_executable(semantic_operations tests/semantic_operations.cpp)
   target_link_libraries(semantic_operations PRIVATE rustless_frontend)
   add_test(NAME semantic_operations COMMAND semantic_operations)

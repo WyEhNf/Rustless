@@ -21,7 +21,7 @@ Layout array_layout(Layout element, std::uint64_t count, const TargetLayout &tar
   return {static_cast<std::uint32_t>(element.bytes * count), element.alignment};
 }
 }
-SemanticBridge::SemanticBridge(const SemanticIndex &semantic, TargetLayout target)
+SemanticBridge::SemanticBridge(const SafeGate &semantic, TargetLayout target)
     : semantic_(semantic), target_(target) {
   auto collect_layout = ast::Overloaded{
       [&](const ast::Struct &node, const ast::Struct &) {

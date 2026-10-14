@@ -1,8 +1,8 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
-#include "rx/semantic.hpp"
-#include "rx/semantic_index.hpp"
-#include "rx/semantic_literal.hpp"
+#include "rx/ast/frontend.hpp"
+#include "rx/semantic/semantic.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
+#include "rx/semantic/literal.hpp"
 
 #undef NDEBUG
 #include <cassert>
@@ -45,7 +45,7 @@ fn main() {
     }
   }
   assert(saw_receiver);
-  rx::SemanticIndex index(*parsed.crate, checked);
+  rx::SafeGate index(*parsed.crate, checked);
   const auto &pair = std::get<ast::Struct>(parsed.crate->items[1]);
   assert(index.declaration(pair.id).kind == rx::SymbolKind::Struct);
   assert(index.structure(index.declaration(pair.id).id).fields[0] ==

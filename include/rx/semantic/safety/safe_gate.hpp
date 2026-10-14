@@ -1,15 +1,15 @@
 #pragma once
 
-#include "rx/semantic.hpp"
+#include "rx/semantic/semantic.hpp"
 #include <unordered_map>
 
 namespace rx {
 
-class SemanticIndex {
+class SafeGate {
 public:
-  SemanticIndex(const ast::Crate &crate, const SemanticResult &result);
-  SemanticIndex(ast::Crate &&, const SemanticResult &) = delete;
-  SemanticIndex(const ast::Crate &&, const SemanticResult &) = delete;
+  SafeGate(const ast::Crate &crate, const SemanticResult &result);
+  SafeGate(ast::Crate &&, const SemanticResult &) = delete;
+  SafeGate(const ast::Crate &&, const SemanticResult &) = delete;
   const ast::Crate &crate() const { return *crate_; }
   const SymbolRecord &symbol(SymbolId id) const;
   const SymbolRecord &declaration(ast::NodeId id) const;
@@ -43,7 +43,7 @@ public:
 private:
   friend class SemanticResult;
   struct ValidationTag {};
-  SemanticIndex(const ast::Crate &crate,
+  SafeGate(const ast::Crate &crate,
                 std::shared_ptr<const SemanticData> snapshot, ValidationTag);
   void validate_links() const;
   void validate_tree();

@@ -2,8 +2,8 @@
 
 #include "rx/ast/node.hpp"
 #include "rx/ast/operators.hpp"
-#include "rx/builtin.hpp"
-#include "rx/semantic_type.hpp"
+#include "rx/semantic/builtin.hpp"
+#include "rx/semantic/type.hpp"
 #include <optional>
 #include <variant>
 #include <vector>

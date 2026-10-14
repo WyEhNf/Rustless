@@ -1,10 +1,10 @@
 #pragma once
 
-#include "rx/ast.hpp"
+#include "rx/ast/ast.hpp"
 #include "rx/diagnostic.hpp"
-#include "rx/semantic_operation.hpp"
-#include "rx/semantic_type.hpp"
-#include "rx/symbol.hpp"
+#include "rx/semantic/operation.hpp"
+#include "rx/semantic/type.hpp"
+#include "rx/semantic/symbol.hpp"
 
 #include <cstdint>
 #include <memory>

@@ -1,5 +1,5 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 #include "rx/ir_semantic.hpp"
 
 #undef NDEBUG
@@ -60,7 +60,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   for (const auto text : {"b &= false", "b |= true", "b ^= false"}) {
     const auto &node = expression(program, text);
@@ -87,7 +87,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   for (const auto text : {"r + r", "rr < rr"}) {
     const auto &node = expression(program, text);
@@ -133,7 +133,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   for (const auto text : {"a == b", "a != b"}) {
     const auto &node = expression(program, text);
@@ -162,7 +162,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   const auto &function =
       std::get<ast::Function>(program.parsed.crate->items[0]);
   const auto function_symbol = index.declaration(function.id).id;
@@ -211,7 +211,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   const auto expected =
       std::array{std::pair{"signed >> 32", ir::BinaryOp::AShr},
@@ -252,7 +252,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   for (const auto text : {"r.value + 1", "ar[0] + 1", "r.get() + 1"}) {
     const auto &node = expression(program, text);
@@ -292,7 +292,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   for (const auto text : {"-r", "!r", "!br"}) {
     const auto &node = expression(program, text);
     const auto &payload = *ast::get_if<ast::UnaryExpr>(node);
@@ -338,7 +338,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   unsigned checked = 0;
   ast::walk(*program.parsed.crate, [&](const auto &node, const auto &payload) {
     if constexpr (std::is_same_v<std::decay_t<decltype(payload)>,
@@ -368,7 +368,7 @@ fn main() {
 }
 )");
   program.accepted();
-  rx::SemanticIndex index(*program.parsed.crate, program.checked);
+  rx::SafeGate index(*program.parsed.crate, program.checked);
   ir::SemanticBridge bridge(index);
   for (const auto text : {"shared + mutable", "shared + (mutable)"}) {
     const auto &node = expression(program, text);

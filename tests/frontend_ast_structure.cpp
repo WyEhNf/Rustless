@@ -1,5 +1,5 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 
 #undef NDEBUG
 #include <cassert>

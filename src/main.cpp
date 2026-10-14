@@ -1,6 +1,6 @@
-#include "rx/ast.hpp"
-#include "rx/frontend.hpp"
-#include "rx/semantic.hpp"
+#include "rx/ast/ast.hpp"
+#include "rx/ast/frontend.hpp"
+#include "rx/semantic/semantic.hpp"
 
 #include <fstream>
 #include <iostream>

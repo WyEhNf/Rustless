@@ -1,4 +1,4 @@
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 
 #include "RxLexer.h"
 #include "RxParser.h"

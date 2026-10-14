@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rx/ir_ids.hpp"
-#include "rx/symbol.hpp"
+#include "rx/semantic/symbol.hpp"
 
 #include <cstdint>
 #include <optional>

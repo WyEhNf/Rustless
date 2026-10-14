@@ -1,4 +1,4 @@
-#include "rx/semantic_type.hpp"
+#include "rx/semantic/type.hpp"
 
 #undef NDEBUG
 #include <array>

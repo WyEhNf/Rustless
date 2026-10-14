@@ -1,5 +1,5 @@
-#include "rx/semantic.hpp"
-#include "rx/semantic_literal.hpp"
+#include "rx/semantic/semantic.hpp"
+#include "rx/semantic/literal.hpp"
 
 #include <algorithm>
 #include <charconv>

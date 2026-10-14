@@ -1,6 +1,6 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
-#include "rx/semantic_index.hpp"
+#include "rx/ast/frontend.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
 
 #undef NDEBUG
 #include <algorithm>
@@ -195,17 +195,17 @@ fn main() {
   });
   static_assert(std::is_const_v<rx::SemanticTypePtr::element_type>);
   static_assert(
-      std::is_constructible_v<rx::SemanticIndex, const rx::ast::Crate &,
+      std::is_constructible_v<rx::SafeGate, const rx::ast::Crate &,
                               const rx::SemanticResult &>);
-  static_assert(!std::is_constructible_v<rx::SemanticIndex, rx::ast::Crate &&,
+  static_assert(!std::is_constructible_v<rx::SafeGate, rx::ast::Crate &&,
                                          const rx::SemanticResult &>);
   static_assert(
-      !std::is_constructible_v<rx::SemanticIndex, const rx::ast::Crate &&,
+      !std::is_constructible_v<rx::SafeGate, const rx::ast::Crate &&,
                                const rx::SemanticResult &>);
-  std::unique_ptr<rx::SemanticIndex> retained;
+  std::unique_ptr<rx::SafeGate> retained;
   {
     auto temporary = rx::SemanticResult::publish(*parsed.crate, original);
-    retained = std::make_unique<rx::SemanticIndex>(*parsed.crate, temporary);
+    retained = std::make_unique<rx::SafeGate>(*parsed.crate, temporary);
   }
   assert(retained->function(choose).parameters.size() == 2);
   rx::DiagnosticEngine foreign_diagnostics;
@@ -244,7 +244,7 @@ fn main() {
   assert(!failed.success());
   bool rejected_failed = false;
   try {
-    rx::SemanticIndex invalid(*parsed.crate, failed);
+    rx::SafeGate invalid(*parsed.crate, failed);
   } catch (const std::exception &) {
     rejected_failed = true;
   }

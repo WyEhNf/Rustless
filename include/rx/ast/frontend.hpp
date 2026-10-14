@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/ast.hpp"
+#include "rx/ast/ast.hpp"
 #include "rx/diagnostic.hpp"
 
 #include <memory>

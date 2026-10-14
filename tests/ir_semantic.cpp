@@ -1,6 +1,6 @@
 #include "rx/ir_semantic.hpp"
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 
 #undef NDEBUG
 #include <cassert>
@@ -9,9 +9,9 @@
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
-static_assert(std::is_constructible_v<ir::SemanticBridge, const rx::SemanticIndex &>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge, rx::SemanticIndex &&>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge, const rx::SemanticIndex &&>);
+static_assert(std::is_constructible_v<ir::SemanticBridge, const rx::SafeGate &>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge, rx::SafeGate &&>);
+static_assert(!std::is_constructible_v<ir::SemanticBridge, const rx::SafeGate &&>);
 namespace {
 void check_unary_lowering() {
   rx::DiagnosticEngine diagnostics;
@@ -35,7 +35,7 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SemanticIndex index(*parsed.crate, checked);
+  rx::SafeGate index(*parsed.crate, checked);
   ir::SemanticBridge bridge(index);
   std::vector<ir::ScalarUnary> computations;
   std::vector<rx::SemanticType::Kind> place_types;
@@ -89,7 +89,7 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SemanticIndex index(*parsed.crate, checked);
+  rx::SafeGate index(*parsed.crate, checked);
   ir::SemanticBridge bridge(index);
   std::vector<rx::SemanticType::Kind> content_types;
   std::vector<bool> negated;
@@ -168,7 +168,7 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SemanticIndex index(*parsed.crate, checked);
+  rx::SafeGate index(*parsed.crate, checked);
   ir::SemanticBridge bridge(index);
   assert(bridge.target().llvm_data_layout() == target.llvm_data_layout());
   assert(bridge.target().triple() == target.triple());

@@ -1,4 +1,4 @@
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 
 #undef NDEBUG
 #include <cassert>

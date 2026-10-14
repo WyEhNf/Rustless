@@ -1,4 +1,4 @@
-#include "rx/semantic_index.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
 #include "rx/ast/visitor.hpp"
 #include <functional>
 #include <stdexcept>
@@ -12,10 +12,10 @@ void insert(Map &map, Id id, const Fact &fact) {
     throw std::invalid_argument("duplicate or zero semantic identity");
 }
 }
-SemanticIndex::SemanticIndex(const ast::Crate &crate,
+SafeGate::SafeGate(const ast::Crate &crate,
                              const SemanticResult &result)
-    : SemanticIndex(crate, result.snapshot(), ValidationTag{}) {}
-SemanticIndex::SemanticIndex(const ast::Crate &crate,
+    : SafeGate(crate, result.snapshot(), ValidationTag{}) {}
+SafeGate::SafeGate(const ast::Crate &crate,
                              std::shared_ptr<const SemanticData> snapshot,
                              ValidationTag)
     : crate_(&crate), snapshot_(std::move(snapshot)) {
@@ -51,7 +51,7 @@ SemanticResult SemanticResult::publish(const ast::Crate &crate,
   data.source_crate = &crate;
   data.success = true;
   auto snapshot = std::make_shared<const SemanticData>(std::move(data));
-  SemanticIndex validated(crate, snapshot, SemanticIndex::ValidationTag{});
+  SafeGate validated(crate, snapshot, SafeGate::ValidationTag{});
   return SemanticResult(std::move(snapshot));
 }
 SemanticResult SemanticResult::rejected(const ast::Crate &crate,
@@ -60,36 +60,36 @@ SemanticResult SemanticResult::rejected(const ast::Crate &crate,
   data.success = false;
   return SemanticResult(std::make_shared<const SemanticData>(std::move(data)));
 }
-const SymbolRecord &SemanticIndex::symbol(SymbolId id) const {
+const SymbolRecord &SafeGate::symbol(SymbolId id) const {
   return *symbols_.at(id);
 }
-const SymbolRecord &SemanticIndex::declaration(ast::NodeId id) const {
+const SymbolRecord &SafeGate::declaration(ast::NodeId id) const {
   return *declarations_.at(id);
 }
-const ExpressionSemantics &SemanticIndex::expression(ast::NodeId id) const {
+const ExpressionSemantics &SafeGate::expression(ast::NodeId id) const {
   return *expressions_.at(id);
 }
-const SemanticTypePtr &SemanticIndex::type(ast::NodeId id) const {
+const SemanticTypePtr &SafeGate::type(ast::NodeId id) const {
   return types_.at(id)->type;
 }
-const SemanticTypePtr &SemanticIndex::symbol_type(SymbolId id) const {
+const SemanticTypePtr &SafeGate::symbol_type(SymbolId id) const {
   return symbol_types_.at(id)->type;
 }
-const FunctionSemantics &SemanticIndex::function(SymbolId id) const {
+const FunctionSemantics &SafeGate::function(SymbolId id) const {
   return *functions_.at(id);
 }
-const StructSemantics &SemanticIndex::structure(SymbolId id) const {
+const StructSemantics &SafeGate::structure(SymbolId id) const {
   return *structures_.at(id);
 }
-const ConstantValue &SemanticIndex::constant(SymbolId id) const {
+const ConstantValue &SafeGate::constant(SymbolId id) const {
   return *constants_.at(id);
 }
-void SemanticIndex::require_node(const ast::Node &node) const {
+void SafeGate::require_node(const ast::Node &node) const {
   const auto found = nodes_.find(node.id);
   if (found == nodes_.end() || found->second != &node)
     throw std::invalid_argument("semantic query uses a foreign AST node");
 }
-void SemanticIndex::validate_links() const {
+void SafeGate::validate_links() const {
   std::unordered_set<const SemanticType *> checked_types;
   std::unordered_set<const SemanticType *> active_types;
   std::function<void(const SemanticTypePtr &)> require_type;
@@ -230,7 +230,7 @@ void SemanticIndex::validate_links() const {
           "constant fact links to a non-constant symbol");
   }
 }
-void SemanticIndex::validate_tree() {
+void SafeGate::validate_tree() {
   std::unordered_set<ast::NodeId> identities;
   std::unordered_set<ast::NodeId> expression_nodes;
   std::unordered_set<ast::NodeId> type_nodes;
@@ -316,7 +316,7 @@ ast::BinaryOp source_operator(const ResolvedOperation &operation) {
           }},
       operation);
 }
-void validate_operand(const SemanticIndex &index,
+void validate_operand(const SafeGate &index,
                       const OperandSemantics &operand) {
   using TypeKind = SemanticType::Kind;
   auto current = index.expression(operand.node).type;
@@ -354,7 +354,7 @@ void validate_operand(const SemanticIndex &index,
   }
   require_equivalent(current, operand.effective_type);
 }
-void validate_operation(const SemanticIndex &index, const ResolvedBinary &fact,
+void validate_operation(const SafeGate &index, const ResolvedBinary &fact,
                         const ast::Expr &left, const ast::Expr &right,
                         ast::BinaryOp op) {
   if (fact.left.node != left.id || fact.right.node != right.id ||
@@ -392,7 +392,7 @@ bool same_target(const CallTarget &left, const CallTarget &right) {
       left);
 }
 }
-void SemanticIndex::validate_declarations() const {
+void SafeGate::validate_declarations() const {
   std::unordered_set<ast::NodeId> expected;
   auto require_symbol = [&](const ast::Node &node, SymbolKind kind,
                             std::optional<SymbolId> owner = {},
@@ -520,7 +520,7 @@ void SemanticIndex::validate_declarations() const {
     throw std::invalid_argument(
         "semantic symbols do not match AST declarations");
 }
-void SemanticIndex::validate_shapes() const {
+void SafeGate::validate_shapes() const {
   using TypeKind = SemanticType::Kind;
   auto expect = [](const SemanticTypePtr &type, TypeKind kind) {
     if (type->kind() != kind)

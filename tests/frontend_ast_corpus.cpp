@@ -1,7 +1,7 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
-#include "rx/semantic.hpp"
-#include "rx/semantic_index.hpp"
+#include "rx/ast/frontend.hpp"
+#include "rx/semantic/semantic.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
       if (passed && check_semantics) {
         const auto semantic_result = rx::analyze(*parsed.crate, diagnostics);
         if (!diagnostics.has_errors()) {
-          rx::SemanticIndex index(*parsed.crate, semantic_result);
+          rx::SafeGate index(*parsed.crate, semantic_result);
           (void)index;
         }
         const auto name = entry.path().filename().string();

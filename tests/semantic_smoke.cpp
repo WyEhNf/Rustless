@@ -1,5 +1,5 @@
-#include "rx/frontend.hpp"
-#include "rx/semantic.hpp"
+#include "rx/ast/frontend.hpp"
+#include "rx/semantic/semantic.hpp"
 
 #undef NDEBUG
 #include <cassert>

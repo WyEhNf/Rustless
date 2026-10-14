@@ -1,5 +1,5 @@
 #include "rx/ast/visitor.hpp"
-#include "rx/frontend.hpp"
+#include "rx/ast/frontend.hpp"
 #include "rx/ir_semantic.hpp"
 
 #undef NDEBUG
@@ -28,7 +28,7 @@ fn main() {
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   assert(checked.success() && !diagnostics.has_errors());
-  rx::SemanticIndex index(*parsed.crate, checked);
+  rx::SafeGate index(*parsed.crate, checked);
   rx::ir::SemanticBridge bridge(index);
   unsigned calls = 0;
   rx::ast::walk(*parsed.crate, [&](const auto &node, const auto &payload) {

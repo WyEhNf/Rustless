@@ -62,7 +62,7 @@ git submodule update --init tests/official
 build/frontend_ast_corpus tests/official/semantic --semantic
 ```
 
-语义分析接口是 `rx::analyze`，声明位于 `include/rx/semantic.hpp`。
+语义分析接口是 `rx::analyze`，声明位于 `include/rx/semantic/semantic.hpp`。
 
 `rxc` 支持 `--stage lex|parse|semantic`，默认运行语义检查。接受源码时退出码为 0，正常拒绝时为 1，命令行、文件访问或内部异常时为 2。诊断写入 stderr；AST 与语义文本可输出到 stdout 或通过 `-o` 保存。示例：
 

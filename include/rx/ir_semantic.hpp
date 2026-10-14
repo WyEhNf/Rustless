@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rx/ir.hpp"
-#include "rx/semantic_index.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
 #include "rx/target_layout.hpp"
 #include <map>
 #include <set>
@@ -105,10 +105,10 @@ struct UnaryLowering {
 };
 class SemanticBridge {
 public:
-  explicit SemanticBridge(const SemanticIndex &semantic,
+  explicit SemanticBridge(const SafeGate &semantic,
                           TargetLayout target = TargetLayout::rv32());
-  SemanticBridge(SemanticIndex &&, TargetLayout = TargetLayout::rv32()) = delete;
-  SemanticBridge(const SemanticIndex &&, TargetLayout = TargetLayout::rv32()) = delete;
+  SemanticBridge(SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
+  SemanticBridge(const SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
   const TargetLayout &target() const { return target_; }
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
@@ -129,7 +129,7 @@ private:
   AbiValue abi(const SemanticTypePtr &type) const;
   BinaryLowering lower_binary(const ResolvedBinary &resolved) const;
   CallLowering lower_call(const ast::Expr &node, const std::vector<ast::ExprPtr> &arguments) const;
-  const SemanticIndex &semantic_;
+  const SafeGate &semantic_;
   const TargetLayout target_;
   std::map<SymbolId, StructLayout> layouts_;
   std::set<SymbolId> resolving_;
