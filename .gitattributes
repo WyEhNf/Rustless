@@ -1,0 +1,3 @@
+# Grammar fingerprints and generated sources must match on Windows and Linux.
+/grammar/*.g4 text eol=lf
+/generated/antlr/* text eol=lf
