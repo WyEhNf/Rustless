@@ -84,6 +84,9 @@ if(BUILD_TESTING)
   add_test(NAME rxc_help COMMAND rxc --help)
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME offline_inputs
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/offline_inputs_test.py"
+        "${CMAKE_COMMAND}" "${CMAKE_GENERATOR}")
     add_test(NAME frontend_cli
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frontend_cli_test.py"
         "$<TARGET_FILE:rxc>")
