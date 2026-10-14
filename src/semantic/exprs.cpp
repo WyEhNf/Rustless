@@ -166,6 +166,10 @@ ExprInfo Analyzer::check_expr(const ast::Expr &expression,
     result.adjustments.insert(result.adjustments.end(), adjustments.begin(),
                               adjustments.end());
   }
+  auto flow = expression_flow(expression);
+  if (result.type->kind() == SemanticType::Kind::Never)
+    flow.exits &= ~ControlFlow::Normal;
+  control_flows_[expression.id] = flow;
   record_node(expression, result);
   return result;
 }

@@ -100,6 +100,9 @@ private:
                       SemanticTypePtr expected = {},
                       bool record_coercion = true);
   ExprInfo check_path(const ast::Expr &node, const ast::PathExpr &value);
+  ControlFlow flow_of(ast::NodeId node) const;
+  ControlFlow expression_flow(const ast::Expr &expression) const;
+  ControlFlow branch_flow(const ast::IfExpr &branch) const;
 
   // Aggregate values and projections.
   ExprInfo check_array(const ast::Expr &node, const ast::ArrayExpr &array,
@@ -183,6 +186,7 @@ private:
   std::map<ast::NodeId, SymbolId> declaration_symbols_;
   std::unordered_set<SymbolId> recorded_symbols_;
   std::map<ast::NodeId, ExpressionSemantics> expression_facts_;
+  std::map<ast::NodeId, ControlFlow> control_flows_;
   std::map<ast::NodeId, SemanticTypePtr> resolved_types_;
   std::map<SymbolId, SemanticTypePtr> symbol_types_;
 };

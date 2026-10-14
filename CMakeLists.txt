@@ -25,6 +25,7 @@ add_library(rustless_frontend STATIC
   src/semantic/structures.cpp
   src/semantic/functions.cpp
   src/semantic/exprs.cpp
+  src/semantic/expr_flow.cpp
   src/semantic/expr_values.cpp
   src/semantic/expr_control.cpp
   src/semantic/expr_operators.cpp

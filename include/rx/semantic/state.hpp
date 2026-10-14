@@ -86,4 +86,16 @@ struct Binding {
   SymbolId symbol{};
 };
 
+// Static types and control-flow exits are independent: a typed tail can be
+// unreachable. An empty exit set represents divergence with no outward transfer.
+struct ControlFlow {
+  enum Exit : unsigned { Normal = 1, Returned = 2, Broken = 4, Continued = 8 };
+  unsigned exits{Normal};
+
+  bool completes_normally() const { return (exits & Normal) != 0; }
+  ControlFlow then(ControlFlow next) const {
+    return {(exits & ~Normal) | (completes_normally() ? next.exits : 0u)};
+  }
+};
+
 } // namespace rx::semantic_detail

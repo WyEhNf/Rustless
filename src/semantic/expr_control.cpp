@@ -6,8 +6,8 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
                                const SemanticTypePtr &expected) {
   scopes_.emplace_back();
   SemanticTypePtr result = primitive_type(SemanticType::Kind::Unit);
-  for (std::size_t index = 0; index < block.statements.size(); ++index) {
-    const auto &statement = block.statements[index];
+  ControlFlow flow;
+  for (const auto &statement : block.statements) {
     ast::visit(
         *statement,
         ast::Overloaded{
@@ -17,6 +17,7 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
               if (payload.annotation)
                 annotation = resolve_type(*payload.annotation, current_owner());
               auto initializer = check_expr(payload.initializer, annotation);
+              flow = flow.then(flow_of(payload.initializer->id));
               auto binding_type = initializer.type;
               if (annotation)
                 binding_type = annotation;
@@ -44,20 +45,24 @@ ExprInfo Analyzer::check_block(const ast::Block &block,
             },
             [&](const ast::Stmt &node, const ast::ExprStmt &payload) {
               auto value = check_expr(payload.expression);
-              if (!block.tail && index + 1 == block.statements.size() &&
-                  value.type->kind() == SemanticType::Kind::Never)
-                result = value.type;
-              else if (payload.termination == ast::Termination::Omitted &&
-                       value.type->kind() != SemanticType::Kind::Unit &&
-                       value.type->kind() != SemanticType::Kind::Never)
+              flow = flow.then(flow_of(payload.expression->id));
+              if (payload.termination == ast::Termination::Omitted &&
+                  value.type->kind() != SemanticType::Kind::Unit &&
+                  value.type->kind() != SemanticType::Kind::Never)
                 report(payload.expression->span,
                        "a non-final expression without a "
                        "semicolon must have unit type");
             }});
   }
-  if (block.tail)
+  // Check all statements and the tail even after normal execution has ended.
+  // A tail always supplies the static type, while a tail-less diverging block is !.
+  if (block.tail) {
     result = check_expr(*block.tail, expected).type;
+    flow = flow.then(flow_of((*block.tail)->id));
+  } else if (!flow.completes_normally())
+    result = primitive_type(SemanticType::Kind::Never);
   scopes_.pop_back();
+  control_flows_[block.id] = flow;
   record_node(block, ExprInfo{result});
   return {result};
 }
