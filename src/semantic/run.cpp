@@ -140,83 +140,6 @@ void Analyzer::report(Span span, std::string message){
   diagnostics_.error(span, std::move(message));
 }
 
-SymbolId Analyzer::symbol_for(ast::NodeId node){
-  auto [entry, inserted] =
-      declaration_symbols_.try_emplace(node, next_symbol_);
-  if (inserted)
-    ++next_symbol_.value;
-  return entry->second;
-}
-
-void Analyzer::record_symbol(ast::NodeId node, SymbolKind kind, std::string name,
-                   std::optional<ast::NodeId> owner){
-  auto id = symbol_for(node);
-  std::optional<SymbolId> parent;
-  if (owner)
-    parent = symbol_for(*owner);
-  if (recorded_symbols_.insert(id).second)
-    result_.symbols.push_back({id, kind, std::move(name), parent, node});
-}
-
-void Analyzer::record_symbol_type(ast::NodeId declaration,
-                        const SemanticTypePtr &type){
-  symbol_types_[symbol_for(declaration)] = type;
-}
-
-void Analyzer::collect_items(){
-  std::unordered_set<std::string> type_names;
-  std::unordered_set<std::string> value_names;
-  for (const auto &item : crate_.items) {
-    ast::visit(item, [&](const ast::Node &, const auto &value) {
-      using Payload = std::decay_t<decltype(value)>;
-      if constexpr (std::is_same_v<Payload, ast::Struct>) {
-        record_symbol(value.id, SymbolKind::Struct, value.name.text);
-        if (builtin_type(value.name.text))
-          report(value.span, "the builtin type name '" + value.name.text +
-                                 "' is protected");
-        if (!type_names.insert(value.name.text).second)
-          report(value.span, "duplicate type name '" + value.name.text + "'");
-        structures_[value.name.text].ast = &value;
-      } else if constexpr (std::is_same_v<Payload, ast::Function>) {
-        record_symbol(value.id, SymbolKind::Function, value.name.text);
-        if (protected_builtin_value(value.name.text))
-          report(value.span, "the builtin value name '" + value.name.text +
-                                 "' is protected");
-        if (!value_names.insert(value.name.text).second)
-          report(value.span,
-                 "duplicate value name '" + value.name.text + "'");
-        functions_[value.name.text].ast = &value;
-      } else if constexpr (std::is_same_v<Payload, ast::Constant>) {
-        record_symbol(value.id, SymbolKind::Constant, value.name.text);
-        if (protected_builtin_value(value.name.text))
-          report(value.span, "the builtin value name '" + value.name.text +
-                                 "' is protected");
-        if (!value_names.insert(value.name.text).second)
-          report(value.span,
-                 "duplicate value name '" + value.name.text + "'");
-        constants_[value.name.text].ast = &value;
-      } else if constexpr (std::is_same_v<Payload, ast::Impl>) {
-        impls_.push_back(&value);
-      } else {
-        static_assert(std::is_same_v<Payload, ast::Use>,
-                      "unhandled AST declaration");
-        (void)value;
-      }
-    });
-  }
-}
-
-bool Analyzer::builtin_type(std::string_view name){
-  return name == "bool" || name == "i32" || name == "u32" ||
-         name == "isize" || name == "usize" || name == "Box" ||
-         name == "Vec" || name == "Copy" || name == "Clone" ||
-         name == "PartialEq" || name == "Eq";
-}
-
-bool Analyzer::protected_builtin_value(std::string_view name){
-  return name == "getInt" || name == "printInt" || name == "printlnInt";
-}
-
 SemanticTypePtr Analyzer::resolve_type(const ast::TypePtr &syntax,
                              std::string_view self_name){
   auto result = resolve_type_impl(syntax, self_name);
@@ -352,43 +275,7 @@ void Analyzer::resolve_constant_type(ConstantInfo &constant){
 
 void Analyzer::resolve_declarations(){
 
-  for (const auto *implementation : impls_) {
-    auto target = resolve_type(implementation->target);
-    if (target->kind() != SemanticType::Kind::Struct ||
-        structures_.find(target->name()) == structures_.end()) {
-      report(implementation->span,
-             "an inherent impl target must be a user-defined struct");
-      continue;
-    }
-    const std::string owner = target->name();
-    const auto owner_symbol = structures_.at(owner).ast->id;
-    std::unordered_set<std::string> associated_names;
-    for (const auto &member : implementation->members) {
-      ast::visit(member, [&](const ast::Node &, const auto &declaration) {
-        using Payload = std::decay_t<decltype(declaration)>;
-        const auto &name = declaration.name.text;
-        auto key = owner + "::" + name;
-        auto kind = SymbolKind::AssociatedConstant;
-        if constexpr (std::is_same_v<Payload, ast::Function>)
-          kind = SymbolKind::AssociatedFunction;
-        record_symbol(declaration.id, kind, key, owner_symbol);
-        if (!associated_names.insert(name).second ||
-            (associated_functions_.find(key) !=
-             associated_functions_.end()) ||
-            (associated_constants_.find(key) != associated_constants_.end()))
-          report(declaration.span,
-                 "duplicate associated item '" + name + "'");
-        if constexpr (std::is_same_v<Payload, ast::Function>) {
-          associated_functions_[key].ast = &declaration;
-          associated_functions_[key].owner = owner;
-        } else {
-          static_assert(std::is_same_v<Payload, ast::Constant>);
-          associated_constants_[key].ast = &declaration;
-          associated_constants_[key].owner = owner;
-        }
-      });
-    }
-  }
+  resolve_impls();
 
   for (auto &[_, constant] : constants_)
     resolve_constant_type(constant);
@@ -396,36 +283,7 @@ void Analyzer::resolve_declarations(){
     resolve_constant_type(constant);
   for (auto &[name, function] : associated_functions_)
     resolve_function(function, name, function.owner);
-  for (auto &[name, structure] : structures_) {
-    std::unordered_set<std::string> fields;
-    std::unordered_set<std::string> derives;
-    for (const auto &attribute : structure.ast->attributes)
-      for (const auto &name : attribute.names) {
-        const std::string derive{ast::spelling(name.kind)};
-        if (!derives.insert(derive).second)
-          report(structure.ast->span, "duplicate derive '" + derive + "'");
-        structure.derives.insert(derive);
-      }
-    if ((structure.derives.find("Copy") != structure.derives.end()) &&
-        structure.derives.find("Clone") == structure.derives.end())
-      report(structure.ast->span, "Copy requires an explicit Clone derive");
-    if ((structure.derives.find("Eq") != structure.derives.end()) &&
-        structure.derives.find("PartialEq") == structure.derives.end())
-      report(structure.ast->span, "Eq requires an explicit PartialEq derive");
-    for (const auto &field : structure.ast->fields) {
-      record_symbol(field.id, SymbolKind::Field, field.name.text,
-                    structure.ast->id);
-      if (!fields.insert(field.name.text).second)
-        report(field.span, "duplicate field '" + field.name.text + "'");
-      structure.fields[field.name.text] = resolve_type(field.type, name);
-      record_symbol_type(field.id, structure.fields[field.name.text]);
-      structure.field_symbols[field.name.text] = symbol_for(field.id);
-    }
-    StructSemantics declaration{symbol_for(structure.ast->id), {}};
-    for (const auto &field : structure.ast->fields)
-      declaration.fields.push_back(symbol_for(field.id));
-    result_.structures.push_back(std::move(declaration));
-  }
+  resolve_structures();
   for (auto &[name, function] : functions_)
     resolve_function(function, name, {});
 }
@@ -1898,6 +1756,79 @@ ExprInfo Analyzer::check_return(const ast::Expr &node, const ast::ReturnExpr &pa
   if (!coercible(value.type, expected))
     mismatch(node.span, value.type, expected);
   return {primitive_type(SemanticType::Kind::Never)};
+}
+
+void Analyzer::resolve_impls() {
+  for (const auto *implementation : impls_) {
+    auto target = resolve_type(implementation->target);
+    if (target->kind() != SemanticType::Kind::Struct ||
+        structures_.find(target->name()) == structures_.end()) {
+      report(implementation->span,
+             "an inherent impl target must be a user-defined struct");
+      continue;
+    }
+    const std::string owner = target->name();
+    const auto owner_symbol = structures_.at(owner).ast->id;
+    std::unordered_set<std::string> associated_names;
+    for (const auto &member : implementation->members) {
+      ast::visit(member, [&](const ast::Node &, const auto &declaration) {
+        using Payload = std::decay_t<decltype(declaration)>;
+        const auto &name = declaration.name.text;
+        auto key = owner + "::" + name;
+        auto kind = SymbolKind::AssociatedConstant;
+        if constexpr (std::is_same_v<Payload, ast::Function>)
+          kind = SymbolKind::AssociatedFunction;
+        record_symbol(declaration.id, kind, key, owner_symbol);
+        if (!associated_names.insert(name).second ||
+            (associated_functions_.find(key) !=
+             associated_functions_.end()) ||
+            (associated_constants_.find(key) != associated_constants_.end()))
+          report(declaration.span,
+                 "duplicate associated item '" + name + "'");
+        if constexpr (std::is_same_v<Payload, ast::Function>) {
+          associated_functions_[key].ast = &declaration;
+          associated_functions_[key].owner = owner;
+        } else {
+          static_assert(std::is_same_v<Payload, ast::Constant>);
+          associated_constants_[key].ast = &declaration;
+          associated_constants_[key].owner = owner;
+        }
+      });
+    }
+  }
+}
+
+void Analyzer::resolve_structures() {
+  for (auto &[name, structure] : structures_) {
+    std::unordered_set<std::string> fields;
+    std::unordered_set<std::string> derives;
+    for (const auto &attribute : structure.ast->attributes)
+      for (const auto &name : attribute.names) {
+        const std::string derive{ast::spelling(name.kind)};
+        if (!derives.insert(derive).second)
+          report(structure.ast->span, "duplicate derive '" + derive + "'");
+        structure.derives.insert(derive);
+      }
+    if ((structure.derives.find("Copy") != structure.derives.end()) &&
+        structure.derives.find("Clone") == structure.derives.end())
+      report(structure.ast->span, "Copy requires an explicit Clone derive");
+    if ((structure.derives.find("Eq") != structure.derives.end()) &&
+        structure.derives.find("PartialEq") == structure.derives.end())
+      report(structure.ast->span, "Eq requires an explicit PartialEq derive");
+    for (const auto &field : structure.ast->fields) {
+      record_symbol(field.id, SymbolKind::Field, field.name.text,
+                    structure.ast->id);
+      if (!fields.insert(field.name.text).second)
+        report(field.span, "duplicate field '" + field.name.text + "'");
+      structure.fields[field.name.text] = resolve_type(field.type, name);
+      record_symbol_type(field.id, structure.fields[field.name.text]);
+      structure.field_symbols[field.name.text] = symbol_for(field.id);
+    }
+    StructSemantics declaration{symbol_for(structure.ast->id), {}};
+    for (const auto &field : structure.ast->fields)
+      declaration.fields.push_back(symbol_for(field.id));
+    result_.structures.push_back(std::move(declaration));
+  }
 }
 
 } // namespace rx::semantic_detail

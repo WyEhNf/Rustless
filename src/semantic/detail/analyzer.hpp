@@ -47,6 +47,8 @@ private:
                   std::string_view self_name = {});
   void resolve_constant_type(ConstantInfo &constant);
   void resolve_declarations();
+  void resolve_impls();
+  void resolve_structures();
   void resolve_function(FunctionInfo &function, const std::string &,
                         std::string owner);
   void validate_constants();
