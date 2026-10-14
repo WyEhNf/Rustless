@@ -82,7 +82,13 @@ add_library(rustless_frontend STATIC
   src/semantic/collection.cpp
   src/semantic/type.cpp
   src/semantic/operation.cpp
-  src/semantic/safety/safe_gate.cpp)
+  src/semantic/result.cpp
+  src/semantic/safety/safe_gate.cpp
+  src/semantic/safety/checks.cpp
+  src/semantic/safety/links_gate.cpp
+  src/semantic/safety/tree_gate.cpp
+  src/semantic/safety/declarations_gate.cpp
+  src/semantic/safety/shapes_gate.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
 target_include_directories(rustless_frontend SYSTEM PRIVATE
   "${antlr4_runtime_SOURCE_DIR}/runtime/src")
