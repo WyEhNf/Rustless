@@ -1,6 +1,7 @@
 #include "rx/ast/visitor.hpp"
 #include "rx/ast/frontend.hpp"
 #include "rx/llvm/semantic.hpp"
+#include "rx/semantic/safety/safe_gate.hpp"
 
 #undef NDEBUG
 #include <array>
