@@ -62,6 +62,23 @@ Result Builder::fresh(Type type) {
   ++function_.next_value.value;
   return {id, type};
 }
+bool Builder::terminated() const {
+  for (const auto &block : function_.blocks) {
+    if (block.id == current_) {
+      return !block.instructions.empty() && is_terminator(block.instructions.back());
+    }
+  }
+  return false;
+}
+Operand Builder::allocate_entry(std::uint32_t bytes, std::uint32_t alignment) {
+  auto result = fresh(Type::Ptr);
+  auto &instructions = function_.blocks.front().instructions;
+  auto insertion = instructions.begin();
+  while (insertion != instructions.end() && std::holds_alternative<Alloca>(insertion->data))
+    ++insertion;
+  instructions.insert(insertion, Instruction{Alloca{result.id, std::max(bytes, 1u), alignment}, origin_});
+  return Operand::local(Type::Ptr, result.id);
+}
 void Builder::append(Instruction::Data data) {
   Instruction node{std::move(data), origin_};
   auto errors = verify_instruction(node);

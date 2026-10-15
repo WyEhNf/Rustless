@@ -9,6 +9,9 @@ public:
   explicit Builder(Function &function);
   BlockId create_block(std::string name);
   void select(BlockId block);
+  BlockId insertion_block() const { return *current_; }
+  bool terminated() const;
+  Operand allocate_entry(std::uint32_t bytes, std::uint32_t alignment = 4);
   void set_origin(const ast::Node &node) { origin_ = ir::origin(node); }
   void clear_origin() { origin_.reset(); }
   Operand allocate(std::uint32_t bytes, std::uint32_t alignment = 4);

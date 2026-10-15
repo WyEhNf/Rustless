@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rx/llvm/ir.hpp"
+#include "rx/llvm/facts.hpp"
 #include "rx/semantic/safety/safe_gate.hpp"
 #include "rx/llvm/target.hpp"
 #include <map>
@@ -105,11 +106,14 @@ struct UnaryLowering {
 };
 class SemanticBridge {
 public:
+  explicit SemanticBridge(const SemanticData &semantic,
+                          TargetLayout target = TargetLayout::rv32());
   explicit SemanticBridge(const SafeGate &semantic,
                           TargetLayout target = TargetLayout::rv32());
   SemanticBridge(SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
   SemanticBridge(const SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
   const TargetLayout &target() const { return target_; }
+  const SemanticFacts &facts() const { return semantic_; }
   Layout layout(const SemanticTypePtr &type) const;
   std::optional<Type> scalar_type(const SemanticTypePtr &type) const;
   const StructLayout &structure(SymbolId symbol) const { return layouts_.at(symbol); }
@@ -129,7 +133,7 @@ private:
   AbiValue abi(const SemanticTypePtr &type) const;
   BinaryLowering lower_binary(const ResolvedBinary &resolved) const;
   CallLowering lower_call(const ast::Expr &node, const std::vector<ast::ExprPtr> &arguments) const;
-  const SafeGate &semantic_;
+  SemanticFacts semantic_;
   const TargetLayout target_;
   std::map<SymbolId, StructLayout> layouts_;
   std::set<SymbolId> resolving_;

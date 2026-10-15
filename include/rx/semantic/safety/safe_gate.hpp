@@ -11,6 +11,7 @@ public:
   SafeGate(ast::Crate &&, const SemanticResult &) = delete;
   SafeGate(const ast::Crate &&, const SemanticResult &) = delete;
   const ast::Crate &crate() const { return *crate_; }
+  const SemanticData &data() const { return *snapshot_; }
   const SymbolRecord &symbol(SymbolId id) const;
   const SymbolRecord &declaration(ast::NodeId id) const;
   const SymbolRecord &declaration(const ast::Node &node) const {

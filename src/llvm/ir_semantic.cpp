@@ -22,17 +22,20 @@ Layout array_layout(Layout element, std::uint64_t count, const TargetLayout &tar
 }
 }
 SemanticBridge::SemanticBridge(const SafeGate &semantic, TargetLayout target)
+    : SemanticBridge(semantic.data(), target) {}
+
+SemanticBridge::SemanticBridge(const SemanticData &semantic, TargetLayout target)
     : semantic_(semantic), target_(target) {
   auto collect_layout = ast::Overloaded{
       [&](const ast::Struct &node, const ast::Struct &) {
-        resolve_structure(semantic.declaration(node).id);
+        resolve_structure(semantic_.declaration(node).id);
       },
       [](const ast::Use &, const ast::Use &) {},
       [](const ast::Function &, const ast::Function &) {},
       [](const ast::Constant &, const ast::Constant &) {},
       [](const ast::Impl &, const ast::Impl &) {},
   };
-  for (const auto &item : semantic.crate().items) {
+  for (const auto &item : semantic_.crate().items) {
     ast::visit(item, collect_layout);
   }
 }
