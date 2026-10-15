@@ -14,6 +14,8 @@ add_library(rustless_frontend STATIC
   src/ast/frontend.cpp
   src/llvm/ir.cpp
   src/llvm/facts.cpp
+  src/llvm/lower.cpp
+  src/llvm/function.cpp
   src/llvm/ir_print.cpp
   src/llvm/ir_verify.cpp
   src/llvm/ir_builder.cpp
