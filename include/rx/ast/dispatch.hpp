@@ -108,10 +108,10 @@ struct Coverage<Visitor, std::variant<Owners...>, void> {
         std::conjunction_v<Coverage<Visitor, Owners>...>;
     if constexpr (all_covered) {
       using FirstOwner = std::variant_alternative_t<0, std::variant<Owners...>>;
-      using Result = decltype(visit(std::declval<const FirstOwner &>(),
+      using Result = decltype(rx::ast::visit(std::declval<const FirstOwner &>(),
                                     std::declval<Visitor &>()));
       return std::conjunction_v<
-          std::is_same<Result, decltype(visit(std::declval<const Owners &>(),
+          std::is_same<Result, decltype(rx::ast::visit(std::declval<const Owners &>(),
                                               std::declval<Visitor &>()))>...>;
     }
     return false;
@@ -125,7 +125,7 @@ template <class... Owners, class Visitor,
                            int> = 0>
 decltype(auto) visit(const std::variant<Owners...> &nodes, Visitor &&visitor) {
   return std::visit(
-      [&](const auto &node) -> decltype(auto) { return visit(node, visitor); },
+      [&](const auto &node) -> decltype(auto) { return rx::ast::visit(node, visitor); },
       nodes);
 }
 }

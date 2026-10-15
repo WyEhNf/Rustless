@@ -28,8 +28,7 @@ Value FunctionLowering::apply_binary(const BinaryLowering &operation, Value left
       [](ShortCircuit) { return Operand::constant(Type::I1, 0); },
   };
   const auto result = std::visit(lower_operation, operation.operation);
-  return {facts().expression(operation.left.node).binary ? left.type : left.type,
-          ScalarValue{result}};
+  return {left.type, ScalarValue{result}};
 }
 
 Value FunctionLowering::emit(const ast::Expr &node, const ast::BinaryExpr &payload) {
