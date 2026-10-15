@@ -44,6 +44,7 @@ private:
   Value intrinsic(const ast::Expr &node);
   Value block(const ast::Block &node);
   Value branch(const ast::Node &node, const ast::IfExpr &payload);
+  Value short_circuit(const ast::Expr &node, const ast::BinaryExpr &payload, ShortCircuit operation);
   Value freeze(Value value);
   Value adjust(Value value, const std::vector<Adjustment> &adjustments);
   Value convert(Value value, const SemanticTypePtr &target);
