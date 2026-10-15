@@ -1,7 +1,7 @@
 #pragma once
 
-#include "rx/llvm/ir.hpp"
 #include "rx/llvm/facts.hpp"
+#include "rx/llvm/ir.hpp"
 #include "rx/llvm/target.hpp"
 #include <map>
 #include <set>
@@ -105,8 +105,7 @@ struct UnaryLowering {
 };
 class SemanticBridge {
 public:
-  explicit SemanticBridge(const SemanticData &semantic,
-                          TargetLayout target = TargetLayout::rv32());
+  explicit SemanticBridge(const SemanticData &semantic, TargetLayout target = TargetLayout::rv32());
   const TargetLayout &target() const { return target_; }
   const SemanticFacts &facts() const { return semantic_; }
   Layout layout(const SemanticTypePtr &type) const;

@@ -75,6 +75,9 @@ target_link_libraries(rxc PRIVATE rustless_frontend)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(ir_lowering tests/ir_lowering.cpp)
+  target_link_libraries(ir_lowering PRIVATE rustless_frontend)
+  add_test(NAME ir_lowering COMMAND ir_lowering)
   add_executable(semantic_divergence tests/semantic_divergence.cpp)
   target_link_libraries(semantic_divergence PRIVATE rustless_frontend)
   add_test(NAME semantic_divergence COMMAND semantic_divergence)
@@ -108,6 +111,16 @@ if(BUILD_TESTING)
   add_test(NAME rxc_help COMMAND rxc --help)
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
+    find_program(RX_CLANG NAMES clang-22 clang)
+    if(RX_CLANG)
+      add_test(NAME llvm_cli
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/llvm_cli_test.py"
+          "$<TARGET_FILE:rxc>" "${RX_CLANG}")
+    else()
+      add_test(NAME llvm_cli
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/llvm_cli_test.py"
+          "$<TARGET_FILE:rxc>")
+    endif()
     add_test(NAME offline_inputs
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/offline_inputs_test.py"
         "${CMAKE_COMMAND}" "${CMAKE_GENERATOR}")

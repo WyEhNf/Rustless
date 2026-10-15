@@ -36,7 +36,7 @@ class FrontendCLI(unittest.TestCase):
 
     def test_stage_isolation(self):
         source = self.source("wrong-type.rx", "fn main() { let x: i32 = true; }")
-        for stage, expected in [("lex", 0), ("parse", 0), ("semantic", 1)]:
+        for stage, expected in [("lex", 0), ("parse", 0), ("semantic", 1), ("ir", 1)]:
             self.assertEqual(self.run_compiler("--stage", stage, source).returncode, expected)
         self.assertEqual(self.run_compiler(source).returncode, 1)
         invalid = self.source("invalid-token.rx", "@")

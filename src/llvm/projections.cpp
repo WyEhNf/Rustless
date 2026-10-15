@@ -20,8 +20,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::IndexExpr &payloa
   auto base = intrinsic(*payload.base);
   if (builder_.terminated())
     return unit(type(node));
-  if (base.type->kind() == SemanticType::Kind::Ref ||
-      base.type->kind() == SemanticType::Kind::Box)
+  if (base.type->kind() == SemanticType::Kind::Ref || base.type->kind() == SemanticType::Kind::Box)
     base = freeze(std::move(base));
   auto index = expression(*payload.index);
   if (builder_.terminated())

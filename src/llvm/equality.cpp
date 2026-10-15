@@ -17,7 +17,7 @@ void FunctionLowering::equality_body(const SemanticTypePtr &type, Operand left, 
   case SemanticType::Kind::Struct:
     for (const auto &field : module_.bridge.structure(type->symbol()).fields)
       equal_child(facts().symbol_type(field.symbol), offset(left, field.offset),
-                  offset(right, field.offset));
+          offset(right, field.offset));
     break;
   case SemanticType::Kind::Array:
   case SemanticType::Kind::Vec: {

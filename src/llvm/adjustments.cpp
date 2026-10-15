@@ -29,8 +29,7 @@ Value FunctionLowering::adjust(Value value, const std::vector<Adjustment> &adjus
 Value FunctionLowering::convert(Value value, const SemanticTypePtr &target) {
   if (same_type(value.type, target))
     return value;
-  if (value.type->kind() == SemanticType::Kind::Ref &&
-      target->kind() == SemanticType::Kind::Ref) {
+  if (value.type->kind() == SemanticType::Kind::Ref && target->kind() == SemanticType::Kind::Ref) {
     if (!same_type(value.type->element(), target->element())) {
       while (!same_type(value.type, target->element()))
         value = dereference(std::move(value));

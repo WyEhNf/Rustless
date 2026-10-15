@@ -9,8 +9,7 @@ FunctionLowering::FunctionLowering(ModuleLowering &module, std::string name, Typ
   builder_.select(builder_.create_block("entry"));
 }
 
-Operand FunctionLowering::parameter(Type type, std::string name,
-                                  std::optional<SymbolId> symbol) {
+Operand FunctionLowering::parameter(Type type, std::string name, std::optional<SymbolId> symbol) {
   const auto id = function_.next_value;
   ++function_.next_value.value;
   function_.parameters.push_back({id, type, std::move(name), symbol});

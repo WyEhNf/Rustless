@@ -11,7 +11,5 @@ struct Origin {
   ast::NodeId node;
   Span span;
 };
-inline Origin origin(const ast::Node &node) {
-  return {node.id, node.span};
-}
+inline Origin origin(const ast::Node &node) { return {node.id, node.span}; }
 }

@@ -2,8 +2,8 @@
 
 namespace rx::ir {
 
-Value FunctionLowering::builtin(BuiltinId id, std::vector<Value> arguments,
-                              const SemanticTypePtr &result) {
+Value FunctionLowering::builtin(
+    BuiltinId id, std::vector<Value> arguments, const SemanticTypePtr &result) {
   switch (id) {
   case BuiltinId::GetInt:
     return {result, ScalarValue{builder_.call(Type::I32, "getInt", {}).value()}};
@@ -15,9 +15,11 @@ Value FunctionLowering::builtin(BuiltinId id, std::vector<Value> arguments,
     return unit(result);
   case BuiltinId::BoxNew: {
     const auto layout = module_.bridge.layout(result->element());
-    const auto pointer = builder_.call(Type::Ptr, "__rx_alloc",
-        {Operand::constant(Type::I32, layout.bytes),
-         Operand::constant(Type::I32, layout.alignment)}).value();
+    const auto pointer = builder_
+                             .call(Type::Ptr, "__rx_alloc",
+                                 {Operand::constant(Type::I32, layout.bytes),
+                                     Operand::constant(Type::I32, layout.alignment)})
+                             .value();
     write(result->element(), pointer, arguments[0]);
     return {result, ScalarValue{pointer}};
   }

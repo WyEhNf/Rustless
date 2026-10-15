@@ -40,16 +40,20 @@ inline constexpr bool ExhaustiveVisitor = detail::OwnerCoverage<Visitor, Owner>:
 
 template <class Owner, class Visitor> decltype(auto) visit(const Owner &node, Visitor &&visitor) {
   static_assert(ExhaustiveVisitor<Visitor, Owner>,
-                "IR visitor must handle every payload with one return type");
+      "IR visitor must handle every payload with one return type");
   return std::visit(
-      [&](const auto &payload) -> decltype(auto) { return std::invoke(visitor, node, payload); },
+      [&](const auto &payload) -> decltype(auto) {
+        return std::invoke(visitor, node, payload);
+      },
       node.data);
 }
 
 template <class Visitor> void for_each_operand(const Instruction &node, Visitor &&visitor) {
   auto enumerate = ast::Overloaded{
       [&](const Instruction &, const Alloca &) {},
-      [&](const Instruction &, const Load &payload) { visitor(payload.address); },
+      [&](const Instruction &, const Load &payload) {
+        visitor(payload.address);
+      },
       [&](const Instruction &, const Store &payload) {
         visitor(payload.value);
         visitor(payload.address);
@@ -66,7 +70,9 @@ template <class Visitor> void for_each_operand(const Instruction &node, Visitor 
         visitor(payload.left);
         visitor(payload.right);
       },
-      [&](const Instruction &, const Cast &payload) { visitor(payload.operand); },
+      [&](const Instruction &, const Cast &payload) {
+        visitor(payload.operand);
+      },
       [&](const Instruction &, const Call &payload) {
         for (const auto &argument : payload.arguments) {
           visitor(argument);
@@ -78,7 +84,9 @@ template <class Visitor> void for_each_operand(const Instruction &node, Visitor 
         }
       },
       [&](const Instruction &, const Branch &) {},
-      [&](const Instruction &, const CondBranch &payload) { visitor(payload.condition); },
+      [&](const Instruction &, const CondBranch &payload) {
+        visitor(payload.condition);
+      },
       [&](const Instruction &, const Return &payload) {
         if (payload.value) {
           visitor(*payload.value);
@@ -99,7 +107,9 @@ template <class Visitor> void for_each_successor(const Instruction &node, Visito
       [&](const Instruction &, const Cast &) {},
       [&](const Instruction &, const Call &) {},
       [&](const Instruction &, const Phi &) {},
-      [&](const Instruction &, const Branch &payload) { visitor(payload.target); },
+      [&](const Instruction &, const Branch &payload) {
+        visitor(payload.target);
+      },
       [&](const Instruction &, const CondBranch &payload) {
         visitor(payload.consequent);
         visitor(payload.alternative);

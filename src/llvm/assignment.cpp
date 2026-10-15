@@ -26,8 +26,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::CompoundAssignExp
   const auto output = address(destination);
   const auto machine = module_.bridge.scalar_type(destination.type).value();
   BinaryLowering binary{operation.operation, operation.target, operation.value, machine};
-  auto result = apply_binary(binary, freeze(destination), std::move(source));
-  result.type = destination.type;
+  auto result = apply_binary(binary, freeze(destination), std::move(source), destination.type);
   write(destination.type, output, std::move(result));
   return unit(type(node));
 }

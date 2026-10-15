@@ -2,7 +2,8 @@
 
 namespace rx::ir {
 
-Value FunctionLowering::apply_binary(const BinaryLowering &operation, Value left, Value right) {
+Value FunctionLowering::apply_binary(
+    const BinaryLowering &operation, Value left, Value right, const SemanticTypePtr &result_type) {
   left = adjust(std::move(left), operation.left.adjustments);
   right = adjust(std::move(right), operation.right.adjustments);
   auto lower_operation = ast::Overloaded{
@@ -33,7 +34,7 @@ Value FunctionLowering::apply_binary(const BinaryLowering &operation, Value left
       },
   };
   const auto result = std::visit(lower_operation, operation.operation);
-  return {left.type, ScalarValue{result}};
+  return {result_type, ScalarValue{result}};
 }
 
 Value FunctionLowering::emit(const ast::Expr &node, const ast::BinaryExpr &payload) {
@@ -46,9 +47,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::BinaryExpr &paylo
   auto right = intrinsic(*payload.right);
   if (builder_.terminated())
     return unit(type(node));
-  auto result = apply_binary(operation, std::move(left), freeze(std::move(right)));
-  result.type = type(node);
-  return result;
+  return apply_binary(operation, std::move(left), freeze(std::move(right)), type(node));
 }
 
 Value FunctionLowering::emit(const ast::Expr &node, const ast::UnaryExpr &payload) {

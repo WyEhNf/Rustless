@@ -29,8 +29,8 @@ void add_runtime(Module &module) {
   allocation.parameters = {{ValueId{1}, Type::I32, "bytes"}, {ValueId{2}, Type::I32, "alignment"}};
   Builder allocator(allocation);
   allocator.select(allocator.create_block("entry"));
-  const auto bytes = allocator.binary(BinaryOp::Add, Operand::local(Type::I32, ValueId{1}),
-                                      Operand::constant(Type::I32, 1));
+  const auto bytes = allocator.binary(
+      BinaryOp::Add, Operand::local(Type::I32, ValueId{1}), Operand::constant(Type::I32, 1));
   allocator.ret(allocator.call(Type::Ptr, "malloc", {bytes}));
   module.functions.push_back(std::move(allocation));
 }

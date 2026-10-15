@@ -44,7 +44,8 @@ private:
   Value intrinsic(const ast::Expr &node);
   Value block(const ast::Block &node);
   Value branch(const ast::Node &node, const ast::IfExpr &payload);
-  Value short_circuit(const ast::Expr &node, const ast::BinaryExpr &payload, ShortCircuit operation);
+  Value short_circuit(
+      const ast::Expr &node, const ast::BinaryExpr &payload, ShortCircuit operation);
   Value freeze(Value value);
   Value adjust(Value value, const std::vector<Adjustment> &adjustments);
   Value convert(Value value, const SemanticTypePtr &target);
@@ -60,7 +61,8 @@ private:
   void copy(Operand destination, Operand source, std::uint32_t bytes);
   void return_value(Value value);
   void bind(SymbolId symbol, const SemanticTypePtr &type, Value value);
-  Value apply_binary(const BinaryLowering &operation, Value left, Value right);
+  Value apply_binary(
+      const BinaryLowering &operation, Value left, Value right, const SemanticTypePtr &result_type);
   Value invoke(const CallLowering &call, std::vector<Value> arguments);
   Value builtin(BuiltinId builtin, std::vector<Value> arguments, const SemanticTypePtr &result);
   Value vector_push(Value receiver, Value element, const SemanticTypePtr &result);

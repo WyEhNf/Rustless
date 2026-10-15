@@ -8,7 +8,9 @@ Function input_runtime() {
   function.result = Type::I32;
   Builder builder(function);
   builder.select(builder.create_block("entry"));
-  auto number = [](std::uint32_t bits) { return Operand::constant(Type::I32, bits); };
+  auto number = [](std::uint32_t bits) {
+    return Operand::constant(Type::I32, bits);
+  };
   const auto character = builder.allocate_entry(4);
   const auto value = builder.allocate_entry(4);
   builder.store(builder.call(Type::I32, "getchar", {}).value(), character);

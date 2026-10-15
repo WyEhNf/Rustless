@@ -26,10 +26,8 @@ public:
   constexpr Layout unit() const { return {0, 1}; }
   constexpr VecLayout vector() const {
     const auto word = integer();
-    return {{pointer().bytes + 2 * word.bytes, word.alignment},
-            0,
-            pointer().bytes,
-            pointer().bytes + word.bytes};
+    return {{pointer().bytes + 2 * word.bytes, word.alignment}, 0, pointer().bytes,
+        pointer().bytes + word.bytes};
   }
   constexpr std::uint32_t shift_count_mask() const { return integer_bits() - 1; }
   constexpr std::uint64_t max_object_size() const {

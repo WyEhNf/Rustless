@@ -52,8 +52,7 @@ Operand FunctionLowering::address(Value value) {
 
 void FunctionLowering::copy(Operand destination, Operand source, std::uint32_t bytes) {
   if (bytes != 0)
-    builder_.call(Type::Ptr, "memmove",
-                  {destination, source, Operand::constant(Type::I32, bytes)});
+    builder_.call(Type::Ptr, "memmove", {destination, source, Operand::constant(Type::I32, bytes)});
 }
 
 void FunctionLowering::write(const SemanticTypePtr &type, Operand destination, Value source) {

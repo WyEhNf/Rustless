@@ -58,6 +58,7 @@ build/rxc --stage lex program.rx
 build/rxc --stage parse --parse-entry expression fragment.rx
 build/rxc --stage parse --dump-ast program.rx
 build/rxc --stage semantic --dump-typed -o checked.txt program.rx
+build/rxc --stage ir -o program.ll program.rx
 ```
 
 On Windows, use `build/rxc.exe`. The default stage is `semantic`. Parser entries
@@ -97,8 +98,28 @@ python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar
 make test STAGE=semantic FILTER=official:semantic
 ```
 
-CMake rejects stale grammar fingerprints. IR/codegen/optimization commands remain
-unset until their CLI entry points are implemented; submit the semantic suite only.
+CMake rejects stale grammar fingerprints. The IR command emits LLVM IR; codegen
+and optimization commands remain available for a future assembly backend.
+
+## LLVM IR
+
+The IR stage lowers the checked AST to typed instructions and emits RV32 LLVM IR.
+Its implementation is split across `include/rx/llvm` and `src/llvm`: types,
+operands, instructions, modules, semantic facts, storage, operators, control flow,
+aggregates, calls, containers, Clone, equality, and runtime functions have separate files.
+The compiler uses C++17 and builds without an LLVM library dependency.
+
+```sh
+build/rxc --stage ir program.rx -o program.ll
+clang-22 -S -x ir program.ll --target=riscv32-unknown-none-elf \
+  -march=rv32im -mabi=ilp32 -O0 -mllvm -riscv-no-aliases -o program.s
+make test STAGE=ir FILTER=official:codegen
+```
+
+Build REIMU as described above before running the execution tests. The test runner
+uses Clang to lower the LLVM IR and compares program output with the official
+fixtures. Integer I/O and allocation wrappers are emitted in the module; REIMU
+supplies `getchar`, `putchar`, `malloc`, and `memmove`.
 
 ## Setting up the Makefile
 

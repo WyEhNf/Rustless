@@ -11,8 +11,8 @@ void FunctionLowering::helper_body(const HelperRequest &request) {
     equality_body(request.type, left, right);
 }
 
-void FunctionLowering::clone_body(const SemanticTypePtr &type, Operand destination,
-                                 Operand source) {
+void FunctionLowering::clone_body(
+    const SemanticTypePtr &type, Operand destination, Operand source) {
   auto clone_child = [&](const SemanticTypePtr &child, Operand output, Operand input) {
     const auto name = module_.helper(HelperKind::Clone, child);
     builder_.call(Type::Void, name, {output, input});
@@ -21,7 +21,7 @@ void FunctionLowering::clone_body(const SemanticTypePtr &type, Operand destinati
   case SemanticType::Kind::Struct:
     for (const auto &field : module_.bridge.structure(type->symbol()).fields)
       clone_child(facts().symbol_type(field.symbol), offset(destination, field.offset),
-                  offset(source, field.offset));
+          offset(source, field.offset));
     break;
   case SemanticType::Kind::Array: {
     const auto stride = Operand::constant(Type::I32, module_.bridge.layout(type->element()).bytes);
@@ -34,9 +34,11 @@ void FunctionLowering::clone_body(const SemanticTypePtr &type, Operand destinati
   }
   case SemanticType::Kind::Box: {
     const auto layout = module_.bridge.layout(type->element());
-    const auto pointer = builder_.call(Type::Ptr, "__rx_alloc",
-        {Operand::constant(Type::I32, layout.bytes),
-         Operand::constant(Type::I32, layout.alignment)}).value();
+    const auto pointer = builder_
+                             .call(Type::Ptr, "__rx_alloc",
+                                 {Operand::constant(Type::I32, layout.bytes),
+                                     Operand::constant(Type::I32, layout.alignment)})
+                             .value();
     builder_.store(pointer, destination);
     clone_child(type->element(), pointer, builder_.load(Type::Ptr, source));
     break;
@@ -55,8 +57,10 @@ void FunctionLowering::clone_body(const SemanticTypePtr &type, Operand destinati
     const auto layout = module_.bridge.layout(type->element());
     const auto stride = Operand::constant(Type::I32, layout.bytes);
     const auto bytes = builder_.binary(BinaryOp::Mul, length, stride);
-    const auto data = builder_.call(Type::Ptr, "__rx_alloc",
-        {bytes, Operand::constant(Type::I32, layout.alignment)}).value();
+    const auto data =
+        builder_
+            .call(Type::Ptr, "__rx_alloc", {bytes, Operand::constant(Type::I32, layout.alignment)})
+            .value();
     builder_.store(data, destination);
     const auto input = builder_.load(Type::Ptr, source);
     each(length, [&](Operand index) {

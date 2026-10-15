@@ -8,7 +8,9 @@ Function output_runtime() {
   function.parameters.push_back({ValueId{1}, Type::I32, "value"});
   Builder builder(function);
   builder.select(builder.create_block("entry"));
-  auto number = [](std::uint32_t bits) { return Operand::constant(Type::I32, bits); };
+  auto number = [](std::uint32_t bits) {
+    return Operand::constant(Type::I32, bits);
+  };
   const auto input = Operand::local(Type::I32, ValueId{1});
   const auto buffer = builder.allocate_entry(10, 1);
   const auto magnitude = builder.allocate_entry(4);

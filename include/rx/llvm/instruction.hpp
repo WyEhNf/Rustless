@@ -113,7 +113,7 @@ struct Unreachable {};
 
 struct Instruction {
   using Data = std::variant<Alloca, Load, Store, Gep, Binary, Compare, Cast, Call, Phi, Branch,
-                            CondBranch, Return, Unreachable>;
+      CondBranch, Return, Unreachable>;
   explicit Instruction(Data data, std::optional<Origin> origin = {})
       : data(std::move(data)), origin(origin) {}
   Data data;

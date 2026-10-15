@@ -25,7 +25,8 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::RepeatArrayExpr &
   const auto output = storage(result_type);
   const auto element = result_type->element();
   const auto stride = Operand::constant(Type::I32, module_.bridge.layout(element).bytes);
-  const auto count = Operand::constant(Type::I32, static_cast<std::uint32_t>(result_type->length()));
+  const auto count =
+      Operand::constant(Type::I32, static_cast<std::uint32_t>(result_type->length()));
   value = convert(std::move(value), element);
   each(count, [&](Operand index) {
     auto bytes = builder_.binary(BinaryOp::Mul, index, stride);

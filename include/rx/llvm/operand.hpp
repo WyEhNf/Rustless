@@ -1,7 +1,7 @@
 #pragma once
 
-#include "rx/llvm/type.hpp"
 #include "rx/llvm/ids.hpp"
+#include "rx/llvm/type.hpp"
 #include <variant>
 
 namespace rx::ir {

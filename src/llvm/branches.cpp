@@ -30,7 +30,9 @@ Value FunctionLowering::branch(const ast::Node &node, const ast::IfExpr &payload
   Value otherwise = unit(result_type);
   if (payload.else_branch) {
     auto lower_else = ast::Overloaded{
-        [&](const ast::Box<ast::Block> &body) { return block(*body); },
+        [&](const ast::Box<ast::Block> &body) {
+          return block(*body);
+        },
         [&](const ast::Box<ast::IfBranch> &body) {
           auto value = branch(*body, body->data);
           if (!builder_.terminated())
@@ -55,8 +57,8 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::IfExpr &payload) 
   return branch(node, payload);
 }
 
-Value FunctionLowering::short_circuit(const ast::Expr &node, const ast::BinaryExpr &payload,
-                                    ShortCircuit operation) {
+Value FunctionLowering::short_circuit(
+    const ast::Expr &node, const ast::BinaryExpr &payload, ShortCircuit operation) {
   auto left = expression(*payload.left);
   if (builder_.terminated())
     return unit(type(node));
@@ -70,8 +72,7 @@ Value FunctionLowering::short_circuit(const ast::Expr &node, const ast::BinaryEx
     short_value = true;
     builder_.cond_branch(scalar(left), join, right_block);
   }
-  std::vector<PhiIncoming> incoming{
-      {Operand::constant(Type::I1, short_value), predecessor}};
+  std::vector<PhiIncoming> incoming{{Operand::constant(Type::I1, short_value), predecessor}};
   builder_.select(right_block);
   auto right = expression(*payload.right);
   if (!builder_.terminated()) {
