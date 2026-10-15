@@ -55,6 +55,7 @@ private:
   Operand offset(Operand base, std::uint32_t bytes);
   Operand offset(Operand base, Operand bytes);
   Value read(const SemanticTypePtr &type, Operand source);
+  Value temporary(const SemanticTypePtr &type, Operand source);
   void write(const SemanticTypePtr &type, Operand destination, Value source);
   void copy(Operand destination, Operand source, std::uint32_t bytes);
   void return_value(Value value);

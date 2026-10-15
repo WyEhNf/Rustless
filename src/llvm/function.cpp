@@ -33,7 +33,7 @@ void FunctionLowering::body(const ast::Function &node) {
     auto argument = parameter(input.value.type, facts().symbol(input.symbol).name, input.symbol);
     Value value{semantic_type, ScalarValue{argument}};
     if (input.value.passing == Passing::Indirect)
-      value.data = StoredValue{argument};
+      value.data = TemporaryValue{argument};
     bind(input.symbol, semantic_type, value);
   };
   if (signature.receiver)

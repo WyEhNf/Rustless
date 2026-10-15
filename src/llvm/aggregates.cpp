@@ -14,7 +14,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::ArrayExpr &payloa
     const auto destination = offset(output, static_cast<std::uint32_t>(index) * stride);
     write(element, destination, convert(std::move(value), element));
   }
-  return {result_type, StoredValue{output}};
+  return {result_type, TemporaryValue{output}};
 }
 
 Value FunctionLowering::emit(const ast::Expr &node, const ast::RepeatArrayExpr &payload) {
@@ -31,7 +31,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::RepeatArrayExpr &
     auto bytes = builder_.binary(BinaryOp::Mul, index, stride);
     write(element, offset(output, bytes), value);
   });
-  return {result_type, StoredValue{output}};
+  return {result_type, TemporaryValue{output}};
 }
 
 Value FunctionLowering::emit(const ast::Expr &node, const ast::StructExpr &payload) {
@@ -50,7 +50,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::StructExpr &paylo
       break;
     }
   }
-  return {result_type, StoredValue{output}};
+  return {result_type, TemporaryValue{output}};
 }
 
 void FunctionLowering::each(Operand count, const std::function<void(Operand)> &body) {

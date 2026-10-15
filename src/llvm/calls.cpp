@@ -63,7 +63,7 @@ Value FunctionLowering::invoke(const CallLowering &call, std::vector<Value> argu
   const auto name = module_.function_name(signature.symbol);
   auto returned = builder_.call(result_type, name, std::move(operands));
   if (output)
-    return {call.result, StoredValue{*output}};
+    return {call.result, TemporaryValue{*output}};
   if (returned)
     return {call.result, ScalarValue{*returned}};
   return unit(call.result);

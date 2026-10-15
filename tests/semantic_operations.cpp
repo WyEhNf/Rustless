@@ -62,7 +62,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   for (const auto text : {"b &= false", "b |= true", "b ^= false"}) {
     const auto &node = expression(program, text);
     const auto &fact = index.expression(node);
@@ -89,7 +89,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   for (const auto text : {"r + r", "rr < rr"}) {
     const auto &node = expression(program, text);
     const auto &payload = *ast::get_if<ast::BinaryExpr>(node);
@@ -135,7 +135,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   for (const auto text : {"a == b", "a != b"}) {
     const auto &node = expression(program, text);
     const auto &resolved = *index.expression(node).binary;
@@ -213,7 +213,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   const auto expected =
       std::array{std::pair{"signed >> 32", ir::BinaryOp::AShr},
                  std::pair{"unsigned >> 32", ir::BinaryOp::LShr},
@@ -254,7 +254,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   for (const auto text : {"r.value + 1", "ar[0] + 1", "r.get() + 1"}) {
     const auto &node = expression(program, text);
     const auto &fact = index.expression(node);
@@ -370,7 +370,7 @@ fn main() {
 )");
   program.accepted();
   rx::SafeGate index(*program.parsed.crate, program.checked);
-  ir::SemanticBridge bridge(index);
+  ir::SemanticBridge bridge(program.checked.data());
   for (const auto text : {"shared + mutable", "shared + (mutable)"}) {
     const auto &node = expression(program, text);
     const auto &payload = *ast::get_if<ast::BinaryExpr>(node);

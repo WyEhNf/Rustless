@@ -23,7 +23,7 @@ Value FunctionLowering::emit(const ast::Expr &node, const ast::LoopExpr &payload
     return unit(type(node));
   }
   if (output)
-    return read(type(node), *output);
+    return temporary(type(node), *output);
   return unit(type(node));
 }
 

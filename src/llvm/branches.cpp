@@ -47,7 +47,7 @@ Value FunctionLowering::branch(const ast::Node &node, const ast::IfExpr &payload
     return unit(result_type);
   }
   if (output)
-    return read(result_type, *output);
+    return temporary(result_type, *output);
   return unit(result_type);
 }
 

@@ -27,6 +27,12 @@ Value FunctionLowering::read(const SemanticTypePtr &type, Operand source) {
   return {type, ScalarValue{builder_.load(*machine, std::move(source), layout.alignment)}};
 }
 
+Value FunctionLowering::temporary(const SemanticTypePtr &type, Operand source) {
+  if (!module_.bridge.scalar_type(type))
+    return {type, TemporaryValue{std::move(source)}};
+  return read(type, std::move(source));
+}
+
 Operand FunctionLowering::scalar(Value value) {
   if (const auto *stored = std::get_if<StoredValue>(&value.data))
     value = read(value.type, stored->address);
@@ -36,6 +42,8 @@ Operand FunctionLowering::scalar(Value value) {
 Operand FunctionLowering::address(Value value) {
   if (const auto *stored = std::get_if<StoredValue>(&value.data))
     return stored->address;
+  if (const auto *temporary = std::get_if<TemporaryValue>(&value.data))
+    return temporary->address;
   const auto type = value.type;
   auto result = storage(type);
   write(type, result, std::move(value));
@@ -65,10 +73,14 @@ Value FunctionLowering::freeze(Value value) {
     return read(value.type, address(value));
   const auto temporary = storage(value.type);
   write(value.type, temporary, value);
-  return {value.type, StoredValue{temporary}};
+  return {value.type, TemporaryValue{temporary}};
 }
 
 void FunctionLowering::bind(SymbolId symbol, const SemanticTypePtr &type, Value value) {
+  if (const auto *temporary = std::get_if<TemporaryValue>(&value.data)) {
+    bindings_.emplace(symbol, Value{type, StoredValue{temporary->address}});
+    return;
+  }
   const auto destination = storage(type);
   write(type, destination, convert(std::move(value), type));
   bindings_.emplace(symbol, Value{type, StoredValue{destination}});

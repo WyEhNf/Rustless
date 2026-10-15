@@ -12,9 +12,12 @@ struct ScalarValue {
 struct StoredValue {
   Operand address;
 };
+struct TemporaryValue {
+  Operand address;
+};
 struct Value {
   SemanticTypePtr type;
-  std::variant<UnitValue, ScalarValue, StoredValue> data;
+  std::variant<UnitValue, ScalarValue, StoredValue, TemporaryValue> data;
 };
 
 }

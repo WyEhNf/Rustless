@@ -27,7 +27,7 @@ Value FunctionLowering::builtin(BuiltinId id, std::vector<Value> arguments,
     builder_.store(Operand::constant(Type::Ptr, 0), offset(output, layout.data_offset));
     builder_.store(Operand::constant(Type::I32, 0), offset(output, layout.length_offset));
     builder_.store(Operand::constant(Type::I32, 0), offset(output, layout.capacity_offset));
-    return {result, StoredValue{output}};
+    return {result, TemporaryValue{output}};
   }
   default:
     break;
@@ -55,7 +55,7 @@ Value FunctionLowering::clone(Value source, const SemanticTypePtr &type) {
   const auto output = storage(type);
   const auto name = module_.helper(HelperKind::Clone, type);
   builder_.call(Type::Void, name, {output, address(std::move(source))});
-  return read(type, output);
+  return temporary(type, output);
 }
 
 }
