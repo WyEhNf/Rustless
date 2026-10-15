@@ -25,6 +25,7 @@ add_library(rustless_frontend STATIC
   src/llvm/loops.cpp
   src/llvm/aggregates.cpp
   src/llvm/projections.cpp
+  src/llvm/calls.cpp
   src/llvm/ir_print.cpp
   src/llvm/ir_verify.cpp
   src/llvm/ir_builder.cpp
