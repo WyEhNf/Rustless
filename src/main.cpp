@@ -1,6 +1,7 @@
 #include "rx/ast/ast.hpp"
 #include "rx/ast/frontend.hpp"
 #include "rx/semantic/semantic.hpp"
+#include "rx/llvm/lower.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -11,7 +12,7 @@
 namespace {
 
 void usage(std::ostream &out) {
-  out << "usage: rxc [--stage lex|parse|semantic] [--parse-entry RULE]\n"
+  out << "usage: rxc [--stage lex|parse|semantic|ir] [--parse-entry RULE]\n"
          "           [--dump-ast] [--dump-typed] [-o OUTPUT] SOURCE.rx\n"
          "parser entries: crate, item, expression, letStatement, typeRef\n";
 }
@@ -53,13 +54,14 @@ int run(int argc, char **argv) {
   }
   const bool valid_entry = entry == "crate" || entry == "item" || entry == "expression" ||
                            entry == "letStatement" || entry == "typeRef";
-  const bool valid_stage = stage == "lex" || stage == "parse" || stage == "semantic";
+  const bool valid_stage = stage == "lex" || stage == "parse" || stage == "semantic" || stage == "ir";
   if (source.empty() || !valid_stage || !valid_entry)
     throw std::runtime_error("invalid stage or option combination; use --help");
   if (entry != "crate" && stage != "parse")
     throw std::runtime_error("invalid stage or option combination; use --help");
   if ((dump_ast && (stage == "lex" || entry != "crate")) || (dump_typed && stage != "semantic") ||
-      (!output.empty() && !dump_ast && !dump_typed))
+      (stage == "ir" && (dump_ast || dump_typed)) ||
+      (!output.empty() && !dump_ast && !dump_typed && stage != "ir"))
     throw std::runtime_error("invalid stage or option combination; use --help");
 
   std::ifstream input(source, std::ios::binary);
@@ -87,7 +89,7 @@ int run(int argc, char **argv) {
 
   const auto frontend = rx::parse_source(buffer.str(), diagnostics);
   rx::SemanticResult semantic;
-  if (frontend.syntax_ok && frontend.crate && stage == "semantic")
+  if (frontend.syntax_ok && frontend.crate && (stage == "semantic" || stage == "ir"))
     semantic = rx::analyze(*frontend.crate, diagnostics);
   diagnostics.print(std::cerr);
   if (diagnostics.has_errors() || !frontend.syntax_ok || !frontend.crate)
@@ -98,6 +100,8 @@ int run(int argc, char **argv) {
     artifact = rx::ast::dump(*frontend.crate);
   if (dump_typed)
     artifact += rx::dump_semantic(semantic);
+  if (stage == "ir")
+    artifact = rx::ir::print(rx::ir::lower(*frontend.crate, semantic));
   if (output.empty())
     std::cout << artifact;
   else {
