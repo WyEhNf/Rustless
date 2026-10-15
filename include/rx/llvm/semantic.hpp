@@ -1,8 +1,8 @@
 #pragma once
 
-#include "rx/ir.hpp"
+#include "rx/llvm/ir.hpp"
 #include "rx/semantic/safety/safe_gate.hpp"
-#include "rx/target_layout.hpp"
+#include "rx/llvm/target.hpp"
 #include <map>
 #include <set>
 

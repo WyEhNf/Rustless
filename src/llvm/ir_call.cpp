@@ -1,4 +1,4 @@
-#include "rx/ir_semantic.hpp"
+#include "rx/llvm/semantic.hpp"
 #include <stdexcept>
 
 namespace rx::ir {

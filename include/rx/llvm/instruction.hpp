@@ -1,38 +1,10 @@
 #pragma once
 
-#include "rx/ir_ids.hpp"
-#include "rx/semantic/symbol.hpp"
-
-#include <cstdint>
+#include "rx/llvm/operand.hpp"
 #include <optional>
-#include <string>
-#include <string_view>
-#include <variant>
 #include <vector>
 
 namespace rx::ir {
-
-enum class Type { Void, I1, I8, I32, Ptr };
-
-struct ConstantOperand {
-  std::uint32_t bits;
-};
-struct LocalOperand {
-  ValueId id;
-};
-struct GlobalOperand {
-  std::string symbol;
-};
-struct Operand {
-  using Data = std::variant<ConstantOperand, LocalOperand, GlobalOperand>;
-  Operand(Type type, Data data) : type(type), data(std::move(data)) {}
-  Type type;
-  Data data;
-
-  static Operand constant(Type type, std::uint32_t bits);
-  static Operand local(Type type, ValueId id);
-  static Operand global(std::string name);
-};
 
 enum class Op {
   Alloca,
@@ -147,52 +119,5 @@ struct Instruction {
   Data data;
   std::optional<Origin> origin;
 };
-
-struct Block {
-  BlockId id{};
-  std::string name;
-  std::vector<Instruction> instructions;
-};
-
-struct Parameter {
-  ValueId id{};
-  Type type{Type::I32};
-  std::string name;
-  std::optional<SymbolId> symbol;
-};
-
-struct Function {
-  std::string name;
-  Type result{Type::Void};
-  std::vector<Parameter> parameters;
-  std::vector<Block> blocks;
-  ValueId next_value{1};
-  std::optional<SymbolId> symbol;
-  std::optional<Origin> origin;
-};
-
-struct Declaration {
-  std::string name;
-  Type result{Type::Void};
-  std::vector<Type> parameters;
-  std::optional<SymbolId> symbol;
-  std::optional<Origin> origin;
-};
-
-struct Module {
-  std::vector<Declaration> declarations;
-  std::vector<Function> functions;
-};
-
-bool is_terminator(Op op);
-Op opcode(const Instruction &instruction);
-std::optional<Result> definition(const Instruction &instruction);
-bool is_terminator(const Instruction &instruction);
-bool has_side_effects(const Instruction &instruction);
-std::string type_name(Type type);
-bool is_value_type(Type type);
-unsigned integer_width(Type type);
-std::string print(const Module &module);
-std::string symbol_name(std::string_view name);
 
 }

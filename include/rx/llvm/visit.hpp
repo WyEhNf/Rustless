@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/ir.hpp"
+#include "rx/llvm/ir.hpp"
 #include <functional>
 #include <type_traits>
 
