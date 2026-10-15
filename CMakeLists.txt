@@ -30,6 +30,9 @@ add_library(rustless_frontend STATIC
   src/llvm/vectors.cpp
   src/llvm/clone.cpp
   src/llvm/equality.cpp
+  src/llvm/runtime.cpp
+  src/llvm/runtime_input.cpp
+  src/llvm/runtime_output.cpp
   src/llvm/ir_print.cpp
   src/llvm/ir_verify.cpp
   src/llvm/ir_builder.cpp
