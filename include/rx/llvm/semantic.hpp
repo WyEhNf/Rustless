@@ -2,7 +2,6 @@
 
 #include "rx/llvm/ir.hpp"
 #include "rx/llvm/facts.hpp"
-#include "rx/semantic/safety/safe_gate.hpp"
 #include "rx/llvm/target.hpp"
 #include <map>
 #include <set>
@@ -108,10 +107,6 @@ class SemanticBridge {
 public:
   explicit SemanticBridge(const SemanticData &semantic,
                           TargetLayout target = TargetLayout::rv32());
-  explicit SemanticBridge(const SafeGate &semantic,
-                          TargetLayout target = TargetLayout::rv32());
-  SemanticBridge(SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
-  SemanticBridge(const SafeGate &&, TargetLayout = TargetLayout::rv32()) = delete;
   const TargetLayout &target() const { return target_; }
   const SemanticFacts &facts() const { return semantic_; }
   Layout layout(const SemanticTypePtr &type) const;

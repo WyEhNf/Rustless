@@ -25,7 +25,12 @@ Value FunctionLowering::apply_binary(const BinaryLowering &operation, Value left
           result = builder_.binary(BinaryOp::Xor, result, Operand::constant(Type::I1, 1));
         return result;
       },
-      [](ShortCircuit) { return Operand::constant(Type::I1, 0); },
+      [&](ShortCircuit logical) {
+        BinaryOp operation = BinaryOp::And;
+        if (logical == ShortCircuit::Or)
+          operation = BinaryOp::Or;
+        return builder_.binary(operation, scalar(left), scalar(right));
+      },
   };
   const auto result = std::visit(lower_operation, operation.operation);
   return {left.type, ScalarValue{result}};

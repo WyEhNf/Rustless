@@ -36,8 +36,9 @@ Operand FunctionLowering::scalar(Value value) {
 Operand FunctionLowering::address(Value value) {
   if (const auto *stored = std::get_if<StoredValue>(&value.data))
     return stored->address;
-  auto result = storage(value.type);
-  write(value.type, result, std::move(value));
+  const auto type = value.type;
+  auto result = storage(type);
+  write(type, result, std::move(value));
   return result;
 }
 

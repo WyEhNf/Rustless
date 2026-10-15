@@ -28,8 +28,8 @@ fn main() {
   assert(parsed.syntax_ok && parsed.crate);
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   assert(checked.success() && !diagnostics.has_errors());
-  rx::SafeGate index(*parsed.crate, checked);
-  rx::ir::SemanticBridge bridge(index);
+  rx::ir::SemanticFacts index(checked.data());
+  rx::ir::SemanticBridge bridge(checked.data());
   unsigned calls = 0;
   rx::ast::walk(*parsed.crate, [&](const auto &node, const auto &payload) {
     using PayloadType = std::decay_t<decltype(payload)>;

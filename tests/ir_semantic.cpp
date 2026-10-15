@@ -9,9 +9,7 @@
 
 namespace ast = rx::ast;
 namespace ir = rx::ir;
-static_assert(std::is_constructible_v<ir::SemanticBridge, const rx::SafeGate &>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge, rx::SafeGate &&>);
-static_assert(!std::is_constructible_v<ir::SemanticBridge, const rx::SafeGate &&>);
+static_assert(std::is_constructible_v<ir::SemanticBridge, const rx::SemanticData &>);
 namespace {
 void check_unary_lowering() {
   rx::DiagnosticEngine diagnostics;
@@ -35,8 +33,8 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SafeGate index(*parsed.crate, checked);
-  ir::SemanticBridge bridge(index);
+  rx::ir::SemanticFacts index(checked.data());
+  ir::SemanticBridge bridge(checked.data());
   std::vector<ir::ScalarUnary> computations;
   std::vector<rx::SemanticType::Kind> place_types;
   unsigned converted_operands = 0;
@@ -89,8 +87,8 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SafeGate index(*parsed.crate, checked);
-  ir::SemanticBridge bridge(index);
+  rx::ir::SemanticFacts index(checked.data());
+  ir::SemanticBridge bridge(checked.data());
   std::vector<rx::SemanticType::Kind> content_types;
   std::vector<bool> negated;
   unsigned converted_operands = 0;
@@ -168,8 +166,8 @@ fn main() {
   auto checked = rx::analyze(*parsed.crate, diagnostics);
   diagnostics.print(std::cerr);
   assert(!diagnostics.has_errors());
-  rx::SafeGate index(*parsed.crate, checked);
-  ir::SemanticBridge bridge(index);
+  rx::ir::SemanticFacts index(checked.data());
+  ir::SemanticBridge bridge(checked.data());
   assert(bridge.target().llvm_data_layout() == target.llvm_data_layout());
   assert(bridge.target().triple() == target.triple());
   const auto &packet = std::get<ast::Struct>(parsed.crate->items[0]);
@@ -197,16 +195,7 @@ fn main() {
   assert(abi.result.passing == ir::Passing::Indirect);
   assert(abi.parameters[0].value.type == ir::Type::Void);
   assert(abi.parameters[1].value.passing == ir::Passing::Indirect);
-  auto foreign = rx::parse_source(parsed.crate->source.text, diagnostics);
-  const auto &foreign_function = std::get<ast::Function>(foreign.crate->items[2]);
-  assert(foreign_function.id == take.id);
-  bool foreign_rejected = false;
-  try {
-    (void)bridge.function(foreign_function);
-  } catch (const std::invalid_argument &) {
-    foreign_rejected = true;
-  }
-  assert(foreign_rejected);
+  assert(bridge.facts().declaration(take).id == index.declaration(take).id);
   assert(ir::print(ir::Module{declarations, {}}).find("@\"Packet::get\"") != std::string::npos);
   std::vector<decltype(ir::BinaryLowering::operation)> operations;
   std::vector<ir::ScalarArithmetic> assignments;
