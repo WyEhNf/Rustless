@@ -115,6 +115,9 @@ acceptance and rejection cases as well. The official test submodule is pinned
 to the test revision published by the judge when this integration was checked:
 `1abfeaefb31c5ad8325d94bf4daebae45a03a943`.
 
+Verified with Clang 22 and REIMU: 239 semantic cases, 60 IR programs, and all
+115 runtime checks passed. The project's 20 CTest checks also passed.
+
 ## LLVM IR
 
 The IR stage lowers the checked AST to typed instructions and emits RV32 LLVM IR.

@@ -120,6 +120,9 @@ make test SUITE=ir FILTER=official
 官方测试子模块已对齐本次核对时网站公布的版本
 `1abfeaefb31c5ad8325d94bf4daebae45a03a943`。
 
+已使用 Clang 22 和 REIMU 验证：239 项语义测试、60 个 IR 程序及其 115 组
+运行输出全部通过；项目的 20 项 CTest 测试也全部通过。
+
 ### LLVM IR 的实现位置
 
 `src/llvm/lower.cpp` 是入口；`ir/` 定义 IR 基础操作和 Builder，`bridge/`
