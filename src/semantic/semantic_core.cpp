@@ -1,4 +1,4 @@
-#include "rx/semantic/analyzer.hpp"
+#include "semantic/analyzer.hpp"
 
 #include <algorithm>
 #include <utility>

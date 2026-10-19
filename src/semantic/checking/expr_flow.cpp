@@ -1,5 +1,5 @@
 #include "rx/ast/children.hpp"
-#include "rx/semantic/analyzer.hpp"
+#include "semantic/analyzer.hpp"
 
 #include <type_traits>
 

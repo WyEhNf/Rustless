@@ -43,17 +43,17 @@ add_library(rustless_frontend STATIC
   src/semantic/resolution/collection.cpp
   src/semantic/resolution/declarations.cpp
   src/semantic/resolution/structures.cpp
-  src/semantic/functions.cpp
-  src/semantic/exprs.cpp
-  src/semantic/expr_flow.cpp
-  src/semantic/expr_values.cpp
-  src/semantic/expr_control.cpp
-  src/semantic/expr_operators.cpp
-  src/semantic/calls.cpp
-  src/semantic/method_calls.cpp
+  src/semantic/checking/functions.cpp
+  src/semantic/checking/exprs.cpp
+  src/semantic/checking/expr_flow.cpp
+  src/semantic/checking/expr_values.cpp
+  src/semantic/checking/expr_control.cpp
+  src/semantic/checking/expr_operators.cpp
+  src/semantic/checking/calls.cpp
+  src/semantic/checking/method_calls.cpp
   src/semantic/resolution/type_resolution.cpp
   src/semantic/resolution/constants.cpp
-  src/semantic/coercion.cpp
+  src/semantic/checking/coercion.cpp
   src/semantic/model/type.cpp
   src/semantic/model/operation.cpp
   src/semantic/result.cpp
@@ -65,6 +65,7 @@ add_library(rustless_frontend STATIC
   src/semantic/safety/declarations_gate.cpp
   src/semantic/safety/shapes_gate.cpp)
 target_include_directories(rustless_frontend PUBLIC include "${GENERATED_DIR}")
+target_include_directories(rustless_frontend PRIVATE src)
 target_include_directories(rustless_frontend SYSTEM PRIVATE
   "${antlr4_runtime_SOURCE_DIR}/runtime/src")
 target_link_libraries(rustless_frontend PUBLIC antlr4_static)

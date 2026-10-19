@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rx/semantic/model/literal.hpp"
-#include "rx/semantic/state.hpp"
+#include "semantic/state.hpp"
 
 #include <array>
 #include <functional>
