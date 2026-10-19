@@ -242,6 +242,24 @@ def select(cases, expression):
     return [c for c in cases if any(c.directory[:len(parts)] == parts for parts in selectors)]
 
 
+def select_stages(cases, stage="", suite=""):
+    if stage and suite:
+        raise TestError("choose either STAGE or SUITE")
+    selected = suite or stage
+    if not selected:
+        return cases
+    if selected not in STAGES:
+        raise TestError("STAGE and SUITE must be semantic, ir, codegen, or optimization")
+    if suite:
+        included = STAGES[:STAGES.index(suite) + 1]
+    else:
+        included = (stage,)
+    result = [case for case in cases if case.stage in included]
+    if not result:
+        raise TestError(f"no testcases match {'suite' if suite else 'stage'} {selected}")
+    return result
+
+
 def expand(command, source=None, output=None, **paths):
     values = {key: value for key, value in {"source": source, "output": output, **paths}.items()
               if value is not None}
@@ -372,6 +390,7 @@ def main():
     parser.add_argument("--tests-dir", type=Path, default=Path("tests"))
     parser.add_argument("--output-dir", type=Path, default=Path("target/tests"))
     parser.add_argument("--stage", choices=STAGES, default=None)
+    parser.add_argument("--suite", choices=STAGES, default=None)
     args = parser.parse_args()
     reporter = Reporter(os.environ.get("VERBOSE", "false").strip().lower() == "true")
     started = time.monotonic()
@@ -379,12 +398,8 @@ def main():
         selected_filter = os.environ.get("FILTER", "")
         cases = select(discover(args.tests_dir.resolve()), selected_filter)
         stage = args.stage or os.environ.get("STAGE", "").strip()
-        if stage:
-            if stage not in STAGES:
-                raise TestError("STAGE must be semantic, ir, codegen, or optimization")
-            cases = [case for case in cases if case.stage == stage]
-            if not cases:
-                raise TestError(f"no {stage} testcases match the selection")
+        suite = args.suite or os.environ.get("SUITE", "").strip()
+        cases = select_stages(cases, stage, suite)
         commands = {name: os.environ.get(f"RX_TEST_{name.upper()}", "")
                     for name in ("semantic", "ir", "codegen", "run")}
         for stage in {c.compiler_command for c in cases} | ({"run"} if any(c.stage in RUNTIME_STAGES for c in cases) else set()):

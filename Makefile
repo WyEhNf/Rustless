@@ -8,6 +8,7 @@ VERBOSE ?= false
 FILTER ?=
 # Optional single stage: semantic, ir, codegen, or optimization.
 STAGE ?=
+SUITE ?=
 CLANG ?= clang-22
 COMPILE_TIMEOUT ?= 30
 RUN_TIMEOUT ?= 10
@@ -18,7 +19,7 @@ export RX_TEST_SEMANTIC = $(SEMANTIC)
 export RX_TEST_IR = $(IR)
 export RX_TEST_CODEGEN = $(CODEGEN)
 export RX_TEST_RUN = $(RUN)
-export FILTER STAGE CLANG COMPILE_TIMEOUT RUN_TIMEOUT VERBOSE
+export FILTER STAGE SUITE CLANG COMPILE_TIMEOUT RUN_TIMEOUT VERBOSE
 
 .PHONY: test
 test:
