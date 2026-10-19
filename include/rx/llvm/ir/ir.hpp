@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/module.hpp"
+#include "rx/llvm/ir/module.hpp"
 #include <string_view>
 
 namespace rx::ir {

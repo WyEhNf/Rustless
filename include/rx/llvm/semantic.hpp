@@ -1,8 +1,8 @@
 #pragma once
 
 #include "rx/llvm/facts.hpp"
-#include "rx/llvm/ir.hpp"
-#include "rx/llvm/target.hpp"
+#include "rx/llvm/ir/ir.hpp"
+#include "rx/llvm/ir/target.hpp"
 #include <map>
 #include <set>
 

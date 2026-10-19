@@ -1,6 +1,6 @@
-#include "rx/llvm/verify.hpp"
-#include "rx/llvm/visit.hpp"
-#include "rx/llvm/target.hpp"
+#include "rx/llvm/ir/verify.hpp"
+#include "rx/llvm/ir/visit.hpp"
+#include "rx/llvm/ir/target.hpp"
 
 #include <algorithm>
 #include <array>

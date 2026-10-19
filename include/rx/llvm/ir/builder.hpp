@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/verify.hpp"
+#include "rx/llvm/ir/verify.hpp"
 
 namespace rx::ir {
 

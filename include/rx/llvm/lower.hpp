@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/ir.hpp"
+#include "rx/llvm/ir/ir.hpp"
 #include "rx/semantic/semantic.hpp"
 
 namespace rx::ir {

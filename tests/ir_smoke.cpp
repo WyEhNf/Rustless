@@ -1,4 +1,4 @@
-#include "rx/llvm/visit.hpp"
+#include "rx/llvm/ir/visit.hpp"
 
 #undef NDEBUG
 #include <cassert>

@@ -1,4 +1,4 @@
-#include "rx/llvm/ir.hpp"
+#include "rx/llvm/ir/ir.hpp"
 
 #include <array>
 #include <stdexcept>

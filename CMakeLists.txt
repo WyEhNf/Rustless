@@ -12,7 +12,7 @@ add_library(rustless_frontend STATIC
   "${GENERATED_DIR}/RxParser.cpp"
   src/ast/ast.cpp
   src/ast/frontend.cpp
-  src/llvm/ir.cpp
+  src/llvm/ir/ir.cpp
   src/llvm/facts.cpp
   src/llvm/lower.cpp
   src/llvm/function.cpp
@@ -33,9 +33,9 @@ add_library(rustless_frontend STATIC
   src/llvm/runtime.cpp
   src/llvm/runtime_input.cpp
   src/llvm/runtime_output.cpp
-  src/llvm/ir_print.cpp
-  src/llvm/ir_verify.cpp
-  src/llvm/ir_builder.cpp
+  src/llvm/ir/ir_print.cpp
+  src/llvm/ir/ir_verify.cpp
+  src/llvm/ir/ir_builder.cpp
   src/llvm/ir_semantic.cpp
   src/llvm/ir_operators.cpp
   src/llvm/ir_call.cpp

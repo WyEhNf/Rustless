@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/visit.hpp"
+#include "rx/llvm/ir/visit.hpp"
 
 namespace rx::ir {
 struct VerificationError {

@@ -1,5 +1,5 @@
-#include "rx/llvm/builder.hpp"
-#include "rx/llvm/visit.hpp"
+#include "rx/llvm/ir/builder.hpp"
+#include "rx/llvm/ir/visit.hpp"
 
 #undef NDEBUG
 #include <cassert>

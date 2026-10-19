@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/builder.hpp"
+#include "rx/llvm/ir/builder.hpp"
 #include "rx/llvm/lower.hpp"
 #include "rx/llvm/semantic.hpp"
 #include "rx/llvm/value.hpp"

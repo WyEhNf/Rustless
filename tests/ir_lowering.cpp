@@ -1,6 +1,6 @@
 #include "rx/ast/frontend.hpp"
 #include "rx/llvm/lower.hpp"
-#include "rx/llvm/verify.hpp"
+#include "rx/llvm/ir/verify.hpp"
 
 #undef NDEBUG
 #include <cassert>
