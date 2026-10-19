@@ -6,6 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import test as runner
+import test_frontend as frontend
 
 
 class JudgeSuites(unittest.TestCase):
@@ -58,6 +59,12 @@ class JudgeSuites(unittest.TestCase):
             runner.select_stages(self.cases, suite="unknown")
         with self.assertRaises(runner.TestError):
             runner.select_stages([], suite="ir")
+
+    def test_frontend_can_check_a_semantic_only_directory(self):
+        selected = frontend.discover(self.root, ("semantic",))
+        self.assertEqual([case["expected_exit"] for case in selected], [0, 1])
+        with self.assertRaisesRegex(ValueError, "no lex testcases"):
+            frontend.discover(self.root)
 
 
 if __name__ == "__main__":

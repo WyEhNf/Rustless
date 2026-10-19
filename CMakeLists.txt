@@ -112,6 +112,8 @@ if(BUILD_TESTING)
   add_test(NAME rxc_help COMMAND rxc --help)
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME rxoj_runner
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/rxoj_runner_test.py")
     find_program(RX_CLANG NAMES clang-22 clang)
     if(RX_CLANG)
       add_test(NAME llvm_cli
@@ -137,10 +139,14 @@ if(BUILD_TESTING)
   add_test(NAME frontend_ast_structure COMMAND frontend_ast_structure)
   add_executable(frontend_ast_corpus tests/frontend_ast_corpus.cpp)
   target_link_libraries(frontend_ast_corpus PRIVATE rustless_frontend)
-  if(EXISTS "${CMAKE_SOURCE_DIR}/tests/official/semantic/arrays/manifest.json")
+  if(Python3_Interpreter_FOUND AND
+     EXISTS "${CMAKE_SOURCE_DIR}/tests/official/semantic/arrays/manifest.json")
     add_test(NAME semantic_official
-      COMMAND frontend_ast_corpus "${CMAKE_SOURCE_DIR}/tests/official/semantic"
-        --semantic)
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/test_frontend.py"
+        --compiler "$<TARGET_FILE:rxc>"
+        --stage semantic
+        --test-root "${CMAKE_SOURCE_DIR}/tests/official/semantic"
+        --report "${CMAKE_BINARY_DIR}/semantic-official-report.json")
   endif()
   add_executable(semantic_smoke tests/semantic_smoke.cpp)
   target_link_libraries(semantic_smoke PRIVATE rustless_frontend)

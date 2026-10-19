@@ -12,12 +12,12 @@ import time
 STAGES = ("lex", "parse", "semantic")
 
 
-def discover(root):
+def discover(root, stages=STAGES):
     cases = []
     for manifest in sorted(root.rglob("manifest.json")):
         entries = json.loads(manifest.read_text(encoding="utf-8"))
         for entry in entries:
-            if entry.get("stage") not in STAGES:
+            if entry.get("stage") not in stages:
                 continue
             if type(entry.get("compilation_success")) is not bool:
                 raise ValueError(f"{manifest}: invalid compilation_success")
@@ -30,7 +30,7 @@ def discover(root):
                 "entry": entry.get("metadata", {}).get("entry", "crate"),
                 "description": entry.get("description", ""),
             })
-    for stage in STAGES:
+    for stage in stages:
         if not any(case["stage"] == stage for case in cases):
             raise ValueError(f"no {stage} testcases under {root}")
     return cases
@@ -66,6 +66,7 @@ def main():
     parser.add_argument("--test-root", type=Path,
                         default=project.parent / "rx-compiler-testcases")
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--stage", choices=STAGES)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=30)
     args = parser.parse_args()
@@ -74,10 +75,11 @@ def main():
         parser.error("compiler and testcase directory must exist")
     if args.jobs < 1 or args.timeout <= 0:
         parser.error("jobs and timeout must be positive")
-    cases = discover(root)
+    stages = (args.stage,) if args.stage else STAGES
+    cases = discover(root, stages)
     started = time.monotonic()
     results, summary = [], {}
-    for stage in STAGES:
+    for stage in stages:
         selected = [case for case in cases if case["stage"] == stage]
         print(f"{stage}: running {len(selected)} cases", flush=True)
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:

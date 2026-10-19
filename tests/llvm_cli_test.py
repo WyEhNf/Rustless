@@ -46,7 +46,8 @@ fn main() {
             assembly = self.root / "program.s"
             lowered = subprocess.run(
                 [str(CLANG), "-S", "-x", "ir", str(output), "-o", str(assembly),
-                 "--target=riscv32-unknown-elf", "-march=rv32im", "-mabi=ilp32", "-O0"],
+                 "--target=riscv32-unknown-none-elf", "-march=rv32im", "-mabi=ilp32",
+                 "-O0", "-mllvm", "-riscv-no-aliases"],
                 capture_output=True, text=True, timeout=30)
             self.assertEqual(lowered.returncode, 0, lowered.stderr)
             self.assertTrue(assembly.is_file())
