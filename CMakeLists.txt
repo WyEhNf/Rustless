@@ -15,17 +15,17 @@ add_library(rustless_frontend STATIC
   src/llvm/ir/ir.cpp
   src/llvm/bridge/facts.cpp
   src/llvm/lower.cpp
-  src/llvm/function.cpp
-  src/llvm/storage.cpp
-  src/llvm/expressions.cpp
-  src/llvm/adjustments.cpp
-  src/llvm/operators.cpp
-  src/llvm/assignment.cpp
-  src/llvm/branches.cpp
-  src/llvm/loops.cpp
-  src/llvm/aggregates.cpp
-  src/llvm/projections.cpp
-  src/llvm/calls.cpp
+  src/llvm/lowering/function.cpp
+  src/llvm/lowering/storage.cpp
+  src/llvm/lowering/expressions.cpp
+  src/llvm/lowering/adjustments.cpp
+  src/llvm/lowering/operators.cpp
+  src/llvm/lowering/assignment.cpp
+  src/llvm/lowering/branches.cpp
+  src/llvm/lowering/loops.cpp
+  src/llvm/lowering/aggregates.cpp
+  src/llvm/lowering/projections.cpp
+  src/llvm/lowering/calls.cpp
   src/llvm/builtins.cpp
   src/llvm/vectors.cpp
   src/llvm/clone.cpp
