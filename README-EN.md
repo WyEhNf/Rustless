@@ -79,11 +79,12 @@ report records every command, exit code, stdout, and stderr. Use `--jobs` and
 `--timeout` to adjust concurrency and per-case limits. The existing Makefile
 reference-compiler workflow remains independent.
 
-## RxOJ semantic submission
+## RxOJ semantic and LLVM IR submission
 
 `config.mk` builds and runs the C++ compiler. Select **C / C++** and
-**Semantic analysis** on RxOJ, using this public repository and a pushed commit.
-The judge builds `build/oj/rxc` and invokes it with `--stage semantic {source}`.
+**Semantic analysis** or **LLVM IR** on [RxOJ](https://rxoj.site/), using this public
+repository and a pushed commit. The judge builds `build/oj/rxc` and uses the
+`SEMANTIC` and `IR` commands from `config.mk`.
 Builds require a C++17 toolchain, CMake 3.24+, and Make, with no network, Java,
 Rust, or REIMU dependency.
 
@@ -98,15 +99,30 @@ python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar
 make test STAGE=semantic FILTER=official:semantic
 ```
 
-CMake rejects stale grammar fingerprints. The IR command emits LLVM IR; codegen
-and optimization commands remain available for a future assembly backend.
+CMake checks the grammar fingerprints before building. `IR` writes a complete
+LLVM module to `{output}`; its integer I/O and allocation runtime is included in
+that module, so `BUILD` leaves `{runtime}` empty.
+
+The website's **LLVM IR** suite runs semantic analysis first, followed by the IR
+execution cases. Run the same selection locally after preparing REIMU:
+
+```sh
+make test SUITE=ir FILTER=official
+```
+
+`STAGE=ir` selects only the IR execution cases. `SUITE=ir` includes semantic
+acceptance and rejection cases as well. The official test submodule is pinned
+to the test revision published by the judge when this integration was checked:
+`1abfeaefb31c5ad8325d94bf4daebae45a03a943`.
 
 ## LLVM IR
 
 The IR stage lowers the checked AST to typed instructions and emits RV32 LLVM IR.
-Its implementation is split across `include/rx/llvm` and `src/llvm`: types,
-operands, instructions, modules, semantic facts, storage, operators, control flow,
-aggregates, calls, containers, Clone, equality, and runtime functions have separate files.
+Its implementation is split by responsibility across `include/rx/llvm` and
+`src/llvm`. `ir/` contains the representation and Builder; `bridge/` supplies
+semantic queries, layouts, and ABI decisions; `lowering/` generates expressions
+and control flow; `builtins/` handles containers, Clone, and equality;
+`runtime/` supplies integer I/O and allocation wrappers. `lower.cpp` is the entry.
 The compiler uses C++17 and builds without an LLVM library dependency.
 
 ```sh
@@ -114,6 +130,7 @@ build/rxc --stage ir program.rx -o program.ll
 clang-22 -S -x ir program.ll --target=riscv32-unknown-none-elf \
   -march=rv32im -mabi=ilp32 -O0 -mllvm -riscv-no-aliases -o program.s
 make test STAGE=ir FILTER=official:codegen
+make test SUITE=ir FILTER=official
 ```
 
 Build REIMU as described above before running the execution tests. The test runner
@@ -188,6 +205,7 @@ Supported environment variables include:
 
 - `FILTER`, which selects directories under `tests`, using `:` between folder names and `,` between selections. Omit `FILTER` or leave it empty to run all supported tests.
 - `STAGE`: optionally run only `semantic`, `ir`, `codegen`, or `optimization`. A directory `FILTER` for codegen fixtures includes both IR and codegen unless `STAGE` restricts it.
+- `SUITE`: include the preceding judge stages; `SUITE=ir` runs semantic and IR. Choose either `STAGE` or `SUITE`.
 - `CLANG`: LLVM IR lowering tool, default `clang-22`.
 - `VERBOSE=true`, which shows every test name and its duration instead of grouped progress. Defaults to `false`.
 - `COMPILE_TIMEOUT` and `RUN_TIMEOUT`, which override the default timeouts for compilation and execution.

@@ -88,12 +88,12 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 
 该脚本按 manifest 的 `compilation_success` 核验退出码，读取 parser 的 `metadata.entry`，并将崩溃、异常退出和超时计为失败。JSON 报告保留逐用例命令、退出码和完整输出。可用 `--jobs` 与 `--timeout` 调整并发数和每用例时限。原有 Makefile 测试流程保持独立。
 
-## RxOJ Semantic 提交
+## RxOJ Semantic 与 LLVM IR 提交
 
 当前 `config.mk` 已接入 C++ 编译器。网站选择 **C / C++** 和
-**Semantic analysis**，提交此仓库的公开 Git 地址及已推送的 commit。
-`BUILD` 会在 `build/oj` 中构建 `rxc`，`SEMANTIC` 调用
-`./build/oj/rxc --stage semantic {source}`。仅需 C++17 工具链、CMake 3.24+
+**Semantic analysis** 或 **LLVM IR**，提交此仓库的公开 Git 地址及已推送的 commit。
+`BUILD` 会在 `build/oj` 中构建 `rxc`，`SEMANTIC` 和 `IR` 分别调用
+`--stage semantic` 与 `--stage ir`。仅需 C++17 工具链、CMake 3.24+
 和 Make；构建无需联网、Java、Rust 或 REIMU。
 
 ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
@@ -106,8 +106,32 @@ python scripts/generate_parser.py --antlr-jar /path/to/antlr-4.13.2-complete.jar
 make test STAGE=semantic FILTER=official:semantic
 ```
 
-CMake 会校验文法指纹，防止使用过期的生成文件。IR、Codegen 与 Optimization
-尚未接入命令行，对应配置留空，当前请仅提交 Semantic 套件。
+CMake 在构建前检查文法指纹。`IR` 将完整 LLVM 模块写入 `{output}`，模块中
+包含整数输入输出及分配函数，因此 `BUILD` 将 `{runtime}` 留空。
+
+网站的 **LLVM IR** 套件依次执行语义检查和 IR 运行测试。准备好 REIMU 后，
+在本地使用同样的阶段选择：
+
+```sh
+make test SUITE=ir FILTER=official
+```
+
+`STAGE=ir` 单独运行 IR 测试，`SUITE=ir` 同时包含语义接受和拒绝测试。
+官方测试子模块已对齐本次核对时网站公布的版本
+`1abfeaefb31c5ad8325d94bf4daebae45a03a943`。
+
+### LLVM IR 的实现位置
+
+`src/llvm/lower.cpp` 是入口；`ir/` 定义 IR 基础操作和 Builder，`bridge/`
+处理语义查询、布局与 ABI，`lowering/` 生成表达式和控制流，`builtins/`
+处理容器、Clone 和相等比较，`runtime/` 提供整数输入输出及分配包装。
+
+```sh
+build/rxc --stage ir program.rx -o program.ll
+clang-22 -S -x ir program.ll --target=riscv32-unknown-none-elf \
+  -march=rv32im -mabi=ilp32 -O0 -mllvm -riscv-no-aliases -o program.s
+make test STAGE=ir FILTER=official:codegen
+```
 
 ## 配置 Makefile
 
@@ -176,6 +200,7 @@ make test VERBOSE=true
 
 - `FILTER`：用于筛选 `tests` 下的目录，文件夹名称之间使用 `:` 分隔，不同项之间使用 `,` 分隔。省略 `FILTER` 或留空则运行所有支持的测试。
 - `STAGE`：可选，仅运行 `semantic`、`ir`、`codegen` 或 `optimization`。按目录筛选 codegen 用例时默认包含 IR 和 codegen 两项检查，可用 `STAGE` 限制。
+- `SUITE`：按网站的套件顺序包含前置阶段，例如 `SUITE=ir` 运行 semantic 和 IR。与 `STAGE` 分别使用。
 - `CLANG`：编译 LLVM IR 使用的工具，默认 `clang-22`。
 - `VERBOSE=true`：显示每个测试的名称及其耗时，而非分组进度。默认为 `false`。
 - `COMPILE_TIMEOUT` 与 `RUN_TIMEOUT`：覆盖默认的编译与运行超时时限。
