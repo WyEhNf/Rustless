@@ -26,13 +26,13 @@ add_library(rustless_frontend STATIC
   src/llvm/lowering/aggregates.cpp
   src/llvm/lowering/projections.cpp
   src/llvm/lowering/calls.cpp
-  src/llvm/builtins.cpp
-  src/llvm/vectors.cpp
-  src/llvm/clone.cpp
-  src/llvm/equality.cpp
-  src/llvm/runtime.cpp
-  src/llvm/runtime_input.cpp
-  src/llvm/runtime_output.cpp
+  src/llvm/builtins/builtins.cpp
+  src/llvm/builtins/vectors.cpp
+  src/llvm/builtins/clone.cpp
+  src/llvm/builtins/equality.cpp
+  src/llvm/runtime/runtime.cpp
+  src/llvm/runtime/runtime_input.cpp
+  src/llvm/runtime/runtime_output.cpp
   src/llvm/ir/ir_print.cpp
   src/llvm/ir/ir_verify.cpp
   src/llvm/ir/ir_builder.cpp
