@@ -2,7 +2,7 @@
 
 #include "rx/llvm/ir/builder.hpp"
 #include "rx/llvm/lower.hpp"
-#include "rx/llvm/semantic.hpp"
+#include "rx/llvm/bridge/semantic.hpp"
 #include "rx/llvm/value.hpp"
 #include <functional>
 #include <map>

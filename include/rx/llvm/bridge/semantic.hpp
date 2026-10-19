@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/llvm/facts.hpp"
+#include "rx/llvm/bridge/facts.hpp"
 #include "rx/llvm/ir/ir.hpp"
 #include "rx/llvm/ir/target.hpp"
 #include <map>

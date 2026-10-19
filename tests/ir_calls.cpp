@@ -1,6 +1,6 @@
 #include "rx/ast/visitor.hpp"
 #include "rx/ast/frontend.hpp"
-#include "rx/llvm/semantic.hpp"
+#include "rx/llvm/bridge/semantic.hpp"
 
 #undef NDEBUG
 #include <cassert>

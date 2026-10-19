@@ -13,7 +13,7 @@ add_library(rustless_frontend STATIC
   src/ast/ast.cpp
   src/ast/frontend.cpp
   src/llvm/ir/ir.cpp
-  src/llvm/facts.cpp
+  src/llvm/bridge/facts.cpp
   src/llvm/lower.cpp
   src/llvm/function.cpp
   src/llvm/storage.cpp
@@ -36,9 +36,9 @@ add_library(rustless_frontend STATIC
   src/llvm/ir/ir_print.cpp
   src/llvm/ir/ir_verify.cpp
   src/llvm/ir/ir_builder.cpp
-  src/llvm/ir_semantic.cpp
-  src/llvm/ir_operators.cpp
-  src/llvm/ir_call.cpp
+  src/llvm/bridge/ir_semantic.cpp
+  src/llvm/bridge/ir_operators.cpp
+  src/llvm/bridge/ir_call.cpp
   src/semantic/semantic_core.cpp
   src/semantic/resolution/collection.cpp
   src/semantic/resolution/declarations.cpp
