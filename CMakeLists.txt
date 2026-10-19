@@ -54,8 +54,8 @@ add_library(rustless_frontend STATIC
   src/semantic/type_resolution.cpp
   src/semantic/constants.cpp
   src/semantic/coercion.cpp
-  src/semantic/type.cpp
-  src/semantic/operation.cpp
+  src/semantic/model/type.cpp
+  src/semantic/model/operation.cpp
   src/semantic/result.cpp
   src/semantic/dump.cpp
   src/semantic/safety/safe_gate.cpp

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rx/semantic/literal.hpp"
+#include "rx/semantic/model/literal.hpp"
 #include "rx/semantic/state.hpp"
 
 #include <array>

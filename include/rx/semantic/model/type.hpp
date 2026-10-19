@@ -1,8 +1,8 @@
 #pragma once
 
 #include "rx/ast/names.hpp"
-#include "rx/semantic/builtin.hpp"
-#include "rx/semantic/symbol.hpp"
+#include "rx/semantic/model/builtin.hpp"
+#include "rx/semantic/model/symbol.hpp"
 #include <cstdint>
 #include <functional>
 #include <memory>

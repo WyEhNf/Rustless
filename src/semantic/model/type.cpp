@@ -1,4 +1,4 @@
-#include "rx/semantic/type.hpp"
+#include "rx/semantic/model/type.hpp"
 
 #include <map>
 #include <stdexcept>

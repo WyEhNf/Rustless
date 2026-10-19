@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rx/llvm/operand.hpp"
-#include "rx/semantic/type.hpp"
+#include "rx/semantic/model/type.hpp"
 
 namespace rx::ir {
 

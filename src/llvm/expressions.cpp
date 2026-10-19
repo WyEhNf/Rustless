@@ -1,5 +1,5 @@
 #include "lowering.hpp"
-#include "rx/semantic/literal.hpp"
+#include "rx/semantic/model/literal.hpp"
 
 namespace rx::ir {
 

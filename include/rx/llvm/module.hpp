@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rx/llvm/instruction.hpp"
-#include "rx/semantic/symbol.hpp"
+#include "rx/semantic/model/symbol.hpp"
 
 namespace rx::ir {
 

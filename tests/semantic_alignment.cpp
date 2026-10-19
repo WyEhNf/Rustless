@@ -2,7 +2,7 @@
 #include "rx/ast/frontend.hpp"
 #include "rx/semantic/semantic.hpp"
 #include "rx/semantic/safety/safe_gate.hpp"
-#include "rx/semantic/literal.hpp"
+#include "rx/semantic/model/literal.hpp"
 
 #undef NDEBUG
 #include <cassert>

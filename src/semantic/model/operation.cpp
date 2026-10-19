@@ -1,4 +1,4 @@
-#include "rx/semantic/operation.hpp"
+#include "rx/semantic/model/operation.hpp"
 #include <stdexcept>
 
 namespace rx {
