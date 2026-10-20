@@ -93,6 +93,10 @@ the frontend's AST, semantic, and IR declarations are precompiled. The compiler
 and ANTLR runtime use `-O1` to reduce cold build time. Generated LLVM IR is lowered
 with the judge's Clang options.
 
+A clean Linux build with GCC 15 and two jobs took 60.7s with this profile,
+compared with 89.7s for the previous configuration. All 299 semantic/IR
+cases, 115 runtime checks, and 20 CTest checks passed with the profile enabled.
+
 The ANTLR 4.13.2 runtime archive is vendored in `vendor/antlr`; matching generated
 sources are tracked in `generated/antlr`. `.rx-oj.toml` disables dependency
 preparation. After editing the grammar, regenerate and commit the outputs using

@@ -100,6 +100,10 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 AST、语义和 IR 公共定义；编译器自身及 ANTLR runtime 使用 `-O1`，以缩短
 冷构建时间。生成的 LLVM IR 继续使用评测规定的 Clang 参数编译。
 
+在本地 Linux、GCC 15、双进程的全新构建对照中，耗时从 89.7 秒降至
+60.7 秒。启用该配置后，299 项 semantic/IR 测试、115 组运行输出和
+20 项 CTest 测试全部通过。
+
 ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
 `generated/antlr`，`.rx-oj.toml` 关闭额外的依赖预取。修改 `.g4` 后，先用
 本地官方生成器重新生成并提交生成文件：
