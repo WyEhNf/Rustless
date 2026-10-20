@@ -96,9 +96,9 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 `--stage semantic` 与 `--stage ir`。仅需 C++17 工具链、CMake 3.24+
 和 Make；构建无需联网、Java、Rust 或 REIMU。
 
-评测构建启用 `RX_JUDGE_BUILD`：预编译重复使用的标准库头文件，并以 `-O1`
-编译编译器自身及 ANTLR runtime，以缩短冷构建时间。生成的 LLVM IR 继续使用
-评测规定的 Clang 参数编译。
+评测构建启用 `RX_JUDGE_BUILD`：预编译重复使用的标准库头文件，前端与 IR
+生成器自身使用 `-O0`，ANTLR runtime 使用 `-O1`，以缩短冷构建时间。
+生成的 LLVM IR 继续使用评测规定的 Clang 参数编译。
 
 ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
 `generated/antlr`，`.rx-oj.toml` 关闭额外的依赖预取。修改 `.g4` 后，先用
