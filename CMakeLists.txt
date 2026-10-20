@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(RX_JUDGE_BUILD "Reduce cold build time for the judge" OFF)
+
 include(cmake/Antlr.cmake)
 
 add_library(rustless_frontend STATIC
@@ -73,6 +75,19 @@ target_compile_definitions(rustless_frontend PRIVATE ANTLR4CPP_STATIC)
 
 add_executable(rxc src/main.cpp)
 target_link_libraries(rxc PRIVATE rustless_frontend)
+
+if(RX_JUDGE_BUILD)
+  target_precompile_headers(antlr4_static PRIVATE <antlr4-runtime.h>)
+  target_precompile_headers(rustless_frontend PRIVATE
+    <antlr4-runtime.h>
+    <rx/semantic/semantic.hpp>
+    <rx/llvm/ir/ir.hpp>)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    foreach(RX_BUILD_TARGET antlr4_static rustless_frontend rxc)
+      target_compile_options(${RX_BUILD_TARGET} PRIVATE -O1)
+    endforeach()
+  endif()
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
