@@ -77,23 +77,9 @@ add_executable(rxc src/main.cpp)
 target_link_libraries(rxc PRIVATE rustless_frontend)
 
 if(RX_JUDGE_BUILD)
-  foreach(RX_BUILD_TARGET antlr4_static rustless_frontend)
-    target_precompile_headers(${RX_BUILD_TARGET} PRIVATE
-      <algorithm>
-      <functional>
-      <map>
-      <memory>
-      <optional>
-      <set>
-      <string>
-      <unordered_map>
-      <unordered_set>
-      <variant>
-      <vector>)
-  endforeach()
-  target_precompile_headers(rustless_frontend PRIVATE
-    <rx/semantic/semantic.hpp>
-    <rx/llvm/ir/ir.hpp>)
+  set_target_properties(antlr4_static rustless_frontend PROPERTIES
+    UNITY_BUILD ON
+    UNITY_BUILD_BATCH_SIZE 4)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(antlr4_static PRIVATE -O1)
     target_compile_options(rustless_frontend PRIVATE -O1)
