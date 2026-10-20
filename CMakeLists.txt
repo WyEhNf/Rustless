@@ -91,10 +91,13 @@ if(RX_JUDGE_BUILD)
       <variant>
       <vector>)
   endforeach()
+  target_precompile_headers(rustless_frontend PRIVATE
+    <rx/semantic/semantic.hpp>
+    <rx/llvm/ir/ir.hpp>)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(antlr4_static PRIVATE -O1)
-    target_compile_options(rustless_frontend PRIVATE -O0)
-    target_compile_options(rxc PRIVATE -O0)
+    target_compile_options(rustless_frontend PRIVATE -O1)
+    target_compile_options(rxc PRIVATE -O1)
   endif()
 endif()
 
