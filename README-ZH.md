@@ -103,6 +103,10 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 此配置替换了预编译头，原配置生成的 `.gch` 超出了评测环境的单文件大小
 限制。CI 采用单文件 64 MiB 的限制检查构建产物；评测端的实际限额可能不同。
 
+在本地 Linux、GCC 15、双进程、单文件 64 MiB 限制下，全新构建耗时
+42.2 秒，最大的构建产物为 5.1 MiB。同一限制下，299 项 semantic/IR
+测试、115 组运行输出检查和 20 项 CTest 测试全部通过。
+
 ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
 `generated/antlr`，`.rx-oj.toml` 关闭额外的依赖预取。修改 `.g4` 后，先用
 本地官方生成器重新生成并提交生成文件：

@@ -97,6 +97,10 @@ This profile replaces precompiled headers, whose `.gch` files exceeded the judge
 per-file size limit. CI builds with a 64 MiB per-file limit to check build artifact
 sizes; the judge's exact limit may differ.
 
+A clean Linux build with GCC 15, two jobs, and the 64 MiB file limit took 42.2s.
+The largest build artifact was 5.1 MiB. All 299 semantic/IR cases, 115 runtime
+checks, and 20 CTest checks passed under the same file limit.
+
 The ANTLR 4.13.2 runtime archive is vendored in `vendor/antlr`; matching generated
 sources are tracked in `generated/antlr`. `.rx-oj.toml` disables dependency
 preparation. After editing the grammar, regenerate and commit the outputs using
