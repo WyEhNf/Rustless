@@ -17,7 +17,7 @@ jobs:
 
       - name: Build C++ compiler and unit tests offline
         run: |
-          cmake -S . -B build/oj -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake -S . -B build/oj -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DRX_JUDGE_BUILD=ON
           cmake --build build/oj -j2
 
       - name: Run unit tests
