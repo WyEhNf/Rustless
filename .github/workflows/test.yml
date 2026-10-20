@@ -15,8 +15,10 @@ jobs:
       - name: Fetch public semantic testcases
         run: git submodule update --init tests/official
 
-      - name: Build C++ compiler and unit tests offline
+      - name: Build offline with a 64 MiB file limit
+        shell: bash
         run: |
+          ulimit -f 65536
           cmake -S . -B build/oj -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DRX_JUDGE_BUILD=ON
           cmake --build build/oj -j2
 

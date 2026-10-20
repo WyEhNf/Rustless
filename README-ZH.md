@@ -96,13 +96,12 @@ python scripts/test_frontend.py --compiler build/rxc --test-root ../rx-compiler-
 `--stage semantic` 与 `--stage ir`。仅需 C++17 工具链、CMake 3.24+
 和 Make；构建无需联网、Java、Rust 或 REIMU。
 
-评测构建启用 `RX_JUDGE_BUILD`：预编译重复使用的标准库头文件，以及前端的
-AST、语义和 IR 公共定义；编译器自身及 ANTLR runtime 使用 `-O1`，以缩短
-冷构建时间。生成的 LLVM IR 继续使用评测规定的 Clang 参数编译。
+评测构建启用 `RX_JUDGE_BUILD`：CMake 将前端与 ANTLR runtime 的源文件
+每 4 个一组编译，编译器自身及 ANTLR runtime 使用 `-O1`，以缩短冷构建
+时间。生成的 LLVM IR 继续使用评测规定的 Clang 参数编译。
 
-在本地 Linux、GCC 15、双进程的全新构建对照中，耗时从 89.7 秒降至
-60.7 秒。启用该配置后，299 项 semantic/IR 测试、115 组运行输出和
-20 项 CTest 测试全部通过。
+此配置替换了预编译头，原配置生成的 `.gch` 超出了评测环境的单文件大小
+限制。CI 采用单文件 64 MiB 的限制检查构建产物；评测端的实际限额可能不同。
 
 ANTLR 4.13.2 runtime 源码包保存在 `vendor/antlr`，匹配的生成源码保存在
 `generated/antlr`，`.rx-oj.toml` 关闭额外的依赖预取。修改 `.g4` 后，先用

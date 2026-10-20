@@ -88,14 +88,14 @@ repository and a pushed commit. The judge builds `build/oj/rxc` and uses the
 Builds require a C++17 toolchain, CMake 3.24+, and Make, with no network, Java,
 Rust, or REIMU dependency.
 
-The judge build enables `RX_JUDGE_BUILD`: common standard library headers and
-the frontend's AST, semantic, and IR declarations are precompiled. The compiler
-and ANTLR runtime use `-O1` to reduce cold build time. Generated LLVM IR is lowered
-with the judge's Clang options.
+The judge build enables `RX_JUDGE_BUILD`: CMake compiles the frontend and ANTLR
+runtime in batches of four source files. Both targets and the compiler executable
+use `-O1` to reduce cold build time. Generated LLVM IR is lowered with the judge's
+Clang options.
 
-A clean Linux build with GCC 15 and two jobs took 60.7s with this profile,
-compared with 89.7s for the previous configuration. All 299 semantic/IR
-cases, 115 runtime checks, and 20 CTest checks passed with the profile enabled.
+This profile replaces precompiled headers, whose `.gch` files exceeded the judge's
+per-file size limit. CI builds with a 64 MiB per-file limit to check build artifact
+sizes; the judge's exact limit may differ.
 
 The ANTLR 4.13.2 runtime archive is vendored in `vendor/antlr`; matching generated
 sources are tracked in `generated/antlr`. `.rx-oj.toml` disables dependency
