@@ -88,7 +88,7 @@ repository and a pushed commit. The judge builds `build/oj/rxc` and uses the
 Builds require a C++17 toolchain, CMake 3.24+, and Make, with no network, Java,
 Rust, or REIMU dependency.
 
-The judge build enables `RX_JUDGE_BUILD`: ANTLR and frontend headers are
+The judge build enables `RX_JUDGE_BUILD`: common standard library headers are
 precompiled, and the compiler executable and ANTLR runtime use `-O1` to reduce
 cold build time. Generated LLVM IR is lowered with the judge's Clang options.
 
